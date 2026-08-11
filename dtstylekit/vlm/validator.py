@@ -27,12 +27,26 @@ _STRING_VIRTUAL_FIELDS = {"curve_preset"}
 def validate_style(
     spec: StyleSpec,
     registry: dict,
+    reference_analysis: dict | None = None,
+    target_analysis: "object | None" = None,
 ) -> tuple[StyleSpec, list[str]]:
     """Validate the StyleSpec.
 
     Args:
         spec: Parsed StyleSpec from VLM.
         registry: Dict mapping operation name -> IOPRegistry-like dataclass.
+        reference_analysis: Optional pre-computed hue/saturation analysis
+            of reference images (from ``analyze_reference_hues``). Contains
+            per-zone ``*_hue``, ``*_hue_mode`` (``neutral``|``mono``|``bi``),
+            and ``*_hue_confidence``. Used by the *monochrome dominance*
+            guard to decide whether a single-hue-across-all-zones pattern is
+            an intentional grade (refs are ``mono`` with the same hue in
+            every zone) or an accidental global tint (refs do NOT call for
+            it → chroma is halved).
+        target_analysis: Optional ``ImageAnalysis`` of the *photo the style
+            will be applied to*. Used by the *midtones protection* guard to
+            pull skin-tone hints from the histogram (mean green dominance)
+            and keep midtones chroma low on likely-portrait targets.
 
     Returns:
         (validated_spec, warnings) tuple.
@@ -174,6 +188,116 @@ def validate_style(
                             f"{c_key} forced to 0.0"
                         )
                     clamped_params[c_key] = 0.0
+
+            # ---- Hito 2.1: dynamic chroma ceiling per confidence ------------
+            # Default chroma caps are conservative (0.10/0.08/0.05). They only
+            # relax to the historical 0.15/0.15/0.10 when the Python hue
+            # analysis for that zone reports HIGH confidence (>=0.85). This
+            # stops the VLM from emitting a strong chroma on a wishy-washy
+            # reference whose hue was borderline detectable.
+            _zone_caps_default = {"shadows": 0.10, "midtones": 0.08, "highlights": 0.05}
+            _zone_caps_highconf = {"shadows": 0.15, "midtones": 0.15, "highlights": 0.10}
+            for zone, default_cap in _zone_caps_default.items():
+                c_key = f"{zone}_C"
+                conf_key = f"{zone}_hue_confidence"
+                if c_key not in clamped_params:
+                    continue
+                cz = float(clamped_params[c_key] or 0.0)
+                if cz <= 0.0:
+                    continue
+                conf = (
+                    float((reference_analysis or {}).get(conf_key) or 0.0)
+                )
+                cap = _zone_caps_highconf[zone] if conf >= 0.85 else default_cap
+                if cz > cap:
+                    if c_key in plg.params:
+                        warnings.append(
+                            f"colorbalancergb.{c_key}={cz:.3f} exceeds dynamic "
+                            f"cap {cap:.2f} (reference {conf_key}={conf:.2f}, "
+                            f"threshold 0.85 for relaxed cap) — clamped"
+                        )
+                    clamped_params[c_key] = cap
+
+            # ---- Hito 2.2: midtones protection on likely-portrait targets ----
+            # The midtones tab carries skin tones. Heavy midtones_C on a photo
+            # whose histogram suggests a portrait (mean green dominant, the
+            # classic warm-skin signature) thrusts a fake cinematic tint into
+            # faces. Cap midtones_C hard at 0.05 in that case.
+            mt_c = float(clamped_params.get("midtones_C") or 0.0)
+            if mt_c > 0.05 and target_analysis is not None:
+                hist = getattr(target_analysis, "histogram", None)
+                if hist is not None:
+                    rg = float(getattr(hist, "mean_red", 0.0) or 0.0)
+                    gg = float(getattr(hist, "mean_green", 0.0) or 0.0)
+                    bg = float(getattr(hist, "mean_blue", 0.0) or 0.0)
+                    # Green dominance (R close to G, both clearly above B)
+                    # = the warm-skin signature. R/G in [0.85, 1.15] AND
+                    # B < min(R,G)*0.85.
+                    if 0.0 < gg and abs(rg - gg) / max(gg, 1e-6) < 0.15 \
+                            and bg < min(rg, gg) * 0.85:
+                        if "midtones_C" in plg.params:
+                            warnings.append(
+                                f"colorbalancergb.midtones_C={mt_c:.3f} on a "
+                                f"likely-portrait target (R≈G>B in histogram) "
+                                f"would tint skin — clamped to 0.05"
+                            )
+                        clamped_params["midtones_C"] = 0.05
+
+            # ---- Hito 2.3: monochrome-dominance check ------------------------
+            # If the VLM puts the SAME hue in shadows+midtones+highlights with
+            # non-trivial chroma in all three, the result is a hidden global
+            # tint — the very failure mode this Hito targets. Halve each chroma
+            # (warn). Exception: when the reference analysis itself declares
+            # ``hue_mode='mono'`` in all three zones with the same hue, the
+            # reference IS intentionally monochrome and we respect it.
+            _zones = ("shadows", "midtones", "highlights")
+            hues = [float(clamped_params.get(f"{z}_H") or 0.0) for z in _zones]
+            chroms = [float(clamped_params.get(f"{z}_C") or 0.0) for z in _zones]
+            # Circular pairwise distance
+            def _circular_diff(a: float, b: float) -> float:
+                d = abs(a - b) % 360.0
+                return min(d, 360.0 - d)
+            same_hue = (
+                _circular_diff(hues[0], hues[1]) < 15.0
+                and _circular_diff(hues[1], hues[2]) < 15.0
+                and _circular_diff(hues[0], hues[2]) < 15.0
+            )
+            all_chroma = all(c > 0.05 for c in chroms)
+            if same_hue and all_chroma:
+                # Exception: reference_analysis declare mono with same hue?
+                allow = False
+                if reference_analysis:
+                    modes = [
+                        reference_analysis.get(f"{z}_hue_mode") for z in _zones
+                    ]
+                    ref_hues = [
+                        reference_analysis.get(f"{z}_hue") for z in _zones
+                    ]
+                    if all(m == "mono" for m in modes) and all(
+                        h is not None for h in ref_hues
+                    ):
+                        def _wrap(h: float) -> float:
+                            return h % 360.0
+                        ref_same = (
+                            _circular_diff(_wrap(ref_hues[0] or 0), _wrap(ref_hues[1] or 0)) < 15.0
+                            and _circular_diff(_wrap(ref_hues[1] or 0), _wrap(ref_hues[2] or 0)) < 15.0
+                        )
+                        if ref_same:
+                            allow = True
+                if not allow:
+                    for zone in _zones:
+                        c_key = f"{zone}_C"
+                        if c_key in plg.params:
+                            old = float(clamped_params[c_key] or 0.0)
+                            warnings.append(
+                                f"colorbalancergb monochrome-dominance: "
+                                f"{c_key}={old:.3f} at hue {hues[_zones.index(zone)]:.1f}° "
+                                f"matches the other zones' hue — collapsing "
+                                f"to a global tint. Halved to {old/2:.3f}. "
+                                f"(Reference analysis does not declare this an "
+                                f"intentional monochrome grade.)"
+                            )
+                        clamped_params[c_key] = float(clamped_params[c_key] or 0.0) / 2.0
 
         validated_plugins.append(
             Plugin(

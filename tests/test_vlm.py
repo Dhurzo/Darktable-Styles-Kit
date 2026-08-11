@@ -122,6 +122,218 @@ class TestValidateStyle:
             validated.plugins[0].params.get("curve_preset") == "doesnt_exist"
 
 
+class TestValidateAntiTintGuards:
+    """Hitos 2.1, 2.2, 2.3: anti-tint-dominance semantic guards."""
+
+    def _colorbalance_plugin(self, **params) -> Plugin:
+        return Plugin(operation="colorbalancergb", params=params)
+
+    # ---- 2.1: dynamic chroma ceiling -----------------------------------
+    def test_default_chroma_ceiling_without_reference(self) -> None:
+        """No reference_analysis → shadows_C caps at 0.10 (default)."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(shadows_C=0.4, shadows_H=200.0,
+                                       midtones_C=0.4, midtones_H=200.0,
+                                       highlights_C=0.4, highlights_H=200.0),
+        ])
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        params = validated.plugins[0].params
+        assert params["shadows_C"] == 0.10
+        assert params["midtones_C"] == 0.08
+        assert params["highlights_C"] == 0.05
+        assert any("dynamic cap" in w for w in warnings)
+
+    def test_high_confidence_relaxes_ceiling(self) -> None:
+        """reference_analysis with confidence>=0.85 allows the larger cap.
+
+        Because we declare both the same hue AND hue_mode='mono' in the
+        three zones, the reference is marking this as an intentional
+        monochrome grade — the dominance guard (2.3) won't fire, only 2.1.
+        """
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(shadows_C=0.15, shadows_H=200.0,
+                                       midtones_C=0.15, midtones_H=200.0,
+                                       highlights_C=0.10, highlights_H=200.0),
+        ])
+        ref = {
+            "shadows_hue_confidence": 0.90,
+            "midtones_hue_confidence": 0.90,
+            "highlights_hue_confidence": 0.90,
+            "shadows_hue_mode": "mono",
+            "midtones_hue_mode": "mono",
+            "highlights_hue_mode": "mono",
+            "shadows_hue": 200.0,
+            "midtones_hue": 200.0,
+            "highlights_hue": 200.0,
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        params = validated.plugins[0].params
+        # 0.15 / 0.15 / 0.10 are the high-confidence caps — within them, no clamp
+        assert params["shadows_C"] == 0.15
+        assert params["midtones_C"] == 0.15
+        assert params["highlights_C"] == 0.10
+        assert not any("dynamic cap" in w for w in warnings)
+
+    def test_medium_confidence_keeps_default_ceiling(self) -> None:
+        """Confidence 0.72 (>=0.7 but <0.85) → still the conservative cap."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(shadows_C=0.15, shadows_H=200.0),
+        ])
+        ref = {"shadows_hue_confidence": 0.72}
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        # 0.15 > default cap 0.10 → clamped down
+        assert validated.plugins[0].params["shadows_C"] == 0.10
+        assert any("dynamic cap" in w for w in warnings)
+
+    # ---- 2.2: midtones protection on likely-portrait target -------------
+    def test_midtones_chroma_protected_on_skin_tone_target(self) -> None:
+        """Target histogram R≈G>B (skin signature) → midtones_C capped to 0.05."""
+        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
+
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(midtones_C=0.20, midtones_H=30.0),
+        ])
+        # Simulate portrait histogram: R≈G>B
+        target = ImageAnalysis(
+            histogram=HistogramStats(mean_red=0.55, mean_green=0.50, mean_blue=0.35),
+        )
+        validated, warnings = validate_style(spec, IOP_REGISTRY, target_analysis=target)
+        assert validated.plugins[0].params["midtones_C"] == 0.05
+        assert any("likely-portrait" in w or "skin" in w for w in warnings)
+
+    def test_midtones_not_protected_when_target_is_neutral(self) -> None:
+        """Neutral target histogram (R=G=B) → protection doesn't trigger."""
+        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
+
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(midtones_C=0.08, midtones_H=30.0),
+        ])
+        target = ImageAnalysis(
+            histogram=HistogramStats(mean_red=0.5, mean_green=0.5, mean_blue=0.5),
+        )
+        validated, _ = validate_style(spec, IOP_REGISTRY, target_analysis=target)
+        # 0.08 is within the default ceiling, no clamp expected; definitely no skin protection
+        assert validated.plugins[0].params["midtones_C"] == 0.08
+
+    def test_midtones_not_protected_when_blue_dominant(self) -> None:
+        """Target histogram with B>>R,G (cool/landscape) → no skin protection."""
+        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
+
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(midtones_C=0.08, midtones_H=200.0),
+        ])
+        target = ImageAnalysis(
+            histogram=HistogramStats(mean_red=0.3, mean_green=0.4, mean_blue=0.6),
+        )
+        validated, warnings = validate_style(spec, IOP_REGISTRY, target_analysis=target)
+        assert validated.plugins[0].params["midtones_C"] == 0.08
+        assert not any("skin" in w for w in warnings)
+
+    # ---- 2.3: monochrome-dominance check --------------------------------
+    def test_monochrome_dominance_halved_when_reference_not_mono(self) -> None:
+        """Same hue in the 3 zones + confident reference in 'neutral' mode
+        (reference didn't actually call for this hue) → chromas halved.
+
+        Setup: confidence 0.90 (lifts the 2.1 cap to 0.15/0.15/0.10) so the
+        VLM's 0.15/0.12/0.10 survives 2.1 unchanged. Then 2.3 fires because
+        the reference hue_modes are 'neutral' (NOT an intentional mono grade)
+        → halves them.
+        """
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(
+                shadows_C=0.15, shadows_H=200.0,
+                midtones_C=0.12, midtones_H=200.0,
+                highlights_C=0.10, highlights_H=200.0,
+            ),
+        ])
+        ref = {
+            "shadows_hue_confidence": 0.90,
+            "midtones_hue_confidence": 0.90,
+            "highlights_hue_confidence": 0.90,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue_mode": "neutral",
+            "highlights_hue_mode": "neutral",
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        params = validated.plugins[0].params
+        # All chroma > 0.05 and same hue → 2.3 halves them
+        assert params["shadows_C"] == 0.075
+        assert params["midtones_C"] == 0.06
+        assert params["highlights_C"] == 0.05
+        assert any("monochrome-dominance" in w for w in warnings)
+
+    def test_monochrome_dominance_allows_intentional_mono_reference(self) -> None:
+        """Reference declares hue_mode=mono with same hue in all 3 zones → allowed."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(
+                shadows_C=0.10, shadows_H=200.0,
+                midtones_C=0.08, midtones_H=200.0,
+                highlights_C=0.05, highlights_H=200.0,
+            ),
+        ])
+        ref = {
+            "shadows_hue_mode": "mono",
+            "midtones_hue_mode": "mono",
+            "highlights_hue_mode": "mono",
+            "shadows_hue": 200.0,
+            "midtones_hue": 200.0,
+            "highlights_hue": 200.0,
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        # No mono-dominance halving should occur (intent = real monochrome grade)
+        assert not any("monochrome-dominance" in w for w in warnings)
+        params = validated.plugins[0].params
+        assert params["shadows_C"] == 0.10  # within default cap, untouched
+        assert params["midtones_C"] == 0.08
+        assert params["highlights_C"] == 0.05
+
+    def test_monochrome_dominance_ignored_when_hues_differ(self) -> None:
+        """Different hues per zone (classic orange-teal) → no dominance tripped."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(
+                shadows_C=0.10, shadows_H=200.0,    # teal shadows
+                midtones_C=0.08, midtones_H=0.0,    # neutral midtones (skin protected)
+                highlights_C=0.05, highlights_H=30.0,  # warm highlights
+            ),
+        ])
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert not any("monochrome-dominance" in w for w in warnings)
+
+    def test_monochrome_dominance_requires_all_three_zones_chroma(self) -> None:
+        """Same hue but chroma=0 in one zone → not a global tint yet."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(
+                shadows_C=0.10, shadows_H=200.0,
+                midtones_C=0.00, midtones_H=200.0,   # midtones neutral
+                highlights_C=0.05, highlights_H=200.0,
+            ),
+        ])
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert not any("monochrome-dominance" in w for w in warnings)
+        # midtones stays neutral, the other two keep their chroma (already capped)
+
+    def test_wrapped_hues_treated_as_same_for_dominance(self) -> None:
+        """Hues 358°, 1°, 2° must count as the same hue (circular)."""
+        spec = StyleSpec(style_name="t", plugins=[
+            self._colorbalance_plugin(
+                shadows_C=0.15, shadows_H=358.0,
+                midtones_C=0.12, midtones_H=1.0,
+                highlights_C=0.10, highlights_H=2.0,
+            ),
+        ])
+        # Confident reference (lifts ceiling) but 'neutral' hue_mode (not mono)
+        ref = {
+            "shadows_hue_confidence": 0.90,
+            "midtones_hue_confidence": 0.90,
+            "highlights_hue_confidence": 0.90,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue_mode": "neutral",
+            "highlights_hue_mode": "neutral",
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        assert any("monochrome-dominance" in w for w in warnings)
+
+
 class TestSchemaRenderer:
     def test_renders_iop_schema(self) -> None:
         from dtstylekit.vlm.schema_renderer import render_iop_schema

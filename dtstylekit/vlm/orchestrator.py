@@ -222,7 +222,11 @@ def generate_style_spec(
             json_mode=False,
         )
         spec, report = parse_response(response_text)
-        validated, warns = validate_style(spec, registry)
+        validated, warns = validate_style(
+            spec, registry,
+            reference_analysis=reference_analysis,
+            target_analysis=analysis,
+        )
         return validated, report, warns
 
     validated_spec, report, warnings = _call(temperature)
