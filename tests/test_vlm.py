@@ -634,3 +634,186 @@ class TestPresetExposureFilter:
         assert _preset_ev_fits(p, 0.15) is False   # dark image → dropped
         assert _preset_ev_fits(p, 0.5) is True     # mid image → fine
         assert _preset_ev_fits(p, 0.85) is True    # bright image → fine
+
+
+class TestE2EValidatorGuardsWithVLMResponse:
+    """Hito 5: structural E2E of the post-validator anti-tint safeguards.
+
+    These tests feed a *simulated VLM JSON response* (the raw string the
+    VLM would return) through ``parse_response`` → ``validate_style``,
+    with a populated ``reference_analysis`` and a ``target_analysis``
+    carrying a portrait-like histogram.  They verify that even when a
+    VLM tries to apply a uniform tint across all three zones, the Hito 2
+    validator salvages the result at the pipeline boundary:
+
+      * monochrome-intent reference + portrait target → midtones protected
+        (Hito 2.2 skin-tone guard caps ``midtones_C`` to 0.05).
+      * neutral reference + uniform-hue VLM attempt → monochrome-dominance
+        halves every zone chroma (Hito 2.3).
+
+    Both tests cover the full pipeline path actually exercised by the
+    orchestrator: VLM text → parser → validator(reference_analysis=…,
+    target_analysis=…).  No live Ollama call is performed.
+    """
+
+    # Simulated VLM responses — the JSON shape the orchestrator passes
+    # through ``parse_response``.  We mirror the structure the SYSTEM_PROMPT
+    # asks the model to emit, including the colorbalancergb module with the
+    # offending uniform-tint values.
+
+    _AGGRESSIVE_SLOT = """```json
+{{
+  "style_name": "uniform tint attack",
+  "style_description": "VLM wrongly applies same hue everywhere",
+  "selected_presets": [],
+  "adjustments": {{
+    "colorbalancergb": {{
+      "shadows_H": 200.0, "shadows_C": {shc:.3f},
+      "midtones_H": 200.0, "midtones_C": {mc:.3f},
+      "highlights_H": 200.0, "highlights_C": {hc:.3f}
+    }}
+  }},
+  "rationale": "intentional wrong uniform tint"
+}}
+```"""
+
+    def _mono_ref(self) -> dict:
+        """Intentional-monochrome reference: mono hue in all 3 zones,
+        same hue, high confidence.  Validator 2.3 must NOT halve here
+        (the reference explicitly calls for a global tint look)."""
+        return {
+            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "mono", "shadows_hue_secondary": None,
+            "midtones_hue": 200.0, "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "mono", "midtones_hue_secondary": None,
+            "highlights_hue": 200.0, "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "mono", "highlights_hue_secondary": None,
+            "shadows_sat": 0.50, "midtones_sat": 0.50, "highlights_sat": 0.50,
+        }
+
+    def _neutral_ref(self) -> dict:
+        """Neutral reference: hue_modes 'neutral' (no clear grade).  The
+        validator's 2.3 dominance guard will then *halve* an aggressive
+        uniform-hue VLM attempt."""
+        return {
+            "shadows_hue": None, "shadows_hue_confidence": 0.20,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue": None, "midtones_hue_confidence": 0.20,
+            "midtones_hue_mode": "neutral",
+            "highlights_hue": None, "highlights_hue_confidence": 0.20,
+            "highlights_hue_mode": "neutral",
+            "shadows_sat": 0.0, "midtones_sat": 0.0, "highlights_sat": 0.0,
+        }
+
+    def _portrait_target(self) -> "ImageAnalysis":
+        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
+        return ImageAnalysis(
+            histogram=HistogramStats(mean_red=0.55, mean_green=0.50, mean_blue=0.35),
+        )
+
+    def _parse_and_validate(
+        self, vlm_json: str, ref: dict, target: "ImageAnalysis | None" = None,
+    ) -> tuple[StyleSpec, list[str]]:
+        spec, _report = parse_response(vlm_json)
+        return validate_style(
+            spec, IOP_REGISTRY,
+            reference_analysis=ref, target_analysis=target,
+        )
+
+    def test_mono_ref_skintone_target_keeps_midtones_neutral(self) -> None:
+        """VLM tries uniform tint 200° in all zones with chroma 0.15/0.15/0.10.
+        Reference_analysis says hue_mode='mono' (intentional) and target is a
+        portrait.  Outcome path:
+          * 2.1 relaxes caps to high-conf (0.15/0.15/0.10) - values pass.
+          * 2.3 sees same hue + all chroma>0.05 BUT reference_analysis
+            declares mono intent → no halving (intentional exception).
+          * 2.2 sees portrait target R≈G>B with midtones_C=0.15 > 0.05 →
+            clamps midtones_C to 0.05 (skin protection).
+        Final: shadows_C=0.15, midtones_C=0.05, highlights_C=0.10.
+        """
+        vlm = self._AGGRESSIVE_SLOT.format(shc=0.15, mc=0.15, hc=0.10)
+        spec, warnings = self._parse_and_validate(
+            vlm, self._mono_ref(), self._portrait_target(),
+        )
+        cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
+        params = cb.params
+        assert params["shadows_C"] == 0.15
+        assert params["midtones_C"] == 0.05, (
+            f"midtones_C must be clamped to 0.05 on portrait target; got "
+            f"{params['midtones_C']}"
+        )
+        assert params["highlights_C"] == 0.10
+        # Skin warning must appear
+        assert any("likely-portrait" in w or "skin" in w for w in warnings)
+        # No dominance halving (mono intent allowed)
+        assert not any("monochrome-dominance" in w for w in warnings)
+
+    def test_neutral_ref_aggressive_vlm_triggers_dominance_halving(self) -> None:
+        """VLM tries uniform tint 200° with chroma 0.15/0.12/0.10.  All 3
+        reference zones report high confidence (0.90) but hue_mode='neutral'
+        (the extractor found colour but doesn't call this an intentional
+        monochrome grade).  Outcome path:
+          * 2.1: conf 0.90 >= 0.85 in all 3 zones → relaxed caps
+            (0.15/0.15/0.10) so the aggressive values (0.15/0.12/0.10)
+            survive unchanged.
+          * 2.3: same_hue (all 200°) + all chroma > 0.05 → fires.
+            reference_analysis hue_modes are 'neutral' (NOT 'mono') in
+            the 3 zones → ``allow`` is False → halve each chroma.
+        Final: shadows_C=0.075, midtones_C=0.06, highlights_C=0.05.
+        """
+        ref = {
+            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "neutral",   # not intentionally mono
+            "midtones_hue": None, "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "neutral",
+            "highlights_hue": None, "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "neutral",
+            "shadows_sat": 0.50, "midtones_sat": 0.50, "highlights_sat": 0.50,
+        }
+        # 0.15/0.12/0.10 - all within high-conf caps (0.15/0.15/0.10)
+        vlm = self._AGGRESSIVE_SLOT.format(shc=0.15, mc=0.12, hc=0.10)
+        spec, warnings = self._parse_and_validate(vlm, ref)
+        cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
+        params = cb.params
+        # 2.3 halves all three chromas (same hue 200° + all chroma > 0.05)
+        assert params["shadows_C"] == 0.075, params["shadows_C"]
+        assert params["midtones_C"] == 0.06, params["midtones_C"]
+        assert params["highlights_C"] == 0.05, params["highlights_C"]
+        assert any("monochrome-dominance" in w for w in warnings)
+
+    def test_prompt_and_validator_agree_on_neutral_reference(self) -> None:
+        """Cross-check: when reference_analysis = neutral everywhere, the
+        prompt's dynamic chroma caps emit 0.000 for all three zones AND the
+        validator's default caps also clamp any non-zero chroma the VLM
+        tries to emit.  This guarantees prompt guidance and post-validator
+        are coherent (Hito 2.1 ↔ Hito 3 chroma caps block).
+        """
+        from dtstylekit.vlm.prompt_builder import _chroma_caps_block
+
+        ref = {
+            "shadows_hue": None, "shadows_hue_confidence": 0.20,
+            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
+            "midtones_hue": None, "midtones_hue_confidence": 0.20,
+            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
+            "highlights_hue": None, "highlights_hue_confidence": 0.20,
+            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+        }
+        # Prompt block: all neutral → caps 0.000
+        block = _chroma_caps_block(ref)
+        assert "SET shadows_C = 0.000" in block
+        assert "SET midtones_C = 0.000" in block
+        assert "SET highlights_C = 0.000" in block
+
+        # Validator: the VLM tries chroma 0.20 everywhere with non-neutral
+        # hue → 2.1 default caps clamp each *_C to the soft ceiling (0.10 /
+        # 0.08 / 0.05), and 2.3 sees "all chroma > 0.05" → halves them.
+        vlm = self._AGGRESSIVE_SLOT.format(shc=0.20, mc=0.20, hc=0.20)
+        spec, _ = self._parse_and_validate(vlm, ref)
+        # With ref_conf < 0.7, the default caps clamp 0.20 → 0.10/0.08/0.05.
+        # highlights cap 0.05 is NOT > 0.05 strict, so 2.3 does not fire on
+        # the strict gate and values keep the default-cap clamps.
+        cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
+        params = cb.params
+        assert params["shadows_C"] == 0.10
+        assert params["midtones_C"] == 0.08
+        assert params["highlights_C"] == 0.05
