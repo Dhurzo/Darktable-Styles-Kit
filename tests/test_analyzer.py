@@ -14,7 +14,13 @@ from dtstylekit.analyzer.luminance import compute_luminance_stats
 from dtstylekit.analyzer.exif import extract_exif
 from dtstylekit.analyzer.scene import detect_scene
 from dtstylekit.analyzer.noise import estimate_noise
-from dtstylekit.analyzer.pipeline import analyze_image
+from dtstylekit.analyzer.pipeline import (
+    analyze_image,
+    analyze_reference_hues,
+    _circular_mean,
+    _circular_dispersion,
+    _detect_bimodal,
+)
 
 
 def make_image(mode: str = "RGB", size: tuple[int, int] = (64, 64),
@@ -85,8 +91,248 @@ class TestPipeline:
         assert len(result.errors) > 0
 
     def test_to_prompt_dict_returns_compact(self, tmp_image: Path) -> None:
-        result: ImageAnalysis = analyze_image(str(tmp_image))
+        result = analyze_image(str(tmp_image))
         prompt_dict = result.to_prompt_dict()
         assert "dimensions" in prompt_dict
         assert "histogram" in prompt_dict
         assert "luminance" in prompt_dict
+
+
+# ---------------------------------------------------------------------------
+# Helpers for reference-hue tests
+# ---------------------------------------------------------------------------
+
+import numpy as np
+
+
+def _solid_color_image(path: Path, size: tuple[int, int] = (128, 128),
+                      color: tuple[int, int, int] = (128, 128, 128)) -> Path:
+    """Write a solid-color JPEG. Luminance is derived from BT.709; the tonal
+    zone (shadows/midtones/highlights) depends on the color."""
+    Image.new("RGB", size, color).save(path, format="JPEG")
+    return path
+
+
+def _gradient_image(path: Path, top_color: tuple[int, int, int],
+                    bottom_color: tuple[int, int, int],
+                    size: tuple[int, int] = (128, 512)) -> Path:
+    """Vertical gradient JPEG. Top row = top_color, bottom row = bottom_color.
+    Useful for placing saturated pixels in a specific tonal zone."""
+    w, h = size
+    arr = np.zeros((h, w, 3), dtype=np.uint8)
+    for y in range(h):
+        t = y / max(h - 1, 1)
+        arr[y, :, :] = [
+            int(top_color[c] * (1 - t) + bottom_color[c] * t) for c in range(3)
+        ]
+    Image.fromarray(arr, "RGB").save(path, format="JPEG")
+    return path
+
+
+def _hue_to_rgb(hue_deg: float, sat: float = 1.0, lum: float = 0.5) -> tuple[int, int, int]:
+    """Convert HSV to 0-255 RGB. lum here is HSV value, not luminance."""
+    import colorsys
+    r, g, b = colorsys.hsv_to_rgb((hue_deg % 360) / 360.0, sat, lum)
+    return int(r * 255), int(g * 255), int(b * 255)
+
+
+def _dark_saturated_color(hue_deg: float, scale: float = 0.2) -> tuple[int, int, int]:
+    """Produce a dark but saturated color so luminance < 0.25 AND delta > 0.15.
+
+    Uses HSV(hue, 1.0, 1.0) = a fully saturated pure hue, then scales the RGB
+    down to keep luminance below the shadows mask threshold (0.25).
+    """
+    pure = _hue_to_rgb(hue_deg, sat=1.0, lum=1.0)
+    return tuple(int(c * scale) for c in pure)
+
+
+class TestCircularStats:
+    """Hito 1: circular statistics helpers."""
+
+    def test_circular_mean_handles_wraparound(self) -> None:
+        # 350° + 10° should mean 0°, NOT 180° (arithmetic mean pitfall)
+        m = _circular_mean([350, 10], [1, 1])
+        assert min(abs(m - 0), abs(m - 360)) < 1.0
+
+    def test_circular_mean_single_value(self) -> None:
+        assert abs(_circular_mean([180.0]) - 180.0) < 1e-3
+        assert abs(_circular_mean([0.0]) - 0.0) < 1e-3
+
+    def test_circular_mean_empty(self) -> None:
+        assert _circular_mean([]) == 0.0
+
+    def test_circular_dispersion_identical_high(self) -> None:
+        # All same hue → dispersion ~1.0
+        assert _circular_dispersion([200, 200, 200]) > 0.99
+
+    def test_circular_dispersion_opposite_low(self) -> None:
+        # Opposite hues → dispersion ~0
+        assert _circular_dispersion([0, 180]) < 0.05
+        assert _circular_dispersion([45, 225]) < 0.05
+
+    def test_circular_dispersion_four_cardinals_zero(self) -> None:
+        # 4 hues 90° apart cancel out exactly
+        assert _circular_dispersion([0, 90, 180, 270]) < 0.05
+
+    def test_circular_dispersion_weighted(self) -> None:
+        # 90% at 0°, 10% at 180° → still high dispersion
+        assert _circular_dispersion([0, 180], [0.9, 0.1]) > 0.7
+
+
+class TestBimodalDetection:
+    """Hito 1: bimodal hue detection."""
+
+    def test_bimodal_detected_two_distinct_peaks(self) -> None:
+        # Two clear groups: 200° (teal-ish) and 30° (orange/warm), 50/50
+        hues = [200.0] * 100 + [30.0] * 100
+        weights = [1.0] * 200
+        result = _detect_bimodal(hues, weights)
+        assert result is not None
+        primary, secondary, share = result
+        assert share > 0.4  # primary holds a meaningful share
+        # Primary/secondary should be near 200 or 30 (within ±20°)
+        peaks = sorted([primary % 360, secondary % 360])
+        assert any(abs(p - 30) < 25 for p in peaks)
+        assert any(abs(p - 200) < 25 for p in peaks)
+
+    def test_bimodal_not_detected_when_single_peak(self) -> None:
+        # All same hue
+        hues = [180.0] * 100
+        weights = [1.0] * 100
+        assert _detect_bimodal(hues, weights) is None
+
+    def test_bimodal_not_detected_when_adjacent_bins(self) -> None:
+        # 10° and 25° are in adjacent 30° bins → same mode
+        hues = [10.0] * 100 + [25.0] * 100
+        weights = [1.0] * 200
+        assert _detect_bimodal(hues, weights) is None
+
+    def test_bimodal_not_detected_when_uniform(self) -> None:
+        # Hues spread everywhere → no two dominant peaks
+        hues = list(range(0, 360, 10))
+        weights = [1.0] * len(hues)
+        assert _detect_bimodal(hues, weights) is None
+
+    def test_bimodal_empty(self) -> None:
+        assert _detect_bimodal([], []) is None
+
+
+class TestAnalyzeReferenceHues:
+    """Hito 1: end-to-end reference hue analysis with circular + bimodal logic."""
+
+    def test_empty_input_returns_neutral(self) -> None:
+        result = analyze_reference_hues([])
+        assert result["shadows_hue"] is None
+        assert result["midtones_hue"] is None
+        assert result["highlights_hue"] is None
+        assert result["shadows_hue_confidence"] == 0.0
+        assert result["shadows_hue_mode"] == "neutral"
+        assert result["midtones_hue_mode"] == "neutral"
+        assert result["highlights_hue_mode"] == "neutral"
+
+    def test_low_saturation_gray_is_neutral(self, tmp_path: Path) -> None:
+        # Pure gray image — no saturation anywhere → neutral in all zones
+        p = _solid_color_image(tmp_path / "gray.jpg", color=(128, 128, 128))
+        result = analyze_reference_hues([p])
+        for zone in ("shadows", "midtones", "highlights"):
+            assert result[f"{zone}_hue"] is None, f"{zone} should be neutral"
+            assert result[f"{zone}_hue_mode"] == "neutral"
+            assert result[f"{zone}_hue_confidence"] == 0.0
+
+    def test_solid_color_single_zone_uses_circular_mean(self, tmp_path: Path) -> None:
+        # Pure red image (hue 0°) in shadows (low luminance) - expect mono mode
+        # Use dark saturated red so luminance<0.25 but delta>0.15.
+        dark_red = _dark_saturated_color(0, scale=0.2)
+        p = _solid_color_image(tmp_path / "dark_red.jpg", color=dark_red)
+        result = analyze_reference_hues([p])
+        # All pixels are in shadows (lum ~0.2 < 0.25). Hue 0 should be detected.
+        assert result["shadows_hue_mode"] == "mono"
+        # Hue near 0 (or 360 — both are red)
+        sh = result["shadows_hue"]
+        assert sh is not None
+        assert min(abs(sh - 0), abs(sh - 360)) < 20.0
+        assert result["shadows_hue_confidence"] > 0.0
+
+    def test_wraparound_hues_combine_to_zero(self, tmp_path: Path) -> None:
+        # Two references: one very slightly orange-red (hue ~5°), one slightly
+        # pink-red (hue ~355°). Arithmetic mean would be 180° (catastrophic).
+        # Circular mean should land near 0°.
+        c1 = _dark_saturated_color(5, scale=0.2)   # near-red, slightly orange
+        c2 = _dark_saturated_color(355, scale=0.2)  # near-red, slightly pink
+        p1 = _solid_color_image(tmp_path / "red1.jpg", color=c1)
+        p2 = _solid_color_image(tmp_path / "red2.jpg", color=c2)
+        result = analyze_reference_hues([p1, p2])
+        sh = result["shadows_hue"]
+        assert sh is not None
+        # Should be near 0° (or 360°), NOT near 180°
+        assert min(abs(sh - 0), abs(sh - 360)) < 15.0, (
+            f"expected hue near 0/360, got {sh}"
+        )
+
+    def test_dispersion_lowers_confidence_for_disagreeing_refs(self, tmp_path: Path) -> None:
+        # Two refs with strongly different hues in shadows: 0° and 120°
+        # Dispersion will be low → confidence drops to 0 → neutral mode
+        c1 = _dark_saturated_color(0, scale=0.2)
+        c2 = _dark_saturated_color(120, scale=0.2)
+        p1 = _solid_color_image(tmp_path / "red.jpg", color=c1)
+        p2 = _solid_color_image(tmp_path / "green.jpg", color=c2)
+        result = analyze_reference_hues([p1, p2])
+        # Two opposite hues → dispersion low → forced neutral
+        assert result["shadows_hue_mode"] == "neutral"
+        assert result["shadows_hue"] is None
+        assert result["shadows_hue_confidence"] == 0.0
+
+    def test_bimodal_reference_emits_secondary_hue(self, tmp_path: Path) -> None:
+        # Build a single image with two tonal populations of distinct hues
+        # in the same zone: 50% of pixels at hue 200° (teal) + 50% at hue 30°
+        # (warm), all at lum<0.25 so both go to shadows.
+        h, w = 256, 256
+        arr = np.zeros((h, w, 3), dtype=np.uint8)
+        # Top half: teal at low luminance (sat delta high enough)
+        # bottom half: warm at low luminance
+        for y in range(h):
+            hue = 200.0 if y < h / 2 else 30.0
+            # Use HSV→RGB then scale down to keep luminance < 0.25
+            import colorsys
+            r, g, b = colorsys.hsv_to_rgb((hue % 360) / 360.0, 0.9, 0.4)
+            # Scale to a luminance just below 0.25 threshold in BT.709
+            # RGB ~ (0.1, 0.18, 0.27) for teal at V=0.4 -> luminance ~0.18
+            arr[y, :, 0] = int(r * 255 * 0.5)
+            arr[y, :, 1] = int(g * 255 * 0.5)
+            arr[y, :, 2] = int(b * 255 * 0.5)
+        Image.fromarray(arr, "RGB").save(tmp_path / "bimodal.jpg", format="JPEG")
+        result = analyze_reference_hues([tmp_path / "bimodal.jpg"])
+        # Shadows should be bimodal with primary near 200 and secondary near 30
+        # OR vice versa
+        assert result["shadows_hue_mode"] == "bi"
+        primary = result["shadows_hue"]
+        secondary = result["shadows_hue_secondary"]
+        assert primary is not None
+        assert secondary is not None
+        peaks = sorted([primary % 360, secondary % 360])
+        # Each peak should be within 25° of one of the inputs (30, 200)
+        assert any(abs(p - 30) < 30 for p in peaks)
+        assert any(abs(p - 200) < 30 for p in peaks)
+
+    def test_returns_hue_mode_field_for_each_zone(self, tmp_path: Path) -> None:
+        # All zones present in the dict
+        p = _solid_color_image(tmp_path / "gray.jpg", color=(128, 128, 128))
+        result = analyze_reference_hues([p])
+        for zone in ("shadows", "midtones", "highlights"):
+            assert f"{zone}_hue_mode" in result
+            assert result[f"{zone}_hue_mode"] in ("neutral", "mono", "bi")
+
+    def test_secondary_hue_field_present(self, tmp_path: Path) -> None:
+        p = _solid_color_image(tmp_path / "gray.jpg", color=(128, 128, 128))
+        result = analyze_reference_hues([p])
+        # Sanity: secondary hue fields exist; None for neutral
+        for zone in ("shadows", "midtones", "highlights"):
+            assert f"{zone}_hue_secondary" in result
+            assert result[f"{zone}_hue_secondary"] is None
+
+    def test_nonexistent_file_skipped_gracefully(self, tmp_path: Path) -> None:
+        # A nonexistent path + a valid gray image should not crash
+        p = _solid_color_image(tmp_path / "gray.jpg", color=(128, 128, 128))
+        result = analyze_reference_hues([tmp_path / "nope.jpg", p])
+        # Should return whatever the gray image gives (neutral everywhere)
+        assert result["shadows_hue_mode"] == "neutral"
