@@ -409,6 +409,166 @@ class TestPromptBuilder:
         assert "[EXPOSURE GUARD]" not in messages[1]["content"]
 
 
+class TestPromptAntiTintRules:
+    """Hito 3: prompt-level anti-tint instructions and dynamic chroma caps."""
+
+    def _make_analysis(self, mean: float = 0.5) -> MagicMock:
+        """Minimal analysis mock with luminance + histogram attributes."""
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {"luminance": {"mean": mean}}
+        luminance = MagicMock()
+        luminance.mean = mean
+        luminance.std = 0.2
+        luminance.saturation_mean = 0.3
+        luminance.white_balance_ratio_rb = 1.0
+        luminance.shadows_pct = 0.2
+        luminance.midtones_pct = 0.6
+        luminance.highlights_pct = 0.2
+        analysis.luminance = luminance
+        histogram = MagicMock()
+        histogram.mean_red = mean * 0.9
+        histogram.mean_green = mean
+        histogram.mean_blue = mean * 1.1
+        analysis.histogram = histogram
+        return analysis
+
+    def test_prompt_has_color_dominance_rule(self) -> None:
+        """SYSTEM_PROMPT must carry rule #18 COLOR DOMINANCE RULE."""
+        from dtstylekit.vlm.prompt_builder import SYSTEM_PROMPT
+
+        assert "18. COLOR DOMINANCE RULE" in SYSTEM_PROMPT
+        assert "HIDDEN GLOBAL TINT" in SYSTEM_PROMPT
+        # Must warn against same hue in all 3 zones
+        assert "shadows_H + midtones_H + highlights_H" in SYSTEM_PROMPT
+        # Must mention the chroma>0.05 threshold (matches validator 2.3)
+        assert "chroma>0.05" in SYSTEM_PROMPT
+
+    def test_prompt_emits_bimodal_instruction(self) -> None:
+        """Reference with hue_mode='bi' for a zone → prompt injects a NOTE
+        describing primary+secondary hue for that zone."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "bi",
+            "shadows_hue_secondary": 30.0,
+            "shadows_sat": 0.50,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.40,
+            "midtones_hue_mode": "neutral",
+            "midtones_hue_secondary": None,
+            "midtones_sat": 0.0,
+            "highlights_hue": 30.0,
+            "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "mono",
+            "highlights_hue_secondary": None,
+            "highlights_sat": 0.30,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "bi-modal color in SHADOWS" in content
+        assert "primary 200.0" in content
+        assert "secondary 30.0" in content
+        # The instructions still drive the SET directive with the primary
+        assert "SET shadows_H = 200.0" in content
+
+    def test_prompt_dynamic_chroma_caps_high_confidence(self) -> None:
+        """All 3 zones with confidence >= 0.85 → caps at 0.15/0.15/0.10
+        (mirrors validator high-confidence ceiling)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "mono", "shadows_sat": 0.50,
+            "midtones_hue": 200.0, "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "mono", "midtones_sat": 0.50,
+            "highlights_hue": 200.0, "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "mono", "highlights_sat": 0.50,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        # High-confidence cap echoed in the prompt
+        assert "high-confidence (conf=0.90 >= 0.85)" in content
+        assert "SET shadows_C = 0.150" in content
+        assert "SET midtones_C = 0.150" in content
+        assert "SET highlights_C = 0.100" in content
+        # Even though all zones are mono with same hue, this prompts the
+        # intentional-monochrome WARNING block (the SETs themselves don't
+        # promote the hidden-tint problem; the warning tells the model to
+        # keep midtones neutral for portability).
+        assert "INTENTIONAL MONOCHROME REFERENCE" in content
+
+    def test_prompt_dynamic_chroma_caps_medium_confidence(self) -> None:
+        """Confidence in [0.70, 0.85) → soft caps 0.10/0.08/0.05.
+        Below 0.70 → 0 (neutral)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.72,   # medium → soft cap 0.10
+            "shadows_hue_mode": "mono",
+            "shadows_sat": 0.50,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.60,  # low → neutral 0
+            "midtones_hue_mode": "neutral",
+            "midtones_sat": 0.0,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.0,  # low → neutral 0
+            "highlights_hue_mode": "neutral",
+            "highlights_sat": 0.0,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        # Shadow: medium conf -> soft cap 0.10 (sat 0.50, so 0.10 wins)
+        assert "shadows   : medium-confidence (conf=0.72)" in content
+        assert "SET shadows_C = 0.100" in content
+        # Midtones: conf 0.60 < 0.70 → neutral 0
+        assert "midtones  : low-confidence (conf=0.60 < 0.70) -> NEUTRAL" in content
+        assert "SET midtones_C = 0.000" in content
+        # Highlights: conf 0.0 < 0.70 → neutral 0
+        assert "highlights: low-confidence (conf=0.00 < 0.70) -> NEUTRAL" in content
+        assert "SET highlights_C = 0.000" in content
+
+    def test_prompt_neutral_reference_tints_no_intentional_mono(self) -> None:
+        """A neutral reference (no clear hues) must NOT emit the intentional
+        monochrome warning (which is reserved for hue_mode='mono' across all
+        3 zones with matching hues)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": None, "shadows_hue_confidence": 0.2,
+            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
+            "midtones_hue": None, "midtones_hue_confidence": 0.2,
+            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
+            "highlights_hue": None, "highlights_hue_confidence": 0.2,
+            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "INTENTIONAL MONOCHROME" not in content
+        # All zones below 0.70 → all neutral
+        assert "SET shadows_C = 0.000" in content
+        assert "SET midtones_C = 0.000" in content
+        assert "SET highlights_C = 0.000" in content
+
+
 class TestPresetExposureFilter:
     """Luminance-suitability filter for candidate presets."""
 
