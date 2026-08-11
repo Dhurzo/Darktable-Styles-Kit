@@ -277,7 +277,6 @@ def generate_style_spec(
 
         # Run iterative refinement
         try:
-            from dtstylekit.vlm.iterative_refiner import iterative_refine
             refined_spec = iterative_refine(
                 raw_path=Path(refine_raw_path),
                 reference_paths=[Path(r) for r in (references or [])],

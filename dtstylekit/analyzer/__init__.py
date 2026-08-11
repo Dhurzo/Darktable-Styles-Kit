@@ -11,7 +11,6 @@ Public surface:
 
 from __future__ import annotations
 
-from .cli import add_analyze_subcommand, cmd_analyze, main_analyze
 from .exif import extract_exif
 from .histogram import compute_histogram
 from .luminance import compute_luminance_stats
@@ -33,8 +32,4 @@ __all__ = [
     "HistogramStats",
     "ImageAnalysis",
     "LuminanceStats",
-    # CLI
-    "add_analyze_subcommand",
-    "cmd_analyze",
-    "main_analyze",
 ]

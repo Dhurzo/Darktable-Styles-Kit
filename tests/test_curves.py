@@ -1,9 +1,17 @@
-"""Tests for curve templates and curve-based IOP pack/unpack."""
+"""Tests for curve templates and curve-based IOP pack/unpack.
+
+Also includes end-to-end pipeline tests and CLI tests.
+"""
 
 from __future__ import annotations
 
 import math
 import struct
+import json
+from pathlib import Path
+from xml.etree import ElementTree as ET
+from io import StringIO
+from unittest.mock import patch
 
 import pytest
 
@@ -35,6 +43,23 @@ from dtstylekit.curves import (
     pack_tonecurve,
     unpack_tonecurve,
     curve_iop_size,
+)
+from dtstylekit.codec.iop_registry import (
+    IOP_REGISTRY,
+    pack_params,
+    unpack_params,
+)
+from dtstylekit.codec.xmp_codec import decode_xmp, encode_xmp
+from dtstylekit.codec.serializer import build_dtstyle_xml
+from dtstylekit.codec.blendop import DEFAULT_BLENDOP_DISPLAY
+from dtstylekit.curves import REGISTRY as CURVE_TEMPLATES
+from dtstylekit.vlm.models import Plugin, StyleSpec
+from dtstylekit.vlm.validator import validate_style
+from dtstylekit.composer.merger import merge_presets
+from dtstylekit.composer.generator import generate_dtstyle
+from dtstylekit.curves.cli import (
+    cmd_curves_list,
+    cmd_curves_info,
 )
 
 
@@ -83,51 +108,35 @@ class TestTemplateCurves:
     def test_s_curve_boosts_mids(self) -> None:
         tmpl = get_template("s_strong")
         nodes = tmpl.nodes_per_channel["all"]
-        # midpoint should be >= 0.5 or curve should dip
         mid_idx = len(nodes) // 2
         x_mid, y_mid = nodes[mid_idx]
-        # S-curve: at x=0.5, y is shifted (should be close to 0.5)
         assert 0.3 <= y_mid <= 0.7
 
     def test_inverted_s_structure(self) -> None:
         tmpl = get_template("inverted_s_strong")
         nodes = tmpl.nodes_per_channel["all"]
-        # Endpoints must be pinned
         assert nodes[0] == (0.0, 0.0)
         assert nodes[-1] == (1.0, 1.0)
-        # Inverted-S differs from S-curve: at the mid-region the y values
-        # should lie closer to 0.5 (i.e. less variation than s_soft)
         s_tmpl = get_template("s_strong")
         s_nodes = s_tmpl.nodes_per_channel["all"]
-        # Variance around 0.5
+
         def var(ns):
-            mid = [n[1] for n in ns[1:-1]]  # skip endpoints
+            mid = [n[1] for n in ns[1:-1]]
             mu = sum(mid) / len(mid)
             return sum((v - mu) ** 2 for v in mid) / len(mid)
-        # S-curve should have more variance than inverted-S at midtones
-        # (the S-curve "S-ifies" mids, inverted-S "straight-ens" them)
+
         assert var(s_nodes) > var(nodes) * 0.5
 
     def test_lift_blacks_lifts_interior(self) -> None:
-        """Lift is visible in the lower-interior nodes (not endpoints).
-
-        Endpoints must remain pinned for spline solver convergence —
-        the lift effect is strongest near the bottom and tapers off toward
-        the (1,1) anchor.
-        """
         identity_tmpl = get_template("identity")
         lift_tmpl = get_template("lift_medium")
         id_nodes = identity_tmpl.nodes_per_channel["all"]
         lift_nodes = lift_tmpl.nodes_per_channel["all"]
 
-        # Endpoints pinned
         assert lift_nodes[0] == (0.0, 0.0)
         assert lift_nodes[-1] == (1.0, 1.0)
 
-        # Lower-interior nodes (skip first and last): lift curve sits
-        # ABOVE identity in the shadow region
         shadow_pts = list(zip(id_nodes[1:-1], lift_nodes[1:-1]))
-        # Lift is most prominent in the first half
         first_half = shadow_pts[: len(shadow_pts) // 2 + 1]
         assert first_half, "Need at least one shadow point"
         for id_node, lift_node in first_half:
@@ -192,22 +201,18 @@ class TestColorzonesPacking:
             blob = pack_colorzones(p)
             p2 = unpack_colorzones(blob)
             for i in range(3):
-                # Endpoints pinned by design (aside from highlight-roll-off
-                # which intentionally caps at <1.0)
                 assert math.isclose(p2.curve_x[i][0], 0.0, abs_tol=1e-5)
                 assert math.isclose(p2.curve_y[i][0], 0.0, abs_tol=1e-5)
                 assert math.isclose(p2.curve_x[i][-1], 1.0, abs_tol=1e-5)
                 assert math.isclose(p2.curve_y[i][-1], 1.0, abs_tol=1e-5)
 
     def test_highlights_soft_caps_at_target(self) -> None:
-        """highlights_soft intentionally doesn't pin (1,1) — it caps at <1.0."""
         p = apply_curve_template_colorzones("highlights_soft")
         blob = pack_colorzones(p)
         p2 = unpack_colorzones(blob)
-        # Last node should NOT be 1.0 — it's capped
         for i in range(3):
             assert p2.curve_y[i][-1] < 1.0
-            assert p2.curve_y[i][-1] >= 0.90  # ~0.95
+            assert p2.curve_y[i][-1] >= 0.90
 
     def test_unpack_wrong_size_raises(self) -> None:
         with pytest.raises(ValueError, match="colorzones blob"):
@@ -338,16 +343,13 @@ class TestExtendedTemplates:
             assert len(blob) == curve_iop_size(curve_op)
 
     def test_low_key_darkens_overall(self) -> None:
-        """Above 0.5 the curve should sit below identity (darker)."""
         tmpl = get_template("low_key")
         nodes = tmpl.nodes_per_channel["all"]
-        # Find a node at x >= 0.5 and check its y is < x
         for x, y in nodes:
             if 0.55 <= x <= 0.9:
                 assert y < x, f"low_key insufficiently dark at x={x}: y={y}"
 
     def test_high_key_brightens_overall(self) -> None:
-        """Above 0.3 the curve should sit above identity (brighter)."""
         tmpl = get_template("high_key")
         nodes = tmpl.nodes_per_channel["all"]
         for x, y in nodes:
@@ -355,19 +357,15 @@ class TestExtendedTemplates:
                 assert y > x, f"high_key insufficiently bright at x={x}: y={y}"
 
     def test_bleach_bypass_structure(self) -> None:
-        """Bleach bypass should lift blacks substantially."""
         tmpl = get_template("bleach_bypass")
         nodes = tmpl.nodes_per_channel["all"]
-        # At x=0.1 the y should still be lifted to ~0.25 (well above identity 0.1)
         for x, y in nodes:
             if 0.05 <= x <= 0.18:
                 assert y > x + 0.10, f"bleach_bypass shadow lift weak at x={x}: y={y}"
 
     def test_matte_film_lifts_and_rolls(self) -> None:
-        """Matte film should lift blacks AND keep highlights compressed."""
         tmpl = get_template("matte_film")
         nodes = tmpl.nodes_per_channel["all"]
-        # Lift at x=0.3 should be visible
         for x, y in nodes:
             if x == 0.0:
                 continue
@@ -379,9 +377,6 @@ class TestExtendedTemplates:
 
 class TestXMPCodecIntegration:
     def test_blob_encodes_decodes(self) -> None:
-        """Colorzones blob should round-trip through encode_xmp/decode_xmp."""
-        from dtstylekit.codec.xmp_codec import encode_xmp, decode_xmp
-
         p = apply_curve_template_colorzones("s_strong")
         blob = pack_colorzones(p)
 
@@ -390,3 +385,234 @@ class TestXMPCodecIntegration:
         assert decoded == blob
 
 
+# ---------------------------------------------------------------------------
+# End-to-end pipeline tests (from test_curves_e2e.py)
+# ---------------------------------------------------------------------------
+
+
+def _fake_vlm_response() -> StyleSpec:
+    """Build a StyleSpec shaped like the VLM's output, exercising
+    a curve-based IOP plus a scalar-only IOP."""
+    return StyleSpec(
+        style_name="warm cinematic",
+        style_description="Faded cinematic look with warm shadows.",
+        iop_list=None,
+        plugins=[
+            Plugin(operation="filmicrgb", params={"contrast": 1.4, "latitude": 25.0}),
+            Plugin(
+                operation="tonecurve",
+                params={"curve_preset": "lift_medium", "preserve_colors": 0},
+            ),
+            Plugin(
+                operation="rgbcurve",
+                params={"curve_preset": "s_soft"},
+            ),
+        ],
+    )
+
+
+class TestEndToEndPipeline:
+    def test_validator_curve_preset_propagates(self) -> None:
+        spec = _fake_vlm_response()
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert len(warnings) == 0, f"unexpected warnings: {warnings}"
+        assert len(validated.plugins) == 3
+
+        by_op = {plg.operation: plg for plg in validated.plugins}
+        assert by_op["tonecurve"].params["curve_preset"] == "lift_medium"
+        assert by_op["rgbcurve"].params["curve_preset"] == "s_soft"
+        assert by_op["tonecurve"].params["preserve_colors"] == 0
+
+    def test_curve_preset_packs_via_registry(self) -> None:
+        blob = pack_params("tonecurve", {"curve_preset": "lift_medium"})
+        assert len(blob) == curve_iop_size("tonecurve")
+        assert blob != b"\x00" * 520
+
+    def test_xmp_encoding_round_trip(self) -> None:
+        blob = pack_params("colorzones", {"curve_preset": "s_strong", "strength": 50.0})
+        encoded = encode_xmp(blob)
+        assert encoded.startswith("gz")
+        decoded = decode_xmp(encoded)
+        assert decoded == blob
+
+    def test_full_xml_serialization(self, tmp_path: Path) -> None:
+        spec = _fake_vlm_response()
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert not warnings
+
+        plugins_xml: list[dict] = []
+        for i, plg in enumerate(validated.plugins):
+            plugins_xml.append({
+                "num": i,
+                "module": 0,
+                "operation": plg.operation,
+                "params": dict(plg.params),
+                "enabled": 1 if plg.enabled else 0,
+                "blendop_version": 13,
+                "multi_priority": plg.multi_priority,
+                "multi_name": plg.multi_name,
+                "multi_name_hand_edited": 0,
+            })
+
+        xml_str = build_dtstyle_xml(
+            name=validated.style_name,
+            description=validated.style_description,
+            plugins=plugins_xml,
+            iop_list=validated.iop_list,
+        )
+
+        out = tmp_path / "warm_cinematic.dtstyle"
+        out.write_text(xml_str, encoding="utf-8")
+
+        root = ET.fromstring(out.read_text())
+        assert root.tag == "darktable_style"
+        assert root.get("version") == "1.0"
+
+        style_elems = root.findall("style/plugin")
+        assert len(style_elems) == 3
+        ops = [pe.find("operation").text for pe in style_elems]
+        assert "filmicrgb" in ops
+        assert "tonecurve" in ops
+        assert "rgbcurve" in ops
+
+        for pe in style_elems:
+            op_name = pe.find("operation").text
+            op_params_hex = pe.find("op_params").text
+            assert len(op_params_hex) > 0
+            blob = decode_xmp(op_params_hex)
+            if op_name in ("colorzones", "rgbcurve", "tonecurve"):
+                assert len(blob) == curve_iop_size(op_name)
+
+
+class TestEndToEndWithComposer:
+    def test_generate_dtstyle_uses_curve_template(self, tmp_path: Path) -> None:
+        spec = _fake_vlm_response()
+        from dtstylekit.vlm.validator import validate_style
+        validated, _ = validate_style(spec, IOP_REGISTRY)
+        out = tmp_path / "test.dtstyle"
+        rc = generate_dtstyle(validated, presets=[], output_path=out)
+        assert rc.exists()
+
+        root = ET.fromstring(rc.read_text())
+        for plg in root.findall("style/plugin"):
+            op = plg.find("operation").text
+            if op in ("colorzones", "rgbcurve", "tonecurve"):
+                blob = decode_xmp(plg.find("op_params").text)
+                assert len(blob) == curve_iop_size(op)
+
+
+@pytest.mark.parametrize("curve_op", ["colorzones", "rgbcurve", "tonecurve"])
+@pytest.mark.parametrize("template_name", ["identity", "s_soft", "lift_medium", "shadow_warm"])
+def test_curve_template_combinations_round_trip(curve_op, template_name):
+    """Every (curve_op, template) combination packs and unpacks correctly."""
+    blob = pack_params(curve_op, {"curve_preset": template_name})
+    unpacked = unpack_params(curve_op, blob)
+    assert unpacked["curve_preset"].startswith("(binary:")
+    assert len(blob) == curve_iop_size(curve_op)
+
+
+# ---------------------------------------------------------------------------
+# CLI tests (from test_curves_cli.py)
+# ---------------------------------------------------------------------------
+
+
+def _make_namespace(**kwargs):
+    import argparse
+    return argparse.Namespace(**kwargs)
+
+
+class TestCurvesList:
+    def test_list_default(self, capsys) -> None:
+        args = _make_namespace(category=None, quiet=False)
+        rc = cmd_curves_list(args)
+        assert rc == 0
+        captured = capsys.readouterr().out
+        assert "Curve templates (19 total" in captured
+        for tmpl in ["s_strong", "lift_medium", "bleach_bypass", "shadow_cool"]:
+            assert tmpl in captured
+
+    def test_list_quiet(self, capsys) -> None:
+        args = _make_namespace(category=None, quiet=True)
+        rc = cmd_curves_list(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "s_strong" in out
+        assert "bleach_bypass" in out
+        assert "───" not in out
+
+    def test_list_filter_category(self, capsys) -> None:
+        args = _make_namespace(category="vintage", quiet=False)
+        rc = cmd_curves_list(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "lift_medium" in out
+        assert "inverted_s_strong" in out
+        assert "inverted_s_soft" in out
+        lines_with_s_strong_alone = [
+            line for line in out.split("\n")
+            if "s_strong" in line and "inverted_s_strong" not in line
+        ]
+        assert not lines_with_s_strong_alone, (
+            f"Found unexpected s_strong lines: {lines_with_s_strong_alone}"
+        )
+        assert "bleach_bypass" not in out
+
+    def test_list_quiet_filter_category(self, capsys) -> None:
+        args = _make_namespace(category="filmic", quiet=True)
+        rc = cmd_curves_list(args)
+        assert rc == 0
+        out_lines = capsys.readouterr().out.strip().split("\n")
+        assert set(out_lines) == {"highlights_soft", "bleach_bypass", "matte_film"}
+
+    def test_list_unknown_category(self, capsys) -> None:
+        args = _make_namespace(category="doesntexist", quiet=False)
+        rc = cmd_curves_list(args)
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "No templates found" in err
+
+
+class TestCurvesInfo:
+    def test_info_known_template(self, capsys) -> None:
+        args = _make_namespace(name="s_strong")
+        rc = cmd_curves_info(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Template: s_strong" in out
+        assert "Title:" in out
+        assert "Category:" in out
+        assert "Nodes per channel:" in out
+
+    def test_info_unknown_template(self, capsys) -> None:
+        args = _make_namespace(name="nonexistent_template")
+        rc = cmd_curves_info(args)
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "Unknown curve template" in err
+
+    def test_info_includes_example_json(self, capsys) -> None:
+        args = _make_namespace(name="bleach_bypass")
+        rc = cmd_curves_info(args)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert '"operation": "tonecurve"' in out
+        assert '"curve_preset": "bleach_bypass"' in out
+
+
+class TestCliIntegration:
+    """Quick end-to-end check: run main() with 'curves list'."""
+
+    def test_cli_runs_curves_list(self) -> None:
+        from dtstylekit.cli import main
+        rc = main(["curves", "list", "--quiet"])
+        assert rc == 0
+
+    def test_cli_runs_curves_info(self) -> None:
+        from dtstylekit.cli import main
+        rc = main(["curves", "info", "s_strong"])
+        assert rc == 0
+
+    def test_cli_curves_info_unknown_returns_nonzero(self) -> None:
+        from dtstylekit.cli import main
+        rc = main(["curves", "info", "nothing"])
+        assert rc != 0

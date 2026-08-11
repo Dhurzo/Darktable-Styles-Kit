@@ -505,11 +505,11 @@ def build_prompt(
 
             + "\n".join(ref_instructions) + "\n"
 
-            f"  -> SET shadows_C = {min(reference_analysis.get('shadows_sat', 0), 0.5):.3f}\n"
+            f"  -> SET shadows_C = {min(reference_analysis.get('shadows_sat', 0), 0.15):.3f}\n"
 
-            f"  -> SET midtones_C = {min(reference_analysis.get('midtones_sat', 0), 0.3):.3f}\n"
+            f"  -> SET midtones_C = {min(reference_analysis.get('midtones_sat', 0), 0.15):.3f}\n"
 
-            f"  -> SET highlights_C = {min(reference_analysis.get('highlights_sat', 0), 0.25):.3f}\n"
+            f"  -> SET highlights_C = {min(reference_analysis.get('highlights_sat', 0), 0.10):.3f}\n"
 
             f"[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
 
