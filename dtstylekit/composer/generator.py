@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from dtstylekit.codec.blendop import DEFAULT_BLENDOP_DISPLAY
 from dtstylekit.codec.serializer import build_dtstyle_xml
 
-from .merger import ComposerPlugin, merge_presets
+from .merger import merge_presets
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,7 @@ def generate_dtstyle(
     spec,  # StyleSpec
     presets: list,  # list[Preset]
     output_path: Path,
-    analysis=None,  # ImageAnalysis for context
+    _analysis=None,  # ImageAnalysis — reserved for context reporting
 ) -> Path:
     """Generate a `.dtstyle` file from a validated StyleSpec.
 
@@ -31,7 +30,14 @@ def generate_dtstyle(
         Absolute path to the written .dtstyle file.
     """
     adjustments = {plg.operation: dict(plg.params) for plg in spec.plugins}
-    plugins = merge_presets(presets, adjustments)
+    # Dark display-referred images (mean luminance < 0.3) must not get a
+    # fresh filmicrgb instance — see merger.merge_presets(dark_image=...).
+    dark_image = False
+    if _analysis is not None:
+        mean_lum = getattr(getattr(_analysis, "luminance", None), "mean", None)
+        if isinstance(mean_lum, (int, float)) and not isinstance(mean_lum, bool):
+            dark_image = mean_lum < 0.3
+    plugins = merge_presets(presets, adjustments, dark_image=dark_image)
 
     # Build XML-ready plugin dicts for the serializer.  We pass already-
     # packed ``op_params_override`` so the serializer doesn't re-pack
@@ -42,7 +48,7 @@ def generate_dtstyle(
     for i, plg in enumerate(plugins):
         xml_plugins.append({
             "num": i,
-            "module": 0,
+            "module": plg.module,
             "operation": plg.operation,
             "op_params_override": plg.op_params,
             "params": {},  # not used when override is supplied
@@ -51,7 +57,7 @@ def generate_dtstyle(
             "blendop_version": plg.blendop_version,
             "multi_priority": plg.multi_priority,
             "multi_name": plg.multi_name,
-            "multi_name_hand_edited": 0,
+            "multi_name_hand_edited": plg.multi_name_hand_edited,
         })
 
     # Filter out None overrides so the serializer picks defaults

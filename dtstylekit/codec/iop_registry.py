@@ -4,11 +4,8 @@ Maps operation names to their parameter struct layouts, default values,
 ranges, and verified sizes. Supports pack/unpack of binary blobs.
 """
 
-from dataclasses import dataclass
-from typing import ClassVar
 import struct
-
-from .xmp_codec import encode_xmp, decode_xmp
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -21,7 +18,10 @@ class IOPRegistry:
     defaults: dict[str, float | int]
     ranges: dict[str, tuple[float | int, float | int]]
     size_bytes: int | None  # None = not verified against real .dtstyle
-    blendop_cst: int  # 2 = scene (RGB_SCENE), 4 = display (RGB_DISPLAY)
+    blendop_cst: int  # 2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE (per blend.h of this master)
+    legacy_size_bytes: tuple[int, ...] = ()  # older versions still shipped in official styles
+    legacy_pack_format: str | None = None  # struct format for legacy blobs
+    legacy_fields: tuple[str, ...] = ()  # field names for legacy blobs
     # Sentinel for curve-based IOPs (colorzones/rgbcurve/tonecurve):
     # when True, ``pack_params`` redirects to the curve-template system
     # rather than the standard struct.pack path.  ``curve_pack_size_override``
@@ -35,12 +35,13 @@ class IOPRegistry:
 _VERIFIED_IOPS = {
     "exposure": IOPRegistry(
         operation="exposure",
-        version=6,
-        # 1 int + 4 floats + 1 int = 6 items, 24 bytes
-        pack_format="<iffffi",
+        version=7,
+        # 1 int + 4 floats + 2 ints = 7 items, 28 bytes
+        pack_format="<iffffii",
         fields=(
             "mode", "black", "exposure", "deflicker_percentile",
-            "deflicker_target_level", "compensate_exposure_bias"
+            "deflicker_target_level", "compensate_exposure_bias",
+            "compensate_hilite_pres"
         ),
         defaults={
             "mode": 0,  # MANUAL
@@ -49,6 +50,7 @@ _VERIFIED_IOPS = {
             "deflicker_percentile": 50.0,
             "deflicker_target_level": -4.0,
             "compensate_exposure_bias": 0,  # gboolean
+            "compensate_hilite_pres": 1,  # gboolean TRUE (v7)
         },
         ranges={
             "mode": (0, 1),
@@ -57,9 +59,16 @@ _VERIFIED_IOPS = {
             "deflicker_percentile": (0.0, 100.0),
             "deflicker_target_level": (-18.0, 18.0),
             "compensate_exposure_bias": (0, 1),
+            "compensate_hilite_pres": (0, 1),
         },
-        size_bytes=24,  # Verified from blob_size_calibration.md
-        blendop_cst=4,  # RGB_DISPLAY (exposure is display-referred)
+        size_bytes=28,  # 7 fields × 4 bytes (v7)
+        legacy_size_bytes=(24,),  # v6 blobs shipped in official styles
+        legacy_pack_format="<iffffi",  # v6: no compensate_hilite_pres
+        legacy_fields=(
+            "mode", "black", "exposure", "deflicker_percentile",
+            "deflicker_target_level", "compensate_exposure_bias"
+        ),
+        blendop_cst=3,  # RGB_DISPLAY (default for exposure per src/iop/exposure.c:324)
     ),
     "filmicrgb": IOPRegistry(
         operation="filmicrgb",
@@ -141,7 +150,7 @@ _VERIFIED_IOPS = {
             "enable_highlight_reconstruction": (0, 1),
         },
         size_bytes=116,  # Verified from blob_size_calibration.md
-        blendop_cst=2,  # RGB_SCENE (filmicrgb is scene-referred)
+        blendop_cst=4,  # RGB_SCENE (filmicrgb is scene-referred)
     ),
     "colorbalancergb": IOPRegistry(
         operation="colorbalancergb",
@@ -194,7 +203,7 @@ _VERIFIED_IOPS = {
             "saturation_formula": (0, 1),
         },
         size_bytes=132,  # Verified from blob_size_calibration.md
-        blendop_cst=2,  # RGB_SCENE (colorbalancergb is scene-referred)
+        blendop_cst=4,  # RGB_SCENE (colorbalancergb is scene-referred)
     ),
     "sigmoid": IOPRegistry(
         operation="sigmoid",
@@ -238,7 +247,7 @@ _VERIFIED_IOPS = {
             "base_primaries": (0, 3),
         },
         size_bytes=56,  # Verified from blob_size_calibration.md
-        blendop_cst=2,  # RGB_SCENE (sigmoid is scene-referred)
+        blendop_cst=4,  # RGB_SCENE (sigmoid is scene-referred)
     ),
     "atrous": IOPRegistry(
         operation="atrous",
@@ -246,27 +255,33 @@ _VERIFIED_IOPS = {
         # Verified size: 248 bytes = 62 items (from blob_size_calibration.md)
         # Use 1 int + 61 floats = 62 items = 248 bytes
         # This doesn't match the full 74-field catalog layout, but matches verified size
+        #
+        # Real layout (atrous.c:64-80): x[5][6], y[5][6] (5 channels × 6
+        # bands) + octaves + mix.  init() (atrous.c:608-620) sets
+        # x[c][k] = k/(BANDS-1) = k/5 → 0.0, 0.2, 0.4, 0.6, 0.8, 1.0 and
+        # y = 0 — matching the ramp below.  A flat x=0 would make
+        # ``mix < 1`` darken the image (output ≈ px × mix).
         pack_format="<i61f",
         fields=(
             "octaves",
-            *(f"x_{c}_{b}" for c in range(6) for b in range(5)),  # 6x5 = 30
-            *(f"y_{c}_{b}" for c in range(6) for b in range(5)),  # 6x5 = 30
+            *(f"x_{c}_{b}" for c in range(5) for b in range(6)),  # 5x6 = 30
+            *(f"y_{c}_{b}" for c in range(5) for b in range(6)),  # 5x6 = 30
             "mix",
         ),
         defaults={
             "octaves": 3,
-            **{f"x_{c}_{b}": 0.0 for c in range(6) for b in range(5)},
-            **{f"y_{c}_{b}": 0.0 for c in range(6) for b in range(5)},
+            **{f"x_{c}_{b}": b / 5.0 for c in range(5) for b in range(6)},
+            **{f"y_{c}_{b}": 0.0 for c in range(5) for b in range(6)},
             "mix": 1.0,
         },
         ranges={
             "octaves": (1, 6),
-            **{f"x_{c}_{b}": (-2.0, 2.0) for c in range(6) for b in range(5)},
-            **{f"y_{c}_{b}": (-2.0, 2.0) for c in range(6) for b in range(5)},
+            **{f"x_{c}_{b}": (-2.0, 2.0) for c in range(5) for b in range(6)},
+            **{f"y_{c}_{b}": (-2.0, 2.0) for c in range(5) for b in range(6)},
             "mix": (-2.0, 2.0),
         },
         size_bytes=248,  # Verified from blob_size_calibration.md
-        blendop_cst=4,  # RGB_DISPLAY (atrous is display-referred)
+        blendop_cst=2,  # LAB (atrous works in Lab)
     ),
     "bilat": IOPRegistry(
         operation="bilat",
@@ -284,7 +299,7 @@ _VERIFIED_IOPS = {
             "midtone": (0.001, 1.0),            # midtone range
         },
         size_bytes=20,    # Verified from blob_size_calibration.md + checked against real .dtstyle
-        blendop_cst=4,    # RGB_DISPLAY (bilat works in LAB, display-referred)
+        blendop_cst=2,    # LAB (bilat works in Lab)
     ),
     "basecurve": IOPRegistry(
         operation="basecurve",
@@ -326,7 +341,7 @@ _VERIFIED_IOPS = {
             "preserve_colors": (0, 6),
         },
         size_bytes=520,   # Verified from real .dtstyle files
-        blendop_cst=2,     # RGB_SCENE (basecurve is scene-referred)
+        blendop_cst=3,  # RGB_DISPLAY (default for exposure per src/iop/exposure.c:324) (basecurve is scene-referred)
     ),
 }
 
@@ -341,27 +356,35 @@ _SIMPLE_IOPS = {
         defaults={"amount": 25.0},
         ranges={"amount": (0.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (vibrance works in Lab)
     ),
     "velvia": IOPRegistry(
         operation="velvia",
         version=2,
+        # Real struct (velvia.c:41-45): float strength ($DEFAULT 25.0,
+        # $MAX 100.0) + float bias ($DEFAULT 1.0, $MAX 1.0,
+        # "mid-tones bias").
         pack_format="<ff",
-        fields=("saturation", "strength"),
-        defaults={"saturation": 100.0, "strength": 100.0},
-        ranges={"saturation": (0.0, 200.0), "strength": (0.0, 100.0)},
+        fields=("strength", "bias"),
+        defaults={"strength": 25.0, "bias": 1.0},
+        ranges={"strength": (0.0, 100.0), "bias": (0.0, 1.0)},
         size_bytes=None,
         blendop_cst=4,
     ),
     "grain": IOPRegistry(
         operation="grain",
         version=2,
+        # Real struct (grain.c:62-70): stored ``scale`` is the UI value
+        # divided by GRAIN_SCALE_FACTOR = 213.2 (grain.c:44).  The UI
+        # default 1600 → 1600/213.2 ≈ 7.5047; UI range 20..6400 →
+        # ~0.0938..~30.02.  Using raw UI values here would produce
+        # grain ~213× too coarse.
         pack_format="<ifff",
         fields=("channel", "scale", "strength", "midtones_bias"),
-        defaults={"channel": 2, "scale": 1600.0, "strength": 25.0, "midtones_bias": 100.0},
-        ranges={"channel": (0, 3), "scale": (20.0, 6400.0), "strength": (0.0, 100.0), "midtones_bias": (0.0, 100.0)},
+        defaults={"channel": 2, "scale": 1600.0 / 213.2, "strength": 25.0, "midtones_bias": 100.0},
+        ranges={"channel": (0, 3), "scale": (20.0 / 213.2, 6400.0 / 213.2), "strength": (0.0, 100.0), "midtones_bias": (0.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (grain works in Lab)
     ),
     "colorcontrast": IOPRegistry(
         operation="colorcontrast",
@@ -371,7 +394,7 @@ _SIMPLE_IOPS = {
         defaults={"a_steepness": 1.0, "a_offset": 0.0, "b_steepness": 1.0, "b_offset": 0.0, "unbound": 1},
         ranges={"a_steepness": (0.0, 5.0), "a_offset": (-5.0, 5.0), "b_steepness": (0.0, 5.0), "b_offset": (-5.0, 5.0), "unbound": (0, 1)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colorcontrast works in Lab)
     ),
     "splittoning": IOPRegistry(
         operation="splittoning",
@@ -391,7 +414,7 @@ _SIMPLE_IOPS = {
         defaults={"size": 20.0, "threshold": 90.0, "strength": 25.0},
         ranges={"size": (0.0, 100.0), "threshold": (0.0, 100.0), "strength": (0.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (bloom works in Lab)
     ),
     "soften": IOPRegistry(
         operation="soften",
@@ -423,7 +446,7 @@ _SIMPLE_IOPS = {
         defaults={"mode": 0, "lift_r": 1.0, "lift_g": 1.0, "lift_b": 1.0, "gamma_r": 1.0, "gamma_g": 1.0, "gamma_b": 1.0, "gain_r": 1.0, "gain_g": 1.0, "gain_b": 1.0, "saturation": 1.0, "contrast": 1.0, "grey": 18.0, "saturation_out": 1.0},
         ranges={"mode": (0, 1), "lift_r": (0.0, 2.0), "lift_g": (0.0, 2.0), "lift_b": (0.0, 2.0), "gamma_r": (0.0, 2.0), "gamma_g": (0.0, 2.0), "gamma_b": (0.0, 2.0), "gain_r": (0.0, 2.0), "gain_g": (0.0, 2.0), "gain_b": (0.0, 2.0), "saturation": (0.0, 2.0), "contrast": (0.01, 1.99), "grey": (0.1, 100.0), "saturation_out": (0.0, 2.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colorbalance works in Lab)
     ),
     "shadhi": IOPRegistry(
         operation="shadhi",
@@ -434,7 +457,7 @@ _SIMPLE_IOPS = {
         defaults={"order": 0, "radius": 100.0, "shadows": 50.0, "whitepoint": 0.0, "highlights": -50.0, "reserved2": 0.0, "compress": 50.0, "shadows_ccorrect": 100.0, "highlights_ccorrect": 50.0, "flags": 1, "low_approximation": 0.000001, "shadhi_algo": 1},
         ranges={"order": (0, 1), "radius": (0.1, 500.0), "shadows": (-100.0, 100.0), "whitepoint": (-10.0, 10.0), "highlights": (-100.0, 100.0), "reserved2": (-100.0, 100.0), "compress": (0.0, 100.0), "shadows_ccorrect": (0.0, 100.0), "highlights_ccorrect": (0.0, 100.0), "flags": (0, 0xFFFFFFFF), "low_approximation": (0.0, 1.0), "shadhi_algo": (0, 1)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (shadhi works in Lab)
     ),
     "colorize": IOPRegistry(
         operation="colorize",
@@ -444,7 +467,7 @@ _SIMPLE_IOPS = {
         defaults={"hue": 0.0, "saturation": 0.5, "source_lightness_mix": 50.0, "lightness": 50.0, "version": 0},
         ranges={"hue": (0.0, 1.0), "saturation": (0.0, 1.0), "source_lightness_mix": (0.0, 100.0), "lightness": (0.0, 100.0), "version": (0, 2)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colorize works in Lab)
     ),
     "monochrome": IOPRegistry(
         operation="monochrome",
@@ -454,7 +477,7 @@ _SIMPLE_IOPS = {
         defaults={"a": 0.0, "b": 0.0, "size": 2.0, "highlights": 0.0},
         ranges={"a": (-2.0, 2.0), "b": (-2.0, 2.0), "size": (0.0, 10.0), "highlights": (0.0, 1.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (monochrome works in Lab)
     ),
     "colisa": IOPRegistry(
         operation="colisa",
@@ -464,7 +487,7 @@ _SIMPLE_IOPS = {
         defaults={"contrast": 0.0, "brightness": 0.0, "saturation": 0.0},
         ranges={"contrast": (-1.0, 1.0), "brightness": (-1.0, 1.0), "saturation": (-1.0, 1.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colisa works in Lab)
     ),
     "lowpass": IOPRegistry(
         operation="lowpass",
@@ -475,7 +498,7 @@ _SIMPLE_IOPS = {
         defaults={"order": 0, "radius": 10.0, "contrast": 1.0, "brightness": 0.0, "saturation": 1.0, "lowpass_algo": 0, "unbound": 1},
         ranges={"order": (0, 1), "radius": (0.1, 500.0), "contrast": (-3.0, 3.0), "brightness": (-3.0, 3.0), "saturation": (-3.0, 3.0), "lowpass_algo": (0, 1), "unbound": (0, 1)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (lowpass works in Lab)
     ),
     "sharpen": IOPRegistry(
         operation="sharpen",
@@ -485,7 +508,7 @@ _SIMPLE_IOPS = {
         defaults={"radius": 2.0, "amount": 0.5, "threshold": 0.5},
         ranges={"radius": (0.0, 99.0), "amount": (0.0, 2.0), "threshold": (0.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (sharpen works in Lab)
     ),
     "highpass": IOPRegistry(
         operation="highpass",
@@ -495,7 +518,7 @@ _SIMPLE_IOPS = {
         defaults={"sharpness": 50.0, "contrast": 50.0},
         ranges={"sharpness": (0.0, 100.0), "contrast": (0.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (highpass works in Lab)
     ),
     "levels": IOPRegistry(
         operation="levels",
@@ -506,7 +529,7 @@ _SIMPLE_IOPS = {
         defaults={"mode": 0, "black": 0.0, "gray": 50.0, "white": 100.0, "levels_r": 0.0, "levels_g": 0.0, "levels_b": 0.0},
         ranges={"mode": (0, 1), "black": (0.0, 100.0), "gray": (0.0, 100.0), "white": (0.0, 100.0), "levels_r": (-100.0, 100.0), "levels_g": (-100.0, 100.0), "levels_b": (-100.0, 100.0)},
         size_bytes=None,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (levels works in Lab)
     ),
 }
 
@@ -554,7 +577,7 @@ _CURVE_IOPS = {
             "curve_preset": ("identity", "inverted_s_strong"),
         },
         size_bytes=520,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colorzones/tonecurve work in Lab)
         is_curve_iop=True,
         curve_pack_size_override=520,
     ),
@@ -581,7 +604,7 @@ _CURVE_IOPS = {
             "curve_preset": ("identity", "inverted_s_strong"),
         },
         size_bytes=516,
-        blendop_cst=4,
+        blendop_cst=4,  # RGB_SCENE (rgbcurve is scene-referred)
         is_curve_iop=True,
         curve_pack_size_override=516,
     ),
@@ -611,7 +634,7 @@ _CURVE_IOPS = {
             "curve_preset": ("identity", "inverted_s_strong"),
         },
         size_bytes=520,
-        blendop_cst=4,
+        blendop_cst=2,  # LAB (colorzones/tonecurve work in Lab)
         is_curve_iop=True,
         curve_pack_size_override=520,
     ),
@@ -663,20 +686,30 @@ def pack_params(op: str, params: dict) -> bytes:
     # basecurve: cannot be packed from scratch (camera-specific curve data).
     if reg.pack_format == "<basecurve>":
         raise ValueError(
-            f"basecurve cannot be packed from scratch — it always comes "
-            f"from existing presets via op_params_override. "
-            f"To include basecurve, reference a preset blob."
+            "basecurve cannot be packed from scratch — it always comes "
+            "from existing presets via op_params_override. "
+            "To include basecurve, reference a preset blob."
         )
 
     # Merge defaults with provided params
     merged = {**reg.defaults, **params}
 
-    # Validate ranges
+    # Validate ranges.  Float bounds get a small float32-scale tolerance:
+    # values decoded from real preset blobs land a hair outside their
+    # declared minimum/maximum (e.g. filmicrgb latitude default 0.01 →
+    # 0.009999999776482582) and must survive a re-pack.  Integer bounds
+    # stay strict.
     for field, (min_val, max_val) in reg.ranges.items():
         val = merged.get(field)
-        if val is not None:
-            if not (min_val <= val <= max_val):
-                raise ValueError(f"{op}.{field}={val} out of range [{min_val}, {max_val}]")
+        if val is None:
+            continue
+        if isinstance(min_val, (int, float)) and not isinstance(min_val, bool):
+            tol = 1e-6 * max(1.0, abs(float(min_val)), abs(float(max_val)))
+            lo, hi = float(min_val) - tol, float(max_val) + tol
+        else:
+            lo, hi = min_val, max_val
+        if not (lo <= val <= hi):
+            raise ValueError(f"{op}.{field}={val} out of range [{min_val}, {max_val}]")
 
     # Build values in field order
     values = [merged[field] for field in reg.fields]
@@ -699,7 +732,8 @@ def _pack_curve_iop(reg: "IOPRegistry", params: dict) -> bytes:
         size from ``dtstylekit.curves``).
     """
     # Lazy import to avoid a hard dependency cycle
-    from dtstylekit.curves import apply_curve_template, curve_iop_size, REGISTRY as CURVE_REG
+    from dtstylekit.curves import REGISTRY as CURVE_REG
+    from dtstylekit.curves import apply_curve_template, curve_iop_size
 
     if "curve_preset" not in params:
         raise ValueError(
@@ -772,11 +806,17 @@ def unpack_params(op: str, blob: bytes) -> dict:
             "preserve_colors": preserve,
         }
 
-    if reg.size_bytes is not None and len(blob) != reg.size_bytes:
+    if reg.size_bytes is not None and len(blob) not in {reg.size_bytes, *reg.legacy_size_bytes}:
         raise ValueError(f"Blob size mismatch for {op}: expected {reg.size_bytes}, got {len(blob)}")
 
+    # Legacy blob (older module version shipped in official styles):
+    # unpack with the legacy format when one is registered.
+    if reg.legacy_pack_format is not None and len(blob) in reg.legacy_size_bytes:
+        values = struct.unpack(reg.legacy_pack_format, blob)
+        return dict(zip(reg.legacy_fields, values, strict=True))
+
     values = struct.unpack(reg.pack_format, blob)
-    return dict(zip(reg.fields, values))
+    return dict(zip(reg.fields, values, strict=True))
 
 
 def _unpack_curve_iop(reg: "IOPRegistry", blob: bytes) -> dict:
@@ -789,7 +829,9 @@ def _unpack_curve_iop(reg: "IOPRegistry", blob: bytes) -> dict:
     know which template was used to produce the blob.
     """
     from dtstylekit.curves import (
-        unpack_colorzones, unpack_rgbcurve, unpack_tonecurve,
+        unpack_colorzones,
+        unpack_rgbcurve,
+        unpack_tonecurve,
     )
     if reg.operation == "colorzones":
         params = unpack_colorzones(blob)
@@ -835,7 +877,7 @@ def verify_size(op: str, blob: bytes) -> bool:
         return False
     if reg.size_bytes is None:
         return True  # Can't verify, assume OK
-    return len(blob) == reg.size_bytes
+    return len(blob) == reg.size_bytes or len(blob) in reg.legacy_size_bytes
 
 
 def list_registered() -> list[str]:

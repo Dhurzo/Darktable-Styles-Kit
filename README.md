@@ -4,7 +4,7 @@ A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze p
 
 ## Overview
 
-This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The 534 presets in `data/styles/` provide a validated library of Darktable styles. The VLM (default: `qwen3-vl:8b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets, and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
+This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The 534 presets in `data/styles/` provide a validated library of Darktable styles. The VLM (default: `gemma3:12b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets, and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
 
 **Output:** Valid `.dtstyle` file + markdown report explaining the choices.
 
@@ -36,13 +36,13 @@ ollama serve  # starts the server (usually auto-starts after install)
 Pull the default vision model:
 
 ```bash
-ollama pull qwen3-vl:8b
+ollama pull gemma3:12b
 ```
 
 Verify it's working:
 
 ```bash
-ollama run qwen3-vl:8b "Describe this image" --image /path/to/a/photo.jpg
+ollama run gemma3:12b "Describe this image" --image /path/to/a/photo.jpg
 ```
 
 > Other compatible models: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB). Switch with `--model` when running dtstylekit.
@@ -64,7 +64,7 @@ pip install -e .[dev]
 ### Usage
 
 ```bash
-# Analyze an image and generate a style (uses default model: qwen3-vl:8b)
+# Analyze an image and generate a style (uses default model: gemma3:12b)
 dtstylekit generate path/to/photo.jpg -o my_style.dtstyle
 
 # Use a different VLM model
@@ -80,7 +80,38 @@ dtstylekit presets search "warm cinematic look"
 dtstylekit curves --help
 ```
 
-> **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `qwen3-vl:8b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
+> **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `gemma3:12b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
+
+### Supported darktable version
+
+The binary layouts (IOP struct versions, blendop version, `module` fields)
+are tightly coupled to a specific darktable build. This checkout targets
+the darktable master that contains `dtstylekit/` — if you update
+darktable, re-run the test suite first:
+
+```bash
+pytest tests/test_version_drift.py tests/test_real_presets.py
+```
+
+`test_version_drift.py` parses `DT_MODULE_INTROSPECTION` from
+`src/iop/*.c` of the enclosing checkout and fails when the registry drifts
+from the C sources (silently dropped modules are the classic symptom).
+`test_real_presets.py` re-verifies blob sizes against the official styles
+in `data/styles/`.
+
+### Visual smoke check
+
+Structural validation (XMP, blob sizes) proves a style *imports*, not
+that it *renders*. After generating a style, run:
+
+```bash
+python tools/visual_check.py --style generated_styles/my_style.dtstyle
+```
+
+It renders a deterministic synthetic image through `darktable-cli` with
+and without the style and fails on near-black/near-white/flat outputs.
+Requires `darktable-cli` on `PATH` (skipped automatically in tests when
+absent).
 
 ### Development
 
@@ -110,7 +141,7 @@ dtstylekit/
 └── data/presets/          # Symlink to 534 .dtstyle files (darktable style library)
 ```
 
-The default VLM is `qwen3-vl:8b` (override with `--model`). Preset library,
+The default VLM is `gemma3:12b` (override with `--model`). Preset library,
 `outputs/` (SQLite index + embeddings) and `generated_styles/` are resolved
 relative to the project root via `dtstylekit/paths.py` and can be overridden
 with the `DTSTYLEKIT_PRESETS_DIR` / `DTSTYLEKIT_OUTPUTS_DIR` environment

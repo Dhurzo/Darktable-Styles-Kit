@@ -8,19 +8,25 @@ import struct
 from .xmp_codec import encode_xmp, decode_xmp
 
 
-# Default blendop encoded strings (verified 420 bytes each)
-# blend_cst=4 (RGB_DISPLAY), blend_mode=24 (NORMAL2), opacity=100.0
-DEFAULT_BLENDOP_DISPLAY = "gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"
-
-# blend_cst=2 (RGB_SCENE), blend_mode=24 (NORMAL2), opacity=100.0
-DEFAULT_BLENDOP_SCENE = "gz10eJxjYGBgYAJiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dcF/IADRAG2yHQc="
-
-
 def _patch_field(encoded: str, offset: int, value: int | float, fmt: str) -> str:
     """Internal helper: decode, patch field at offset, re-encode."""
     blob = bytearray(decode_xmp(encoded))
     struct.pack_into(fmt, blob, offset, value)
     return encode_xmp(bytes(blob))
+
+
+# Base 420-byte blendop: blend_cst=4 (RGB_SCENE), blend_mode=24 (NORMAL2),
+# opacity=100.0.  Verified against the blendops stored in the official
+# darktable styles of this master (data/styles).
+_BASE_BLENDOP = "gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"
+
+# Default blendop encoded strings (verified 420 bytes each).
+# Color spaces per src/develop/blend.h of this darktable master:
+#   2 = DEVELOP_BLEND_CS_LAB, 3 = DEVELOP_BLEND_CS_RGB_DISPLAY,
+#   4 = DEVELOP_BLEND_CS_RGB_SCENE
+DEFAULT_BLENDOP_SCENE = _BASE_BLENDOP                                # blend_cst=4
+DEFAULT_BLENDOP_DISPLAY = _patch_field(_BASE_BLENDOP, 4, 3, '<i')    # blend_cst=3
+DEFAULT_BLENDOP_LAB = _patch_field(_BASE_BLENDOP, 4, 2, '<i')        # blend_cst=2
 
 
 def patch_opacity(encoded: str, opacity_pct: float) -> str:
@@ -43,27 +49,28 @@ def patch_blend_mode(encoded: str, mode: int) -> str:
 
 def patch_blend_cst(encoded: str, cst: int) -> str:
     """Patch blend_cst field at offset 4 (int32).
-    
-    Color space for blending:
-    - 2: DEVELOP_BLEND_CS_RGB_SCENE (scene-referred)
-    - 4: DEVELOP_BLEND_CS_RGB_DISPLAY (display-referred)
+
+    Color space for blending (per src/develop/blend.h of this master):
+    - 2: DEVELOP_BLEND_CS_LAB
+    - 3: DEVELOP_BLEND_CS_RGB_DISPLAY (display-referred)
+    - 4: DEVELOP_BLEND_CS_RGB_SCENE (scene-referred)
     """
     return _patch_field(encoded, 4, cst, '<i')
 
 
-def create_blendop(opacity: float = 100.0, mode: int = 24, cst: int = 4) -> str:
+def create_blendop(opacity: float = 100.0, mode: int = 24, cst: int = 3) -> str:
     """Create a blendop from the display template with custom values.
-    
+
     Args:
         opacity: Opacity percentage (0-100)
         mode: Blend mode (default 24 = NORMAL2)
-        cst: Color space (default 4 = RGB_DISPLAY)
-    
+        cst: Color space (default 3 = RGB_DISPLAY)
+
     Returns:
         Encoded blendop string
     """
     result = DEFAULT_BLENDOP_DISPLAY
-    if cst != 4:
+    if cst != 3:
         result = patch_blend_cst(result, cst)
     if mode != 24:
         result = patch_blend_mode(result, mode)
@@ -74,13 +81,13 @@ def create_blendop(opacity: float = 100.0, mode: int = 24, cst: int = 4) -> str:
 
 def create_blendop_scene(opacity: float = 100.0, mode: int = 24) -> str:
     """Create a blendop from the scene template with custom values.
-    
+
     Args:
         opacity: Opacity percentage (0-100)
         mode: Blend mode (default 24 = NORMAL2)
-    
+
     Returns:
-        Encoded blendop string with blend_cst=2 (RGB_SCENE)
+        Encoded blendop string with blend_cst=4 (RGB_SCENE)
     """
     result = DEFAULT_BLENDOP_SCENE
     if mode != 24:
@@ -116,6 +123,7 @@ def verify_blendop_size(encoded: str) -> bool:
 __all__ = [
     'DEFAULT_BLENDOP_DISPLAY',
     'DEFAULT_BLENDOP_SCENE',
+    'DEFAULT_BLENDOP_LAB',
     'patch_opacity',
     'patch_blend_mode',
     'patch_blend_cst',

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 import numpy as np
 
@@ -113,8 +114,18 @@ class PresetSearcher:
             Higher score = better match (we normalize BM25 distance to a similarity-like 0..1).
         """
         self.indexer.connect()  # Ensure connection
+        # FTS5 has no tolerance for query syntax it can't parse: hyphens
+        # ("low-key") are read as `column:term` minus-operators and raise
+        # "no such column", commas and other punctuation raise "syntax
+        # error".  Strip everything except word characters so descriptive
+        # direction strings (which can contain commas, quotes, colons, …)
+        # never crash the keyword search — the semantic branch still gets
+        # the raw query.
+        safe_query = re.sub(r"[^a-zA-Z0-9\s]", " ", query).strip()
+        if not safe_query:
+            return []
         # Over-fetch so we still hit `limit` after filtering camera profiles.
-        ranked = self.indexer.search_presets_fts_ranked(query, limit=max(limit * 3, limit))
+        ranked = self.indexer.search_presets_fts_ranked(safe_query, limit=max(limit * 3, limit))
 
         results = []
         for entry, rank in ranked:
@@ -237,9 +248,24 @@ class PresetSearcher:
                 SearchResult(preset=entry, score=combined_score, search_type="hybrid")
             )
 
-        # Sort by combined score and limit
+        # Sort by combined score (unfiltered) so we know the global ranking.
         combined.sort(key=lambda r: r.score, reverse=True)
-        return combined[:limit]
+
+        # Apply the category filter, but never return fewer than ``limit``
+        # results: if filtering excludes everything (e.g. a generic query
+        # whose nearest neighbours are all camera baseline profiles), top
+        # up with the best unfiltered candidates so the VLM always has
+        # something to choose from.
+        filtered = [r for r in combined if self._should_keep(r.preset)]
+        if len(filtered) < limit:
+            seen_ids = {r.preset.id for r in filtered}
+            for r in combined:
+                if r.preset.id not in seen_ids:
+                    filtered.append(r)
+                    seen_ids.add(r.preset.id)
+                    if len(filtered) >= limit:
+                        break
+        return filtered[:limit]
 
     def close(self) -> None:
         """Close database connections."""

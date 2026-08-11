@@ -61,7 +61,7 @@ class VLMRequest:
     """
 
     messages: list[dict[str, Any]]
-    model: str = "qwen3-vl:8b"
+    model: str = "gemma3:27b"
     temperature: float = 0.4
     options: dict[str, Any] = field(default_factory=dict)
     image_path: Path | None = None

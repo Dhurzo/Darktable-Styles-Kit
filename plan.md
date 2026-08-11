@@ -11,7 +11,7 @@ This project pivots from "LLM generates binary blobs" to "VLM selects/composes v
 
 **Runtime**: Python 3.11+  
 **Language**: Python (type-hinted, dataclasses, pathlib)  
-**VLM Runtime**: Ollama (local) — default `qwen3-vl:8b`; also `llava:7b`, `gemma3:4b`, `llama3.2-vision:11b` (override with `--model`)  
+**VLM Runtime**: Ollama (local) — default `gemma3:12b`; also `llava:7b`, `gemma3:4b`, `llama3.2-vision:11b` (override with `--model`)  
 **Database**: SQLite (preset index + semantic embeddings)  
 **Key Libraries**: Pillow, numpy, exifread, ollama (Python client), sqlite3, xml.etree, struct, zlib, base64, sentence-transformers (for embeddings)  
 **Folder Structure**:  

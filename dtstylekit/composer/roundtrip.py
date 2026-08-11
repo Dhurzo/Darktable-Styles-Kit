@@ -120,7 +120,7 @@ def validate_plugin_blobs(dtstyle_path: Path) -> list[str]:
 
             reg = IOP_REGISTRY.get(operation)
             if reg and reg.size_bytes is not None:
-                if len(blob) != reg.size_bytes:
+                if not verify_size(operation, blob):
                     errors.append(
                         f"{operation}: blob size {len(blob)} != "
                         f"expected {reg.size_bytes}"

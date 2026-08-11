@@ -172,14 +172,12 @@ class TestVerifiedIopSizeMatchesDarktable:
         if not matching:
             pytest.skip(f"no real presets actually use {op_name}")
 
-        expected = reg.size_bytes if op_name not in ("colorzones", "rgbcurve", "tonecurve") \
-            else curve_iop_size(op_name)
-
         for entry in matching:
             actual = len(entry["op_params_blob"])
-            assert actual == expected, (
+            ok_sizes = {reg.size_bytes} | set(reg.legacy_size_bytes)
+            assert actual in ok_sizes, (
                 f"{op_name} in {entry['file_name']}: actual={actual} "
-                f"bytes, expected={expected}"
+                f"bytes, expected one of {sorted(ok_sizes)}"
             )
 
     @pytest.mark.parametrize(
@@ -272,7 +270,9 @@ class TestStructFormatMatchesReality:
         unpacked = unpack_params(
             "exposure", matching[0]["op_params_blob"]
         )
-        assert len(unpacked) == len(reg.fields)
+        # v7 blobs have 7 fields; v6 legacy blobs (shipped in official
+        # styles) have 6.
+        assert len(unpacked) in (len(reg.fields), len(reg.legacy_fields))
 
 
 # ---------------------------------------------------------------------------

@@ -84,7 +84,7 @@ class TestPackParams:
     def test_pack_exposure_defaults(self):
         """Pack exposure with defaults produces correct size."""
         blob = pack_params("exposure", {})
-        assert len(blob) == 24
+        assert len(blob) == 28
         assert verify_size("exposure", blob)
     
     def test_pack_exposure_custom(self):
@@ -97,7 +97,7 @@ class TestPackParams:
             "deflicker_target_level": -2.0,
             "compensate_exposure_bias": 1,
         })
-        assert len(blob) == 24
+        assert len(blob) == 28
         assert verify_size("exposure", blob)
     
     def test_pack_filmicrgb_defaults(self):
@@ -376,7 +376,7 @@ class TestRoundTrip:
     def test_roundtrip_exposure_specific(self):
         """Specific test for exposure."""
         blob = pack_params("exposure", {"exposure": 1.5, "black": 0.1})
-        assert len(blob) == 24
+        assert len(blob) == 28
         
         unpacked = unpack_params("exposure", blob)
         assert abs(unpacked["exposure"] - 1.5) < 1e-6
@@ -444,20 +444,21 @@ class TestRegistryStructure:
             assert reg.blendop_cst in (2, 4), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
     
     def test_verified_iops_blendop_cst(self):
-        """Verified IOPs should have correct blendop_cst."""
-        # Scene-referred (blendop_cst=2)
-        for op in ["filmicrgb", "colorbalancergb", "sigmoid"]:
+        """Verified IOPs should have correct blendop_cst (per blend.h:
+        2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE)."""
+        # Scene-referred RGB (blendop_cst=4)
+        for op in ["filmicrgb", "colorbalancergb", "sigmoid", "exposure"]:
             reg = get_registry(op)
-            assert reg.blendop_cst == 2, f"{op} should be scene-referred (2)"
+            assert reg.blendop_cst == 4, f"{op} should be scene-referred (4)"
         
-        # Display-referred (blendop_cst=4)
-        for op in ["exposure", "atrous"]:
+        # Lab-based (blendop_cst=2)
+        for op in ["atrous", "bilat"]:
             reg = get_registry(op)
-            assert reg.blendop_cst == 4, f"{op} should be display-referred (4)"
+            assert reg.blendop_cst == 2, f"{op} should be Lab-based (2)"
     
     def test_version_numbers(self):
         """Version numbers should match known versions."""
-        assert get_registry("exposure").version == 6
+        assert get_registry("exposure").version == 7
         assert get_registry("filmicrgb").version == 6
         assert get_registry("colorbalancergb").version == 5
         assert get_registry("sigmoid").version == 3

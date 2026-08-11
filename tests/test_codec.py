@@ -8,6 +8,7 @@ from dtstylekit.codec import (
     verify_roundtrip,
     DEFAULT_BLENDOP_DISPLAY,
     DEFAULT_BLENDOP_SCENE,
+    DEFAULT_BLENDOP_LAB,
     patch_opacity,
     patch_blend_mode,
     patch_blend_cst,
@@ -108,11 +109,19 @@ class TestBlendop:
         """Default blendop constants should be defined."""
         assert DEFAULT_BLENDOP_DISPLAY.startswith("gz")
         assert DEFAULT_BLENDOP_SCENE.startswith("gz")
+        assert DEFAULT_BLENDOP_LAB.startswith("gz")
     
     def test_default_sizes(self):
         """Default blendops should decode to 420 bytes."""
         assert verify_blendop_size(DEFAULT_BLENDOP_DISPLAY)
         assert verify_blendop_size(DEFAULT_BLENDOP_SCENE)
+        assert verify_blendop_size(DEFAULT_BLENDOP_LAB)
+
+    def test_default_color_spaces(self):
+        """Color spaces per blend.h: 2=LAB, 3=RGB_DISPLAY, 4=RGB_SCENE."""
+        assert get_blend_cst(DEFAULT_BLENDOP_DISPLAY) == 3
+        assert get_blend_cst(DEFAULT_BLENDOP_SCENE) == 4
+        assert get_blend_cst(DEFAULT_BLENDOP_LAB) == 2
     
     def test_patch_opacity(self):
         """Patch opacity at offset 16 (float32, 0-100%)."""
@@ -143,13 +152,13 @@ class TestBlendop:
     
     def test_patch_blend_cst(self):
         """Patch blend_cst at offset 4 (int32)."""
-        assert get_blend_cst(DEFAULT_BLENDOP_DISPLAY) == 4
+        assert get_blend_cst(DEFAULT_BLENDOP_DISPLAY) == 3
         
         patched = patch_blend_cst(DEFAULT_BLENDOP_DISPLAY, 2)
         assert get_blend_cst(patched) == 2
         
-        patched = patch_blend_cst(DEFAULT_BLENDOP_SCENE, 4)
-        assert get_blend_cst(patched) == 4
+        patched = patch_blend_cst(DEFAULT_BLENDOP_SCENE, 3)
+        assert get_blend_cst(patched) == 3
     
     def test_create_blendop_display(self):
         """Create custom blendop from display template."""
@@ -157,7 +166,7 @@ class TestBlendop:
         blendop = create_blendop()
         assert get_opacity(blendop) == 100.0
         assert get_blend_mode(blendop) == 24
-        assert get_blend_cst(blendop) == 4
+        assert get_blend_cst(blendop) == 3
         
         # Custom opacity
         blendop = create_blendop(opacity=50.0)
@@ -180,14 +189,14 @@ class TestBlendop:
     def test_create_blendop_scene(self):
         """Create custom blendop from scene template."""
         blendop = create_blendop_scene()
-        assert get_blend_cst(blendop) == 2
+        assert get_blend_cst(blendop) == 4
         assert get_opacity(blendop) == 100.0
         assert get_blend_mode(blendop) == 24
         
         blendop = create_blendop_scene(opacity=25.0, mode=5)
         assert get_opacity(blendop) == 25.0
         assert get_blend_mode(blendop) == 5
-        assert get_blend_cst(blendop) == 2
+        assert get_blend_cst(blendop) == 4
     
     def test_patch_order_independence(self):
         """Patching in different orders should give same result."""

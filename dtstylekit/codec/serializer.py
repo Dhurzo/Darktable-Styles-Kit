@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 from .xmp_codec import encode_xmp
-from .blendop import DEFAULT_BLENDOP_DISPLAY, DEFAULT_BLENDOP_SCENE
+from .blendop import DEFAULT_BLENDOP_DISPLAY, DEFAULT_BLENDOP_SCENE, DEFAULT_BLENDOP_LAB
 from .iop_registry import get_registry, pack_params
 
 
@@ -63,9 +63,12 @@ def encode_plugin(plugin_dict: dict) -> dict:
     if blendop_override:
         blendop_encoded = blendop_override
     else:
-        # Use appropriate default based on blendop_cst
-        if blendop_cst == 2:
+        # Use appropriate default based on blendop_cst (per blend.h of
+        # this master: 2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE).
+        if blendop_cst == 4:
             blendop_encoded = DEFAULT_BLENDOP_SCENE
+        elif blendop_cst == 2:
+            blendop_encoded = DEFAULT_BLENDOP_LAB
         else:
             blendop_encoded = DEFAULT_BLENDOP_DISPLAY
     

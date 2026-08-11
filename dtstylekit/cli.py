@@ -128,7 +128,7 @@ def _load_selected_presets(
             indexer.close()
 
 
-def _resolve_via_index(indexer, name: str) -> "Path | None":
+def _resolve_via_index(indexer, name: str) -> Path | None:
     """Try to resolve a preset name to a file path via the SQLite index.
 
     Matches the name against (a) the basename of the stored file_path
@@ -162,7 +162,7 @@ def _resolve_via_index(indexer, name: str) -> "Path | None":
     return None
 
 
-def _search_preset_dirs(name: str) -> "Path | None":
+def _search_preset_dirs(name: str) -> Path | None:
     """Search known preset directories for a file by name (fallback)."""
     from pathlib import Path
 
@@ -207,20 +207,61 @@ def cmd_generate(args) -> int:
 
     searcher = PresetSearcher(db_path, emb_path)
 
-    spec, vlm_report, vlm_warnings, analysis = generate_style_spec(
-        image_path=args.image,
-        direction=args.direction,
-        searcher=searcher,
-        analyzer=analyze_image,
-        registry=IOP_REGISTRY,
-        model=args.model,
-    )
+    # Expand glob patterns in --references (e.g. '/path/refs/*.jpeg').
+    import glob as _glob
+
+    references: list[Path] = []
+    for ref in args.references or []:
+        if any(c in ref for c in "*?["):
+            references.extend(Path(p) for p in sorted(_glob.glob(ref, recursive=True)))
+        else:
+            references.append(Path(ref).expanduser())
+    references = [p for p in references if p.is_file()]
+    if args.references and not references:
+        logger.warning("No reference image files matched: %s", args.references)
+
+    try:
+        spec, vlm_report, vlm_warnings, analysis = generate_style_spec(
+            image_path=args.image,
+            direction=args.direction,
+            searcher=searcher,
+            analyzer=analyze_image,
+            registry=IOP_REGISTRY,
+            model=args.model,
+            references=references,
+            refine_iterations=args.refine_iterations,
+            refine_raw_path=args.refine_raw,
+        )
+    except Exception as exc:
+        logger.error("Style spec generation failed: %s", exc)
+        print(f"ERROR: Style spec generation failed: {exc}", file=sys.stderr)
+        return 1
 
     # Accumulate all warnings in one place
     all_warnings: list[str] = list(vlm_warnings)
 
     # Load selected presets (with proper error accumulation)
     selected_presets = _load_selected_presets(spec, all_warnings)
+
+    # Guard against empty styles: writing a .dtstyle with neither presets
+    # nor adjustments produces a useless file that renders identical to
+    # the baseline (visual_check.py reports "no visible effect").  Fail
+    # loudly instead of silently shipping a no-op style.  We accept a
+    # style with adjustments but no presets (the composer emits only the
+    # scalar-adjusted modules) — what we reject is "absolutely nothing".
+    if not selected_presets and not getattr(spec, "plugins", None):
+        msg = (
+            "Cannot generate a style: the VLM returned no selected presets "
+            "and no scalar adjustments. Re-run with a different --model or "
+            "provide --references that define the target aesthetic."
+        )
+        logger.error(msg)
+        print(f"ERROR: {msg}", file=sys.stderr)
+        if all_warnings:
+            print("Warnings:", file=sys.stderr)
+            for w in all_warnings:
+                print(f"  - {w}", file=sys.stderr)
+        return 1
 
     # Generate .dtstyle + report
     output_dir = Path(args.output) if args.output else Path("./generated_styles")
@@ -235,6 +276,35 @@ def cmd_generate(args) -> int:
         logger.error("Style generation failed: %s", exc)
         print(f"ERROR: Style generation failed: {exc}", file=sys.stderr)
         return 1
+
+    # Post-write guard: if the generated file has no enabled plugins (all
+    # adjustments were silently skipped by the merger — every blob
+    # failed to re-pack), refuse to call the result a style.  This catches
+    # the "styled == baseline" symptom that visual_check reports as
+    # identical-mean/identical-std.
+    try:
+        import xml.etree.ElementTree as _ET
+
+        root = _ET.parse(dtstyle_path).getroot()
+        enabled_plugins = [
+            p for p in root.findall("style/plugin")
+            if (p.findtext("enabled", "1") or "1") == "1"
+        ]
+        if not enabled_plugins:
+            msg = (
+                "Generated style has no enabled plugins — every adjustment "
+                "was silently dropped by the composer (preset blobs could "
+                "not be re-packed). Refusing to ship a no-op style."
+            )
+            logger.error(msg)
+            print(f"ERROR: {msg}", file=sys.stderr)
+            try:
+                dtstyle_path.unlink()
+            except OSError:
+                pass
+            return 1
+    except Exception as exc:  # noqa: BLE001 — post-check is best-effort
+        logger.warning("Post-write style check failed: %s", exc)
 
     try:
         generate_report(spec, selected_presets, analysis, vlm_report, report_path)
@@ -256,6 +326,17 @@ def cmd_generate(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
+    # Configure logging for *every* entry point (installed ``dtstylekit``
+    # script and ``python -m dtstylekit.cli``).  Without this, the
+    # orchestrator's progress logs are silent and a slow VLM call looks
+    # like a hang.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+
     parser = argparse.ArgumentParser(
         prog="dtstylekit",
         description="AI-powered Darktable style generator",
@@ -276,13 +357,33 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument(
         "--model",
         default=None,
-        help="VLM model (default: qwen3-vl:8b)",
+        help="VLM model (default: gemma3:27b)",
     )
     gen.add_argument(
         "--output",
         "-o",
         default=None,
         help="Output directory (default: ./generated_styles)",
+    )
+    gen.add_argument(
+        "--references",
+        nargs="+",
+        default=None,
+        help="Reference-look images (glob accepted) the VLM derives the "
+        "target aesthetic from, e.g. '/path/refs/*.jpeg'",
+    )
+    gen.add_argument(
+        "--refine-iterations",
+        type=int,
+        default=0,
+        help="Enable iterative generate→render→eval refinement (default: 0 = off). "
+             "Requires --refine-raw. Each iteration re-prompts VLM with visual feedback.",
+    )
+    gen.add_argument(
+        "--refine-raw",
+        default=None,
+        help="RAW file path for test renders during iterative refinement. "
+             "Required if --refine-iterations > 0.",
     )
 
     # analyze subcommand (alias for generate)
@@ -299,13 +400,20 @@ def main(argv: list[str] | None = None) -> int:
     ana.add_argument(
         "--model",
         default=None,
-        help="VLM model (default: qwen3-vl:8b)",
+        help="VLM model (default: gemma3:27b)",
     )
     ana.add_argument(
         "--output",
         "-o",
         default=None,
         help="Output directory (default: ./generated_styles)",
+    )
+    ana.add_argument(
+        "--references",
+        nargs="+",
+        default=None,
+        help="Reference-look images (glob accepted) the VLM derives the "
+        "target aesthetic from, e.g. '/path/refs/*.jpeg'",
     )
 
     # preset subcommand

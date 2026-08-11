@@ -132,6 +132,49 @@ def validate_style(
 
             clamped_params[fld] = num_val
 
+        # ---- Semantic guard: colorbalancergb color tints ----------------
+        # The "global" tab is an ADDITIVE RGB offset (commit_params in
+        # src/iop/colorbalancergb.c): RGB += offset.  With global_C>0 and
+        # global_H=0 (hue 0° = red) the whole image is tinted red — a
+        # classic VLM mistake.  Neutralize the chroma when the hue is
+        # missing/neutral instead of rendering a red-tinted image.
+        #
+        # We also guard shadows/midtones/highlights: when H≈0 the grading
+        # tint is RED-ish (Yrg 0° = conventional -30°, a red/orange).  If
+        # the VLM set H=0 (neutral intent) but left C>0, the result is an
+        # unintended warm/red tint.  Force C to 0 in that case so the
+        # target photo's original colors are respected.
+        if plg.operation == "colorbalancergb":
+            _neutral_hue = lambda h: abs(float(h or 0.0)) < 1e-3 or float(h or 0.0) > 359.999
+            # Global additive offset (most dangerous - tints EVERY pixel).
+            gc = float(clamped_params.get("global_C") or 0.0)
+            gh = float(clamped_params.get("global_H") or 0.0)
+            if gc > 0.0 and _neutral_hue(gh):
+                if "global_C" in plg.params:
+                    warnings.append(
+                        "colorbalancergb.global_C>0 with global_H≈0 tints the "
+                        "whole image RED (additive offset, hue 0°=red) — "
+                        "global_C forced to 0.0"
+                    )
+                clamped_params["global_C"] = 0.0
+            # Shadows / midtones / highlights: neutral hue + chroma = tint.
+            for zone in ("shadows", "midtones", "highlights"):
+                c_key = f"{zone}_C"
+                h_key = f"{zone}_H"
+                cz = float(clamped_params.get(c_key) or 0.0)
+                hz = float(clamped_params.get(h_key) or 0.0)
+                # Treat hue ≈ 0 or ≈ 360 as "neutral intent" (no grading).
+                # Also catch tiny non-zero hues (VLM noise around 0).
+                if cz > 0.0 and _neutral_hue(hz):
+                    if c_key in plg.params:
+                        warnings.append(
+                            f"colorbalancergb.{c_key}>0 with {h_key}≈0 tints "
+                            f"{zone} red/warm (Yrg hue 0° = conventional -30°). "
+                            f"For neutral grading (respect target colors) "
+                            f"{c_key} forced to 0.0"
+                        )
+                    clamped_params[c_key] = 0.0
+
         validated_plugins.append(
             Plugin(
                 operation=plg.operation,

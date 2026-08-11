@@ -25,7 +25,7 @@ def add_vlm_parser(subparsers: argparse._SubParsersAction) -> None:
     gen.add_argument(
         "--model",
         default=None,
-        help="VLM model (default: qwen3-vl:8b)",
+        help="VLM model (default: gemma3:27b)",
     )
     gen.add_argument(
         "--output",

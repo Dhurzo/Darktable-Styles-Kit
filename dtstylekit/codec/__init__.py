@@ -8,6 +8,7 @@ from .xmp_codec import (
 from .blendop import (
     DEFAULT_BLENDOP_DISPLAY,
     DEFAULT_BLENDOP_SCENE,
+    DEFAULT_BLENDOP_LAB,
     patch_opacity,
     patch_blend_mode,
     patch_blend_cst,
@@ -43,6 +44,7 @@ __all__ = [
     # blendop
     "DEFAULT_BLENDOP_DISPLAY",
     "DEFAULT_BLENDOP_SCENE",
+    "DEFAULT_BLENDOP_LAB",
     "patch_opacity",
     "patch_blend_mode",
     "patch_blend_cst",

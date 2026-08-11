@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -19,25 +20,33 @@ class VLMClient:
 
     Args:
         host: Ollama API endpoint (default: localhost:11434).
-        default_model: Default VLM model (e.g., 'gemma3:4b', 'llava:7b').
+        default_model: Default VLM model (e.g., 'gemma3:12b', 'llava:7b').
         timeout: Request timeout in seconds.
         max_retries: Number of retries on transient errors.
     """
 
     def __init__(
         self,
-        host: str = "http://localhost:11434",
-        default_model: str = "qwen3-vl:8b",
-        timeout: float = 120.0,
-        max_retries: int = 2,
+        host: str | None = None,
+        default_model: str = "gemma3:27b",
+        timeout: float = 3600.0,
+        max_retries: int = 1,
     ) -> None:
-        self.host = host
+        # Allow overriding the Ollama endpoint via OLLAMA_HOST (e.g. to
+        # point at a user-run server on a non-default port).  An explicit
+        # host argument always wins.
+        #
+        # ``timeout`` defaults to 1 hour: on CPU-only machines a single
+        # gemma3:12b generation routinely takes 10-30 minutes, and the
+        # old 300 s default made the client time out mid-generation,
+        # retry from scratch, and never make progress.
+        self.host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.default_model = default_model
         self.timeout = timeout
         self.max_retries = max_retries
         if ollama is not None:
             try:
-                self._client = ollama.Client(host=host)
+                self._client = ollama.Client(host=self.host, timeout=self.timeout)
             except Exception as e:
                 logger.warning("Ollama client init failed: %s", e)
                 self._client = None
@@ -62,14 +71,14 @@ class VLMClient:
             temperature: Sampling temperature (0.0-1.0).
             max_tokens: Maximum output tokens (Ollama ``num_predict``).
             num_ctx: Context window size in tokens.  Ollama defaults to
-                4096 for ``qwen3-vl:8b`` which is too small for our
+                4096 for ``gemma3:12b`` which is too small for our
                 prompt (image analysis + candidate presets + IOP schema
                 easily exceeds 4k tokens).  8192 leaves headroom.
             think: Whether to use the model's thinking mode.  ``True``
-                (default for qwen3-vl:8b) lets the model do its
+                (default for gemma3:12b) lets the model do its
                 chain-of-thought into ``message.thinking`` and write
                 the FINAL answer into ``message.content``.  Empirically
-                ``think=False`` makes qwen3-vl put everything into the
+                ``think=False`` makes gemma3 put everything into the
                 ``thinking`` field and leave ``content`` empty (the
                 model is hard-wired to think first).  Pass ``False`` for
                 non-thinking models, or one of
@@ -87,7 +96,7 @@ class VLMClient:
         model_name = model or self.default_model
         if self._client is None and ollama is not None:
             try:
-                self._client = ollama.Client(host=self.host)
+                self._client = ollama.Client(host=self.host, timeout=self.timeout)
             except Exception as e:
                 raise RuntimeError(f"Ollama client unavailable: {e}") from e
 
@@ -110,7 +119,7 @@ class VLMClient:
                     resp = self._client.chat(**kwargs)
                     msg = resp.get("message", {}) or {}
                     content = msg.get("content") or ""
-                    # qwen3-vl:8b sometimes routes the entire answer into
+                    # gemma3:12b sometimes routes the entire answer into
                     # ``thinking`` and leaves ``content`` empty even with
                     # ``think=True``.  When that happens fall back to the
                     # thinking field so the downstream parser still sees a

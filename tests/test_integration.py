@@ -10,9 +10,6 @@ The VLM is mocked to avoid requiring Ollama.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from dtstylekit.codec.iop_registry import pack_params
 from dtstylekit.codec.xmp_codec import encode_xmp
@@ -25,7 +22,6 @@ from dtstylekit.composer.roundtrip import (
 )
 from dtstylekit.presets.models import PluginRef, Preset
 from dtstylekit.vlm.models import Plugin, StyleSpec
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,17 +156,30 @@ class TestE2EGenerateAndValidate:
         xml_errors = validate_xml_structure(output)
         assert xml_errors == [], f"XML errors: {xml_errors}"
 
-    def test_with_adjustments(self, tmp_path: Path) -> None:
-        """Merge preset + scalar adjustments and validate."""
-        preset = _make_preset_with_real_blob()
+    def test_with_adjustments(self) -> None:
+        """Merge preset + scalar adjustments and validate.
+
+        Uses exposure (verified IOP): the adjustment is merged onto the
+        preset's own blob values, not on registry defaults.
+        """
+        preset = _make_preset_with_real_blob(
+            operation="exposure",
+            params={
+                "exposure": 0.5, "black": 0.0, "mode": 0,
+                "deflicker_percentile": 50.0,
+                "deflicker_target_level": -4.0,
+                "compensate_exposure_bias": 0,
+            },
+        )
         merged = merge_presets(
             [preset],
-            adjustments={"vibrance": {"amount": 80.0}},
+            adjustments={"exposure": {"exposure": 0.8}},
         )
         assert len(merged) >= 1
-        # Verify the adjustment was applied
-        vib = next(p for p in merged if p.operation == "vibrance")
-        assert vib.params == {"amount": 80.0}
+        # Verify the adjustment was applied on top of the preset values
+        exp = next(p for p in merged if p.operation == "exposure")
+        assert exp.params["exposure"] == 0.8
+        assert exp.params["black"] == 0.0  # preserved from the preset blob
 
     def test_iop_list_consistency_check(self, tmp_path: Path) -> None:
         """Validate detects iop_list / style mismatch."""
@@ -220,8 +229,8 @@ class TestE2EGenerateAndValidate:
             op = plugin.findtext("operation")
             op_params_enc = plugin.findtext("op_params", "")
             if op_params_enc and op in ("exposure", "vibrance"):
-                from dtstylekit.codec.xmp_codec import decode_xmp
                 from dtstylekit.codec.iop_registry import unpack_params
+                from dtstylekit.codec.xmp_codec import decode_xmp
                 blob = decode_xmp(op_params_enc)
                 params = unpack_params(op, blob)
                 assert isinstance(params, dict)
@@ -238,7 +247,7 @@ class TestE2EFullPipelineMocked:
 
     def test_pipeline_produces_valid_style(self, tmp_path: Path) -> None:
         """Analyze image → (mocked VLM) → .dtstyle → validate."""
-        from dtstylekit.analyzer.models import ImageAnalysis, LuminanceStats, HistogramStats
+        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
         from dtstylekit.composer.report import generate_report
 
         # -- Analyze (synthetic) --

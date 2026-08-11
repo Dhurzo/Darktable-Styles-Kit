@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
 
 from dtstylekit.codec.iop_registry import IOP_REGISTRY
+from dtstylekit.presets.models import PluginRef, Preset
 from dtstylekit.vlm.models import Plugin, StyleSpec
 from dtstylekit.vlm.parser import parse_response
 from dtstylekit.vlm.validator import validate_style
-
 
 MOCK_VLM_RESPONSE_OK = """Here's my analysis:
 
@@ -132,7 +131,6 @@ class TestSchemaRenderer:
 
 class TestPromptBuilder:
     def test_build_prompt_messages(self) -> None:
-        from unittest.mock import MagicMock
         from dtstylekit.vlm.prompt_builder import build_prompt
 
         analysis = MagicMock()
@@ -144,3 +142,106 @@ class TestPromptBuilder:
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
         assert "warm cinematic" in messages[1]["content"]
+
+    def test_dark_image_gets_exposure_guard(self) -> None:
+        """A dark image must trigger the EXPOSURE GUARD in the prompt."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.15}}
+        analysis.luminance.mean = 0.15
+
+        messages = build_prompt(analysis, [], "night", iop_schema="### filmicrgb")
+        content = messages[1]["content"]
+        assert "[EXPOSURE GUARD]" in content
+        assert "DARK" in content
+        assert "'day for twilight'" in content
+
+    def test_bright_image_gets_exposure_guard(self) -> None:
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.85}}
+        analysis.luminance.mean = 0.85
+
+        messages = build_prompt(analysis, [], "sunny", iop_schema="### filmicrgb")
+        content = messages[1]["content"]
+        assert "[EXPOSURE GUARD]" in content
+        assert "BRIGHT" in content
+
+    def test_mid_image_no_guard(self) -> None:
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.5}}
+        analysis.luminance.mean = 0.5
+
+        messages = build_prompt(analysis, [], "neutral", iop_schema="### filmicrgb")
+        assert "[EXPOSURE GUARD]" not in messages[1]["content"]
+
+
+class TestPresetExposureFilter:
+    """Luminance-suitability filter for candidate presets."""
+
+    def _preset(self, plugins: list) -> Preset:
+        from pathlib import Path
+
+        return Preset(
+            name="test", description="", iop_list="", plugins=plugins,
+            file_path=Path("/tmp/x.dtstyle"), xml_hash="h",
+        )
+
+    def _exposure_ref(self, ev: float, enabled: int = 1) -> PluginRef:
+        from dtstylekit.codec.iop_registry import pack_params
+        from dtstylekit.codec.xmp_codec import encode_xmp
+
+        blob = pack_params("exposure", {"exposure": ev})
+        return PluginRef(
+            operation="exposure", enabled=enabled, multi_name="",
+            multi_priority=0, num=0, module=7, op_params=encode_xmp(blob),
+            blendop_params="", blendop_version=13, multi_name_hand_edited=0,
+        )
+
+    def test_net_ev_summed_only_enabled(self) -> None:
+        from dtstylekit.vlm.orchestrator import _preset_net_ev
+
+        p = self._preset([self._exposure_ref(-1.0), self._exposure_ref(0.5, enabled=0)])
+        assert _preset_net_ev(p) == -1.0
+
+    def test_darkening_preset_rejected_for_dark_image(self) -> None:
+        from dtstylekit.vlm.orchestrator import _preset_ev_fits
+
+        p = self._preset([self._exposure_ref(-1.0)])
+        assert _preset_ev_fits(p, 0.15) is False   # dark image + -1 EV → crushed
+        assert _preset_ev_fits(p, 0.5) is True     # mid image → fine
+        assert _preset_ev_fits(p, 0.85) is True    # bright image → fine
+
+    def test_brightening_preset_rejected_for_bright_image(self) -> None:
+        from dtstylekit.vlm.orchestrator import _preset_ev_fits
+
+        p = self._preset([self._exposure_ref(0.8)])
+        assert _preset_ev_fits(p, 0.85) is False
+        assert _preset_ev_fits(p, 0.15) is True
+
+    def test_preset_without_exposure_always_fits(self) -> None:
+        from dtstylekit.vlm.orchestrator import _preset_ev_fits
+
+        p = self._preset([])
+        assert _preset_ev_fits(p, 0.1) is True
+        assert _preset_ev_fits(p, 0.9) is True
+
+    def test_dehaze_preset_rejected_for_dark_image_by_name(self) -> None:
+        """hazeremoval is not in the IOP registry (no blob decode), but
+        dehaze crushes dark images — reject by name for mean_lum < 0.3."""
+        from pathlib import Path
+
+        from dtstylekit.vlm.orchestrator import _preset_ev_fits
+
+        p = Preset(
+            name="dehaze strong luminance only", description="",
+            iop_list="", plugins=[], file_path=Path("/tmp/x.dtstyle"),
+            xml_hash="h",
+        )
+        assert _preset_ev_fits(p, 0.15) is False   # dark image → dropped
+        assert _preset_ev_fits(p, 0.5) is True     # mid image → fine
+        assert _preset_ev_fits(p, 0.85) is True    # bright image → fine

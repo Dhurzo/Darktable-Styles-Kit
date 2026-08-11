@@ -1,28 +1,47 @@
 """End-to-end VLM style spec generation.
 
 Orchestrates: image analysis → preset search → prompt build → VLM call
-→ response parse → validation.
+→ response parse → validation → iterative refinement (optional).
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .client import VLMClient
+from .iterative_refiner import iterative_refine
 from .models import encode_image_b64
 from .parser import parse_response
 from .prompt_builder import build_prompt
 from .schema_renderer import render_iop_schema
 from .validator import validate_style
+from dtstylekit.analyzer.pipeline import analyze_reference_hues
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
     from dtstylekit.presets.models import Preset
+
     from .models import StyleSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 88) -> str:
+    """Encode image as base64 JPEG, downscaled to max_dim."""
+    from PIL import Image
+    import io
+
+    img = Image.open(image_path)
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGB")
+    if max(img.size) > max_dim:
+        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def generate_style_spec(
@@ -33,17 +52,29 @@ def generate_style_spec(
     registry: dict,
     model: str | None = None,
     temperature: float = 0.4,
-) -> tuple["StyleSpec", str, list[str], "ImageAnalysis"]:
+    references: list[str | Path] | None = None,
+    refine_iterations: int = 0,          # 0 = no iterative refinement
+    refine_raw_path: str | Path | None = None,  # RAW file for test renders
+) -> tuple[StyleSpec, str, list[str], ImageAnalysis]:
     """Generate a validated StyleSpec for a given image.
 
     Args:
-        image_path: Path to JPEG/TIFF image.
+        image_path: Path to JPEG/TIFF image (for analysis + VLM vision).
         direction: User style direction string.
         searcher: PresetSearcher instance.
         analyzer: Callable taking image_path -> ImageAnalysis.
         registry: IOP_REGISTRY dict.
         model: VLM model override.
         temperature: Sampling temperature.
+        references: Optional list of reference-look images (JPEG/TIFF) the
+            VLM should derive the target aesthetic from.  The analysis
+            still runs on ``image_path``; the references are attached to
+            the prompt as vision context.
+        refine_iterations: If >0, run iterative generate→render→eval loop
+            using ``refine_raw_path`` as test RAW. Each iteration re-prompts
+            the VLM with visual feedback from the previous render.
+        refine_raw_path: RAW file path for test renders during refinement.
+            Required if ``refine_iterations > 0``.
 
     Returns:
         (validated_spec, vlm_report, warnings, image_analysis) tuple.
@@ -52,15 +83,25 @@ def generate_style_spec(
     logger.info("Analyzing %s", image_path)
     analysis = analyzer(image_path)
 
-    # 2. Search presets
-    logger.info("Searching presets for direction: %s", direction)
-    search_results = searcher.hybrid_search(direction, limit=5)
+    # 2. Search presets.  When no explicit direction is given (the CLI
+    #    default is "auto"), build a query from the image's own scene
+    #    tags so the semantic search has something meaningful to match —
+    #    a literal "auto" query returns nothing useful and (because the
+    #    preset library is dominated by camera baseline profiles, which
+    #    are category-filtered out) can yield zero candidates.
+    if direction and direction.strip().lower() not in ("", "auto"):
+        query = direction
+    else:
+        tags = getattr(analysis, "scene_tags", None) or []
+        query = " ".join(tags) if tags else "neutral balanced photography"
+    logger.info("Searching presets for query: %s", query)
+    search_results = searcher.hybrid_search(query, limit=5)
 
     # 2b. Resolve each SearchResult (lightweight PresetIndexEntry) back to a
     # full Preset (with plugins / op_params / blendops / filename) by
     # re-parsing the .dtstyle file from disk. The indexer persists the
     # absolute file_path for exactly this case.
-    presets: list["Preset"] = []
+    presets: list[Preset] = []
     for r in search_results:
         file_path = getattr(r.preset, "file_path", None)
         if not file_path:
@@ -69,8 +110,9 @@ def generate_style_spec(
                 getattr(r.preset, "display_name", None) or r.preset.name,
             )
             continue
-        from dtstylekit.presets.parser import parse_preset
         from pathlib import Path
+
+        from dtstylekit.presets.parser import parse_preset
 
         full = parse_preset(Path(file_path))
         if full is not None:
@@ -78,43 +120,227 @@ def generate_style_spec(
         else:
             logger.warning("Could not re-parse preset file: %s", file_path)
 
+    # 2c. Luminance-suitability filter.  The semantic search matches
+    # keywords, not exposure: a query built from scene tags like "night
+    # low-key" happily returns "day for twilight" (net exposure -1 EV),
+    # and gemma3:12b picked it for an already-dark
+    # image — crushing the output to near black.  Drop candidates whose
+    # net exposure pushes a dark image darker (or a bright image
+    # brighter), but always keep at least two candidates so the VLM
+    # still has a choice.
+    mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
+    if not isinstance(mean_lum, (int, float)) or isinstance(mean_lum, bool):
+        mean_lum = None
+    if mean_lum is not None:
+        fitted = [p for p in presets if _preset_ev_fits(p, mean_lum)]
+        if len(fitted) >= 2:
+            dropped = len(presets) - len(fitted)
+            if dropped:
+                logger.info(
+                    "Dropped %d candidate preset(s) with unsuitable net "
+                    "exposure for a %.2f-luminance image",
+                    dropped, mean_lum,
+                )
+            presets = fitted
+        elif len(presets) > len(fitted) > 0:
+            logger.info(
+                "Kept all %d candidates: filter would leave fewer than 2",
+                len(presets),
+            )
+
     # 3. Build schema
     schema = render_iop_schema(registry)
 
     # 4. Optionally encode image for VLM vision
     try:
-        image_b64 = encode_image_b64(image_path)
+        image_b64 = _encode_resized(image_path)
     except Exception as e:
         logger.warning("Could not encode image: %s", e)
         image_b64 = None
 
-    # 5. Build prompt
-    messages = build_prompt(analysis, presets, direction, schema, image_b64)
+    # 4b. Optionally encode reference-look images (they define the target
+    # aesthetic; e.g. samples of a photographer's style).
+    reference_b64s: list[str] = []
+    reference_paths: list[Path] = []
+    for ref in references or []:
+        try:
+            reference_b64s.append(_encode_resized(ref))
+            reference_paths.append(Path(ref))
+            logger.info("Attaching reference image: %s", ref)
+        except Exception as e:
+            logger.warning("Could not encode reference image %s: %s", ref, e)
 
-    # 6. Call VLM.  qwen3-vl:8b at ~2.5 tok/s on CPU; num_predict=8000
-    #    leaves headroom for thinking-mode budget (which counts against
-    #    num_predict) plus the final JSON.  think=True lets the model
-    #    reason in `message.thinking` and emit the clean JSON in
-    #    `message.content`.  The client falls back to `thinking` when
-    #    `content` is empty (qwen3-vl sometimes does this).
-    logger.info("Calling VLM...")
-    client = VLMClient()
-    response_text = client.generate(
-        messages,
-        model=model,
-        temperature=temperature,
-        max_tokens=8000,
-        num_ctx=8192,
-        think=True,
-        json_mode=False,
+    # 4c. Analyze reference hues with Python (avoids VLM visual confusion)
+    reference_analysis: dict | None = None
+    if reference_paths:
+        logger.info("Analyzing reference hues with Python...")
+        reference_analysis = analyze_reference_hues(reference_paths)
+        logger.info(
+            "Reference hues: shadows_H=%.1f (conf=%.2f), midtones_H=%.1f (conf=%.2f), highlights_H=%.1f (conf=%.2f), "
+            "shadows_S=%.3f, midtones_S=%.3f, highlights_S=%.3f",
+            reference_analysis.get("shadows_hue", 0) or 0,
+            reference_analysis.get("shadows_hue_confidence", 0),
+            reference_analysis.get("midtones_hue", 0) or 0,
+            reference_analysis.get("midtones_hue_confidence", 0),
+            reference_analysis.get("highlights_hue", 0) or 0,
+            reference_analysis.get("highlights_hue_confidence", 0),
+            reference_analysis.get("shadows_sat", 0),
+            reference_analysis.get("midtones_sat", 0),
+            reference_analysis.get("highlights_sat", 0),
+        )
+
+    # 5. Build prompt
+    messages = build_prompt(
+        analysis, presets, direction, schema, image_b64,
+        reference_b64s=reference_b64s or None,
+        reference_analysis=reference_analysis,
     )
 
-    # 7. Parse response
-    spec, report = parse_response(response_text)
+    # 6. Call VLM.  gemma3:12b left ``content`` empty under ``think="low"``
+    #    on some runs (everything routed to the ``thinking`` field), which
+    #    produced an empty style.  ``think=False`` reliably populates
+    #    ``content`` with the final JSON, and the client still falls back to
+    #    ``thinking`` if ``content`` is ever empty.  ``max_tokens`` bounds
+    #    the call so it cannot run unbounded on CPU.
+    logger.info("Calling VLM...")
+    # Long timeout: on CPU-only machines a gemma3:12b generation takes
+    # 10-30 minutes.  The client's default is 1 hour; pass it explicitly
+    # so a slow machine never trips the 5-minute default from older code.
+    client = VLMClient(timeout=3600.0, max_retries=1)
 
-    # 8. Validate
-    validated_spec, warnings = validate_style(spec, registry)
+    def _call(temperature: float) -> tuple[StyleSpec, str, list[str]]:
+        response_text = client.generate(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=3000,
+            # 16384: with several attached reference images a single
+            # request routinely exceeds 8192 (5 refs + target image
+            # ≈ 7-9k tokens on top of the analysis/preset/schema text).
+            num_ctx=16384,
+            think=False,
+            json_mode=False,
+        )
+        spec, report = parse_response(response_text)
+        validated, warns = validate_style(spec, registry)
+        return validated, report, warns
+
+    validated_spec, report, warnings = _call(temperature)
+
+    # 6b. Empty spec guard.  A VLM response that yields neither presets nor
+    # adjustments produces a useless "untitled" style with no plugins.
+    # Retry once at higher temperature (cheap, often recovers empty specs
+    # from "thinking" models), then fail with a clear error instead of
+    # silently writing a broken style.
+    if not validated_spec.plugins and not validated_spec.selected_preset_names:
+        logger.warning("VLM returned an empty style spec — retrying once at higher temperature")
+        try:
+            validated_spec, report, retry_warnings = _call(0.8)
+            warnings = list(retry_warnings)
+        except Exception as exc:
+            logger.warning("VLM retry failed: %s", exc)
+        if not validated_spec.plugins and not validated_spec.selected_preset_names:
+            raise ValueError(
+                "VLM returned an empty style spec (no presets, no adjustments) "
+                "even after a retry — cannot generate a style. "
+                "Check the model and the analysis output."
+            )
+
+    # 7. Report + warnings for the CLI
+    logger.info("VLM report: %s", (report or "(empty)")[:500])
     for w in warnings:
         logger.warning(w)
 
+    # 8. Optional iterative refinement (generate → render → evaluate → adjust)
+    if refine_iterations > 0 and refine_raw_path:
+        logger.info("Starting iterative refinement (%d iterations)...", refine_iterations)
+
+        # Build a generate function that the refiner can call
+        def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]):
+            refine_messages = build_prompt(
+                analysis, presets, refine_direction, schema, image_b64,
+                reference_b64s=ref_b64s or None,
+            )
+            refine_spec, refine_report, refine_warns = _call(temperature)
+            # Merge warnings
+            warnings.extend(refine_warns)
+            return refine_spec
+
+        # Encode references for refiner
+        ref_b64s = reference_b64s if reference_b64s else []
+        for ref in references or []:
+            if ref not in [r for r in references or []]:  # avoid double-encoding
+                try:
+                    ref_b64s.append(_encode_resized(ref))
+                except Exception:
+                    pass
+
+        # Run iterative refinement
+        try:
+            from dtstylekit.vlm.iterative_refiner import iterative_refine
+            refined_spec = iterative_refine(
+                raw_path=Path(refine_raw_path),
+                reference_paths=[Path(r) for r in (references or [])],
+                direction=direction,
+                target_analysis=analysis,
+                generate_func=_generate_for_refiner,
+                max_iterations=refine_iterations,
+            )
+            validated_spec = refined_spec
+            logger.info("Iterative refinement completed successfully")
+        except Exception as e:
+            logger.warning("Iterative refinement failed: %s, using original spec", e)
+
     return validated_spec, report, warnings, analysis
+
+
+def _preset_net_ev(preset: Preset) -> float:
+    """Net exposure EV contributed by a preset's *enabled* exposure IOPs.
+
+    Decodes the exposure blobs (v6 or v7 layout) and sums their
+    ``exposure`` field.  A preset like "day for twilight" contributes
+    -1.0 EV; a plain color preset contributes 0.0.
+    """
+    from dtstylekit.codec.iop_registry import unpack_params
+    from dtstylekit.codec.xmp_codec import decode_xmp
+
+    ev = 0.0
+    for plg in preset.plugins:
+        if plg.operation != "exposure" or not plg.enabled or not plg.op_params:
+            continue
+        try:
+            params = unpack_params("exposure", decode_xmp(plg.op_params))
+            ev += float(params.get("exposure", 0.0))
+        except Exception:
+            continue
+    return ev
+
+
+def _preset_ev_fits(preset: Preset, mean_lum: float) -> bool:
+    """Whether a preset's net exposure suits the image's brightness.
+
+    Dark images (mean luminance < 0.3) are crushed by darkening presets
+    (net EV < -0.3); bright images (> 0.7) are blown out by brightening
+    presets (net EV > +0.3).  Everything else is acceptable.
+
+    In addition, for dark images we drop dehaze/defog presets by name:
+    hazeremoval is not in the IOP registry (its blob cannot be decoded
+    for a net-EV estimate), but dehaze removes atmospheric brightness,
+    which empirically crushes dark images (gemma3:12b picked "dehaze
+    strong luminance only" for a night photo and pushed 61% of pixels
+    below 10/255).
+    """
+    ev = _preset_net_ev(preset)
+    if mean_lum < 0.3 and ev < -0.3:
+        return False
+    if mean_lum > 0.7 and ev > 0.3:
+        return False
+    if mean_lum < 0.3:
+        name = " ".join(
+            part.lower()
+            for part in (preset.name, getattr(preset, "description", "") or "")
+            if part
+        )
+        if any(kw in name for kw in ("dehaze", "defog", "fog", "mist")):
+            return False
+    return True

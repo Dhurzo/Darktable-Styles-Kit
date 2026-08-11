@@ -2,11 +2,11 @@
 
 from .client import VLMClient
 from .models import (
-    VLMRequest,
-    VLMResponse,
-    StyleSpec,
     Plugin,
     ReportSection,
+    StyleSpec,
+    VLMRequest,
+    VLMResponse,
     encode_image_b64,
 )
 from .orchestrator import generate_style_spec
