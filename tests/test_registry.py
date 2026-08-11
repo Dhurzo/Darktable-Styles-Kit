@@ -439,18 +439,23 @@ class TestRegistryStructure:
             assert set(reg.ranges.keys()) == set(reg.fields)
     
     def test_all_have_blendop_cst(self):
-        """All registry entries should have blendop_cst (2 or 4)."""
+        """All registry entries should have blendop_cst (2, 3, or 4)."""
         for op, reg in IOP_REGISTRY.items():
-            assert reg.blendop_cst in (2, 4), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
+            assert reg.blendop_cst in (2, 3, 4), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
     
     def test_verified_iops_blendop_cst(self):
         """Verified IOPs should have correct blendop_cst (per blend.h:
         2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE)."""
         # Scene-referred RGB (blendop_cst=4)
-        for op in ["filmicrgb", "colorbalancergb", "sigmoid", "exposure"]:
+        for op in ["filmicrgb", "colorbalancergb", "sigmoid"]:
             reg = get_registry(op)
             assert reg.blendop_cst == 4, f"{op} should be scene-referred (4)"
-        
+
+        # Display-referred RGB (blendop_cst=3)
+        # exposure uses RGB_DISPLAY per src/iop/exposure.c:324
+        reg = get_registry("exposure")
+        assert reg.blendop_cst == 3, f"exposure should be display-referred (3)"
+
         # Lab-based (blendop_cst=2)
         for op in ["atrous", "bilat"]:
             reg = get_registry(op)

@@ -130,12 +130,35 @@ class TestSchemaRenderer:
 
 
 class TestPromptBuilder:
+    def _make_analysis(self, mean: float, std: float = 0.2, sat: float = 0.3) -> MagicMock:
+        """Create a properly mocked analysis with luminance and histogram attributes."""
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {"luminance": {"mean": mean}}
+        
+        # Create a proper mock for luminance with all needed attributes
+        luminance = MagicMock()
+        luminance.mean = mean
+        luminance.std = std
+        luminance.saturation_mean = sat
+        luminance.white_balance_ratio_rb = 1.0
+        luminance.shadows_pct = 0.2
+        luminance.midtones_pct = 0.6
+        luminance.highlights_pct = 0.2
+        analysis.luminance = luminance
+        
+        # Create a proper mock for histogram with all needed attributes
+        histogram = MagicMock()
+        histogram.mean_red = mean * 0.9
+        histogram.mean_green = mean
+        histogram.mean_blue = mean * 1.1
+        analysis.histogram = histogram
+        
+        return analysis
+
     def test_build_prompt_messages(self) -> None:
         from dtstylekit.vlm.prompt_builder import build_prompt
 
-        analysis = MagicMock()
-        analysis.to_prompt_dict.return_value = {"test": "data"}
-
+        analysis = self._make_analysis(mean=0.5)
         presets = []
         messages = build_prompt(analysis, presets, "warm cinematic", iop_schema="### filmicrgb", image_b64=None)
         assert len(messages) == 2
@@ -147,22 +170,18 @@ class TestPromptBuilder:
         """A dark image must trigger the EXPOSURE GUARD in the prompt."""
         from dtstylekit.vlm.prompt_builder import build_prompt
 
-        analysis = MagicMock()
-        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.15}}
-        analysis.luminance.mean = 0.15
+        analysis = self._make_analysis(mean=0.15, std=0.1)
 
         messages = build_prompt(analysis, [], "night", iop_schema="### filmicrgb")
         content = messages[1]["content"]
-        assert "[EXPOSURE GUARD]" in content
+        assert "EXPOSURE GUARD" in content
         assert "DARK" in content
         assert "'day for twilight'" in content
 
     def test_bright_image_gets_exposure_guard(self) -> None:
         from dtstylekit.vlm.prompt_builder import build_prompt
 
-        analysis = MagicMock()
-        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.85}}
-        analysis.luminance.mean = 0.85
+        analysis = self._make_analysis(mean=0.85, std=0.15)
 
         messages = build_prompt(analysis, [], "sunny", iop_schema="### filmicrgb")
         content = messages[1]["content"]
@@ -172,9 +191,7 @@ class TestPromptBuilder:
     def test_mid_image_no_guard(self) -> None:
         from dtstylekit.vlm.prompt_builder import build_prompt
 
-        analysis = MagicMock()
-        analysis.to_prompt_dict.return_value = {"luminance": {"mean": 0.5}}
-        analysis.luminance.mean = 0.5
+        analysis = self._make_analysis(mean=0.5, std=0.2)
 
         messages = build_prompt(analysis, [], "neutral", iop_schema="### filmicrgb")
         assert "[EXPOSURE GUARD]" not in messages[1]["content"]

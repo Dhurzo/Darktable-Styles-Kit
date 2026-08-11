@@ -490,7 +490,6 @@ def build_prompt(
             ref_hues = "\n[No reliable pre-computed hues - use NEUTRAL: shadows=0°, midtones=0°, highlights=0° (respect target colors)]\n"
 
 
-
         reference_note = (
 
             f"{ref_hues}"
@@ -525,6 +524,9 @@ def build_prompt(
 
         )
 
+    else:
+        # No reference images provided - use empty reference note
+        reference_note = ""
 
     user_content_parts = [
 
