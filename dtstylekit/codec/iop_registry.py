@@ -567,6 +567,9 @@ _REFINEMENT_IOPS = {
             "preset": (-1, 4),  # UNKNOWN=-1, AS_SHOT=0, SPOT=1, USER=2, D65=3, D65_LATE=4
         },
         size_bytes=20,
+        legacy_size_bytes=(16,),  # v3: 4 floats, no preset (benchmarks 3.4)
+        legacy_pack_format="<4f",
+        legacy_fields=("red", "green", "blue", "various"),
         blendop_cst=4,  # RGB_SCENE (temperature works scene-referred)
     ),
     "basicadj": IOPRegistry(
@@ -723,6 +726,53 @@ _REFINEMENT_IOPS = {
         },
         size_bytes=128,
         blendop_cst=3,  # RGB_DISPLAY (colorequal is display-referred)
+    ),
+    # NOTE: relight is deliberately NOT registered — it is deprecated in
+    # darktable ("please use the tone equalizer module instead") and is
+    # not compiled into the 5.6.0 binary, so darktable silently ignores
+    # it when applying styles.  See docs/future-iops.md.
+    "colorharmonizer": IOPRegistry(
+        operation="colorharmonizer",
+        version=1,
+        # 1 enum(int) + 4 floats + 4 floats (custom_hue[4]) + 1 int +
+        # 4 floats (node_saturation[4]) + 1 float = 60 bytes
+        # (colorharmonizer.c:70-81, COLORHARMONIZER_MAX_NODES=4)
+        pack_format="<i4f4fi4ff",
+        fields=(
+            "rule", "anchor_hue", "pull_strength", "neutral_protection",
+            "pull_width", "custom_hue_0", "custom_hue_1", "custom_hue_2",
+            "custom_hue_3", "num_custom_nodes", "node_saturation_0",
+            "node_saturation_1", "node_saturation_2", "node_saturation_3",
+            "smoothing",
+        ),
+        defaults={
+            "rule": 3,  # DT_COLORHARMONIZER_COMPLEMENTARY
+            "anchor_hue": 0.1,
+            "pull_strength": 0.0,
+            "neutral_protection": 0.5,
+            "pull_width": 1.0,
+            "custom_hue_0": 0.0, "custom_hue_1": 0.0,
+            "custom_hue_2": 0.0, "custom_hue_3": 0.0,
+            "num_custom_nodes": 4,
+            "node_saturation_0": 1.0, "node_saturation_1": 1.0,
+            "node_saturation_2": 1.0, "node_saturation_3": 1.0,
+            "smoothing": 0.0,
+        },
+        ranges={
+            "rule": (0, 9),  # MONOCHROMATIC..CUSTOM
+            "anchor_hue": (0.0, 1.0),
+            "pull_strength": (0.0, 1.0),
+            "neutral_protection": (0.0, 1.0),
+            "pull_width": (0.25, 4.0),
+            "custom_hue_0": (0.0, 1.0), "custom_hue_1": (0.0, 1.0),
+            "custom_hue_2": (0.0, 1.0), "custom_hue_3": (0.0, 1.0),
+            "num_custom_nodes": (2, 4),
+            "node_saturation_0": (0.0, 2.0), "node_saturation_1": (0.0, 2.0),
+            "node_saturation_2": (0.0, 2.0), "node_saturation_3": (0.0, 2.0),
+            "smoothing": (0.0, 2.0),
+        },
+        size_bytes=60,
+        blendop_cst=3,  # RGB_DISPLAY (colorharmonizer is display-referred)
     ),
 }
 

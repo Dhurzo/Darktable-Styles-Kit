@@ -171,6 +171,13 @@ _TEXT = {
         "ceq_channel": "**{ch}**: {detail} — ajuste por matiz de saturación/matiz/brillo para este rango de color.",
         "ceq_hue_shift": "**hue_shift = {v:+.0f}°**: rotación global de matiz aplicada tras el etalonaje.",
         "ceq_neutral": "*(todos los canales de color neutros — sin cambios del ecualizador por matiz)*",
+        "harm_rule": "**rule = {v}**: regla armónica de color aplicada por colorharmonizer (0 monocromática … 9 personalizada, 3 = complementaria).",
+        "harm_anchor": "**anchor_hue = {v}**: matiz ancla de la regla armónica, derivado del tono dominante de las referencias.",
+        "harm_strength": "**pull_strength = {v}**: intensidad con la que los colores se desplazan hacia el esquema armónico.",
+        "harm_neutral_prot": "**neutral_protection = {v}**: protección de los tonos neutros frente al desplazamiento armónico.",
+        "harm_width": "**pull_width = {v}**: anchura del rango de matices atraídos por la regla armónica.",
+        "harm_smoothing": "**smoothing = {v}**: suavizado de las transiciones de la regla armónica.",
+        "harm_neutral": "*(sin cambios de colorharmonizer — regla por defecto y matices neutros)*",
         "exp_tonal_bright": "ligeramente más brillante",
         "exp_tonal_dark": "ligeramente más oscura",
         "exp_tonal_same": "con un brillo similar",
@@ -274,6 +281,13 @@ _TEXT = {
         "ceq_channel": "**{ch}**: {detail} — per-hue saturation/hue/brightness tuning for this colour range.",
         "ceq_hue_shift": "**hue_shift = {v:+.0f}°**: global hue rotation applied after grading.",
         "ceq_neutral": "*(all colour channels neutral — no per-hue equalizer change)*",
+        "harm_rule": "**rule = {v}**: harmonic colour rule applied by colorharmonizer (0 monochromatic … 9 custom, 3 = complementary).",
+        "harm_anchor": "**anchor_hue = {v}**: anchor hue of the harmonic rule, derived from the dominant tone of the references.",
+        "harm_strength": "**pull_strength = {v}**: how strongly colours are pulled toward the harmonic scheme.",
+        "harm_neutral_prot": "**neutral_protection = {v}**: protection of neutral tones against the harmonic shift.",
+        "harm_width": "**pull_width = {v}**: width of the hue range attracted by the harmonic rule.",
+        "harm_smoothing": "**smoothing = {v}**: smooths the transitions of the harmonic rule.",
+        "harm_neutral": "*(no colorharmonizer change — default rule and neutral hues)*",
         "exp_tonal_bright": "slightly brighter",
         "exp_tonal_dark": "slightly darker",
         "exp_tonal_same": "similar brightness",
@@ -559,6 +573,25 @@ def _explain_colorequal(lang: str, params: dict) -> list[str]:
     return out
 
 
+def _explain_colorharmonizer(lang: str, params: dict) -> list[str]:
+    out: list[str] = []
+    if "rule" in params and int(params["rule"]) != 3:
+        out.append(_t(lang, "harm_rule").format(v=params["rule"]))
+    if "anchor_hue" in params and abs(float(params["anchor_hue"]) - 0.1) > 0.01:
+        out.append(_t(lang, "harm_anchor").format(v=params["anchor_hue"]))
+    if "pull_strength" in params and abs(float(params["pull_strength"])) > 0.01:
+        out.append(_t(lang, "harm_strength").format(v=params["pull_strength"]))
+    if "neutral_protection" in params and abs(float(params["neutral_protection"]) - 0.5) > 0.05:
+        out.append(_t(lang, "harm_neutral_prot").format(v=params["neutral_protection"]))
+    if "pull_width" in params and abs(float(params["pull_width"]) - 1.0) > 0.05:
+        out.append(_t(lang, "harm_width").format(v=params["pull_width"]))
+    if "smoothing" in params and abs(float(params["smoothing"])) > 0.01:
+        out.append(_t(lang, "harm_smoothing").format(v=params["smoothing"]))
+    if not out:
+        out.append(_t(lang, "harm_neutral"))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -698,6 +731,8 @@ def generate_explanation(
             explains = _explain_toneequal(lang, plg.params)
         elif plg.operation == "colorequal":
             explains = _explain_colorequal(lang, plg.params)
+        elif plg.operation == "colorharmonizer":
+            explains = _explain_colorharmonizer(lang, plg.params)
         elif plg.operation in ("tonecurve", "rgbcurve", "colorzones"):
             explains = _explain_curve(lang, plg.operation, plg.params)
         else:

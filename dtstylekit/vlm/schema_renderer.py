@@ -46,10 +46,15 @@ def render_iop_schema(registry: dict, max_iops: int = 16) -> str:
         "colorbalance",
         "shadhi",
     ]
-    # Refinement IOPs (v0.4.0) — fine tonal/color shaping on top of the
+    # Refinement IOPs — fine tonal/color shaping on top of the
     # core pipeline.  temperature sits BEFORE exposure in the pipeline
-    # (raw WB), toneequal after exposure, colorequal after filmicrgb.
-    refinement = ["temperature", "basicadj", "toneequal", "colorequal"]
+    # (raw WB), toneequal after exposure, colorequal after filmicrgb,
+    # colorharmonizer in RGB.  (relight is deprecated in darktable and
+    # deliberately not registered.)
+    refinement = [
+        "temperature", "basicadj", "toneequal", "colorequal",
+        "colorharmonizer",
+    ]
 
     included: list[str] = []
     for op in verified:

@@ -188,6 +188,16 @@ STEP 3 - MAP TO MODULES WITH STRONG VALUES (use FULL ranges, not timid defaults)
   │   hue_shift(-23..23° global rotation).                                 │
   │   -> Boost foliage sat_green 1.2–1.5; warm skin sat_red/orange 1.1–1.3 │
   │   -> Cool shadows: hue_blue +10..+20; NEVER hue_shift > ±15 alone.     │
+  │ colorharmonizer (v1): harmonic color-rule grading (RGB).               │
+  │   rule(0=monochromatic..9=custom, def 3=complementary),                 │
+  │   anchor_hue(0..1, def 0.1) master hue, pull_strength(0..1, def 0),     │
+  │   neutral_protection(0..1, def 0.5), pull_width(0.25..4, def 1),        │
+  │   smoothing(0..2, def 0).                                               │
+  │   -> Gentle: pull_strength 0.1–0.3, anchor_hue from ref midtone hue;    │
+  │   -> rule=3 (complementary) adds contrast; DO NOT touch custom_hue_*    │
+  │     arrays or num_custom_nodes (leave defaults).                        │
+  │ NOTE: relight is NOT available — deprecated in darktable, use           │
+  │   toneequal to lift shadows instead.                                    │
   ├─────────────────────────────────────────────────────────────────────────┤
   │ CURVE-BASED (Lab) - use NAMED TEMPLATES only                          │
   ├─────────────────────────────────────────────────────────────────────────┤
@@ -293,9 +303,10 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
     a Sony RAW). NEVER emit temperature unless you have an intentional WB
     (warm skin: red≈1.8/blue≈1.2; cool mood: red≈1.1/blue≈1.9; D65:
     2.01/1.0/1.40). When in doubt, omit it entirely.
-20. MODEST REFINEMENT: basicadj/toneequal/colorequal are fine-tuning tools.
-    Prefer 2-3 of them over stacking all four; toneequal bands ±0.8 max,
-    colorequal sat_* 1.1-1.5 max, basicadj exposure ±0.3. Each must be
+20. MODEST REFINEMENT: basicadj/toneequal/colorequal/colorharmonizer
+    are fine-tuning tools. Prefer 2-3 of them over stacking all; toneequal
+    bands ±0.8 max, colorequal sat_* 1.1-1.5 max, basicadj exposure ±0.3,
+    colorharmonizer pull_strength 0.1-0.3. Each must be
     traceable to a reference trait.
 """
 

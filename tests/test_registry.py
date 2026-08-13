@@ -56,9 +56,10 @@ class TestRegistryAccess:
         # Simple IOPs should NOT be in verified
         assert "vibrance" not in verified
         # Now includes bilat (20B), basecurve (520B), plus the originals
-        # and the v0.4.0 refinement IOPs (temperature, basicadj,
-        # toneequal, colorequal) — all with verified sizes.
-        assert len(verified) == 14
+        # and the refinement IOPs (temperature, basicadj, toneequal,
+        # colorequal, colorharmonizer) — all with verified sizes.
+        # (relight is deprecated in darktable and not registered.)
+        assert len(verified) == 15
 
     def test_list_unverified(self):
         """list_unverified returns operations without verified sizes."""
@@ -520,13 +521,14 @@ class TestEdgeCases:
 
 
 class TestRefinementIops:
-    """Round-trip pack/unpack for the v0.4.0 refinement IOPs."""
+    """Round-trip pack/unpack for the refinement IOPs."""
 
     REFINEMENT_OPS = [
         ("temperature", 20, "<4fi", 5),
         ("basicadj", 44, "<5fi5f", 11),
         ("toneequal", 72, "<15f3i", 18),
         ("colorequal", 128, "<6fi24ff", 32),
+        ("colorharmonizer", 60, "<i4f4fi4ff", 15),
     ]
 
     @pytest.mark.parametrize("op,size,fmt,nfields", REFINEMENT_OPS)
@@ -598,6 +600,38 @@ class TestRefinementIops:
             pack_params("colorequal", {"threshold": 0.9})  # max 0.3
         with pytest.raises(ValueError):
             pack_params("toneequal", {"iterations": 0})  # min 1
+
+    def test_colorharmonizer_defaults(self):
+        """colorharmonizer: <i4f4fi4ff 60B with rule enum first."""
+        blob = pack_params("colorharmonizer", {})
+        assert len(blob) == 60
+        p = unpack_params("colorharmonizer", blob)
+        assert p["rule"] == 3  # COMPLEMENTARY
+        assert isinstance(p["rule"], int)
+        assert abs(p["anchor_hue"] - 0.1) < 1e-5
+        assert abs(p["neutral_protection"] - 0.5) < 1e-5
+        assert p["num_custom_nodes"] == 4
+        assert isinstance(p["num_custom_nodes"], int)
+        assert len(p) == 15
+
+    def test_colorharmonizer_custom_values_and_clamp(self):
+        blob = pack_params("colorharmonizer", {
+            "rule": 9, "anchor_hue": 0.6, "pull_strength": 0.8,
+            "custom_hue_0": 0.25, "custom_hue_3": 0.9,
+            "node_saturation_1": 1.5, "smoothing": 1.5,
+        })
+        p = unpack_params("colorharmonizer", blob)
+        assert p["rule"] == 9
+        assert abs(p["anchor_hue"] - 0.6) < 1e-5
+        assert abs(p["pull_strength"] - 0.8) < 1e-5
+        assert abs(p["custom_hue_0"] - 0.25) < 1e-5
+        assert abs(p["custom_hue_3"] - 0.9) < 1e-5
+        assert abs(p["node_saturation_1"] - 1.5) < 1e-5
+        assert abs(p["smoothing"] - 1.5) < 1e-5
+        with pytest.raises(ValueError):
+            pack_params("colorharmonizer", {"anchor_hue": 1.5})  # max 1.0
+        with pytest.raises(ValueError):
+            pack_params("colorharmonizer", {"num_custom_nodes": 1})  # min 2
 
 
 class TestColorequalRealBlobs:
