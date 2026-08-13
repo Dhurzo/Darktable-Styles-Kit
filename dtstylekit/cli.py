@@ -313,6 +313,33 @@ def cmd_generate(args) -> int:
         all_warnings.append(f"Report generation failed: {exc}")
         logger.warning("Report generation failed: %s", exc)
 
+    # Natural-language explanation document (narrative companion to the
+    # technical report).  It analyses the reference photographs and
+    # explains, in plain language, how they are graded and why each
+    # module/parameter of the generated style was chosen.
+    if references:
+        from dtstylekit.analyzer.pipeline import analyze_reference_hues
+        from dtstylekit.composer.explanation import generate_explanation
+
+        explanation_path = (
+            output_dir / f"{spec.style_name.replace(' ', '_')}_EXPLICACION.md"
+        )
+        try:
+            reference_analysis = analyze_reference_hues(references)
+            generate_explanation(
+                spec,
+                selected_presets,
+                analysis,
+                reference_analysis=reference_analysis,
+                reference_paths=[Path(p) for p in references],
+                output_path=explanation_path,
+                lang=args.lang,
+            )
+            print(f"✓ Explanation: {explanation_path}")
+        except Exception as exc:
+            all_warnings.append(f"Explanation generation failed: {exc}")
+            logger.warning("Explanation generation failed: %s", exc)
+
     print(f"✓ Generated: {dtstyle_path}")
     if report_path.exists():
         print(f"✓ Report:    {report_path}")
@@ -385,6 +412,13 @@ def main(argv: list[str] | None = None) -> int:
         help="RAW file path for test renders during iterative refinement. "
              "Required if --refine-iterations > 0.",
     )
+    gen.add_argument(
+        "--lang",
+        choices=("es", "en"),
+        default="es",
+        help="Language of the natural-language explanation document "
+             "(default: es).",
+    )
 
     # analyze subcommand (alias for generate)
     ana = subparsers.add_parser(
@@ -414,6 +448,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Reference-look images (glob accepted) the VLM derives the "
         "target aesthetic from, e.g. '/path/refs/*.jpeg'",
+    )
+    ana.add_argument(
+        "--lang",
+        choices=("es", "en"),
+        default="es",
+        help="Language of the natural-language explanation document "
+             "(default: es).",
     )
 
     # preset subcommand

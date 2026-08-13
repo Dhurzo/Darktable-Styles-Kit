@@ -502,6 +502,36 @@ def build_prompt(
             ref_hues_lines.append(f"  midtones_sat = {ms:.3f}")
             ref_hues_lines.append(f"  highlights_sat = {hs:.3f}")
 
+            # Global HSV saturation (mean over references).  The per-zone
+            # *_sat values above use ABSOLUTE RGB deltas averaged over ALL
+            # pixels of the zone; on low-key photography (most pixels in
+            # shadows) they under-report how colorful the references really
+            # are (Palander: zones 0.04–0.08 vs HSV mean ~0.30).  The
+            # global HSV mean is the TRUE colorfulness — saturation
+            # decisions (filmicrgb.saturation / vibrance) must use it, not
+            # the depressed per-zone deltas.
+            gsat = reference_analysis.get("global_saturation")
+            if isinstance(gsat, (int, float)) and not isinstance(gsat, bool):
+                ref_hues_lines.append(
+                    f"  global_saturation (HSV) = {gsat:.3f}  <- TRUE colorfulness of the references"
+                )
+                if gsat >= 0.25:
+                    ref_instructions.append(
+                        f"  -> References are COLORFUL (global HSV {gsat:.3f}): do NOT desaturate to "
+                        f"match the low per-zone deltas. Use filmicrgb.saturation in [0, +15] (or 0) "
+                        f"and colorbalancergb.vibrance +0.1..+0.3 to preserve the vivid look."
+                    )
+                elif gsat >= 0.15:
+                    ref_instructions.append(
+                        f"  -> References are moderately colorful (global HSV {gsat:.3f}): use "
+                        f"filmicrgb.saturation in [-10, +5] and vibrance 0..+0.15."
+                    )
+                else:
+                    ref_instructions.append(
+                        f"  -> References are DESATURATED (global HSV {gsat:.3f}): filmicrgb.saturation "
+                        f"-15..-30 is appropriate; keep vibrance 0."
+                    )
+
             # Detect INTENTIONAL MONOCHROME reference: same hue across the 3
             # zones with hue_mode='mono' in all of them. This is the rare
             # case where a global-tint look IS the intended look (sepia,

@@ -299,6 +299,29 @@ def validate_style(
                             )
                         clamped_params[c_key] = float(clamped_params[c_key] or 0.0) / 2.0
 
+        # ---- Hito 2.4: colorful-references desaturation guard ----
+        # The prompt tells the VLM to keep saturation when references
+        # are COLORFUL (global HSV >= 0.25), but the VLM has repeatedly
+        # ignored it (Alen Palander: chose filmicrgb.saturation=-25 "to
+        # match reference color intensity" while the references measure
+        # 0.30 HSV — the per-zone delta metrics misled it).  Enforce the
+        # rule here: a negative saturation contradicts the reference
+        # look, clamp to 0.0 (neutral).  Keeps the style portable for
+        # references that are genuinely desaturated (< 0.15 → allowed).
+        if plg.operation == "filmicrgb":
+            gsat = (reference_analysis or {}).get("global_saturation")
+            sat = float(clamped_params.get("saturation") or 0.0)
+            if (
+                isinstance(gsat, (int, float)) and not isinstance(gsat, bool)
+                and gsat >= 0.25 and sat < 0.0 and "saturation" in plg.params
+            ):
+                warnings.append(
+                    f"filmicrgb.saturation={sat:.1f} contradicts colorful "
+                    f"references (global HSV {gsat:.3f} >= 0.25) — "
+                    f"clamped to 0.0"
+                )
+                clamped_params["saturation"] = 0.0
+
         validated_plugins.append(
             Plugin(
                 operation=plg.operation,

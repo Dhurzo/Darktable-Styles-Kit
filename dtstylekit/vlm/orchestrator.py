@@ -189,6 +189,38 @@ def generate_style_spec(
             reference_analysis.get("highlights_sat", 0),
         )
 
+        # 4c-bis. Global HSV saturation of the references (mean of
+        # luminance.saturation_mean per reference).  The per-zone *_sat
+        # values from analyze_reference_hues use ABSOLUTE RGB deltas
+        # averaged over ALL pixels of the zone — on low-key references
+        # (most pixels in shadows) they systematically under-report how
+        # colorful the photos actually are (Alen Palander: zones
+        # 0.04–0.08 vs HSV mean ~0.30).  The VLM used the depressed
+        # number to justify filmicrgb.saturation=-20 and skipped
+        # vibrance entirely, producing muted outputs.  Feed the true
+        # global HSV saturation into the prompt so saturation decisions
+        # are based on real data.
+        try:
+            from dtstylekit.analyzer.pipeline import analyze_image as _analyze_ref
+
+            _sats: list[float] = []
+            for ref in reference_paths:
+                try:
+                    _a = _analyze_ref(ref)
+                    _s = getattr(getattr(_a, "luminance", None), "saturation_mean", None)
+                    if isinstance(_s, (int, float)) and not isinstance(_s, bool):
+                        _sats.append(float(_s))
+                except Exception:
+                    continue
+            if _sats:
+                reference_analysis["global_saturation"] = sum(_sats) / len(_sats)
+                logger.info(
+                    "Reference global HSV saturation: %.3f (%d refs)",
+                    reference_analysis["global_saturation"], len(_sats),
+                )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Could not compute reference global saturation: %s", exc)
+
     # 5. Build prompt
     messages = build_prompt(
         analysis, presets, direction, schema, image_b64,

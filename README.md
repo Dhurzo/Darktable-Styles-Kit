@@ -78,6 +78,9 @@ dtstylekit presets search "warm cinematic look"
 
 # Generate a curve-based preset adjustment (e.g. tone curve, rgb curve, color zones)
 dtstylekit curves --help
+
+# Generate with reference-look images + a Spanish explanation document
+dtstylekit generate photo.jpg --references 'refs/*.jpg' --direction "cinematic warm portrait" --lang es
 ```
 
 > **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `gemma3:12b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
@@ -168,6 +171,7 @@ The VLM analyzes the input image and:
 Each run produces:
 - **`.dtstyle` file** — Ready to import into Darktable
 - **Markdown report** — Explains preset selection, parameter choices, and expected visual effect
+- **`*_EXPLICACION.md` explanation document** — When `--references` are given, a natural-language narrative companion is auto-generated: it analyses the reference photographs (tonal key, contrast, saturation, white balance, per-zone hue grading) and explains in plain language how they are edited and why every module/parameter of the generated style was chosen. Language: `--lang es` (default) or `--lang en`.
 
 ## License
 

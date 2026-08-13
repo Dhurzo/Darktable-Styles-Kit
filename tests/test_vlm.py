@@ -82,6 +82,38 @@ class TestValidateStyle:
         assert validated.plugins[0].params["contrast"] == 1.5
         assert "grey_point_source" in validated.plugins[0].params  # default
 
+    def test_colorful_references_block_negative_filmic_saturation(self) -> None:
+        """Hito 2.4: references with global HSV saturation >= 0.25 are
+        colorful — a negative filmicrgb.saturation contradicts the look
+        and must be clamped to 0.0 (the VLM ignored the prompt hint and
+        chose -25 for the colorful Palander references)."""
+        spec = StyleSpec(style_name="test", plugins=[
+            Plugin(operation="filmicrgb", params={"contrast": 1.4, "saturation": -25.0}),
+        ])
+        ref = {
+            # per-zone deltas look desaturated (low-key refs)...
+            "shadows_sat": 0.040, "midtones_sat": 0.083, "highlights_sat": 0.058,
+            "shadows_hue_confidence": 0.0, "midtones_hue_confidence": 0.0,
+            "highlights_hue_confidence": 0.0,
+            # ...but the global HSV mean says they are colorful
+            "global_saturation": 0.304,
+        }
+        validated, warnings = validate_style(
+            spec, IOP_REGISTRY, reference_analysis=ref,
+        )
+        assert validated.plugins[0].params["saturation"] == 0.0
+        assert any("contradicts colorful references" in w for w in warnings)
+
+    def test_desaturated_references_allow_negative_filmic_saturation(self) -> None:
+        """Global HSV < 0.15 → references genuinely desaturated: a negative
+        filmicrgb.saturation stays as-is."""
+        spec = StyleSpec(style_name="test", plugins=[
+            Plugin(operation="filmicrgb", params={"saturation": -25.0}),
+        ])
+        ref = {"global_saturation": 0.10}
+        validated, _ = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        assert validated.plugins[0].params["saturation"] == -25.0
+
     def test_skips_unknown_iop(self) -> None:
         spec = StyleSpec(style_name="test", plugins=[
             Plugin(operation="nonexistent_iop", params={"x": 1.0}),
@@ -567,6 +599,73 @@ class TestPromptAntiTintRules:
         assert "SET shadows_C = 0.000" in content
         assert "SET midtones_C = 0.000" in content
         assert "SET highlights_C = 0.000" in content
+
+    def test_prompt_global_saturation_colorful_references(self) -> None:
+        """High global HSV saturation (>= 0.25) must override the depressed
+        per-zone deltas: do NOT desaturate, use filmicrgb.saturation
+        [0, +15] and vibrance +0.1..+0.3."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            # Low-key references: per-zone deltas look nearly desaturated...
+            "shadows_sat": 0.040, "midtones_sat": 0.083, "highlights_sat": 0.058,
+            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
+            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
+            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+            # ...but the global HSV mean says they are colorful
+            "global_saturation": 0.30,
+        }
+        msgs = build_prompt(
+            analysis, [], "editorial", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "global_saturation (HSV) = 0.300" in content
+        assert "TRUE colorfulness" in content
+        assert "COLORFUL" in content
+        assert "filmicrgb.saturation in [0, +15]" in content
+        assert "vibrance +0.1..+0.3" in content
+
+    def test_prompt_global_saturation_desaturated_references(self) -> None:
+        """Low global HSV saturation (< 0.15) allows filmicrgb.saturation
+        -15..-30 with vibrance 0."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_sat": 0.02, "midtones_sat": 0.04, "highlights_sat": 0.03,
+            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
+            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
+            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+            "global_saturation": 0.10,
+        }
+        msgs = build_prompt(
+            analysis, [], "editorial", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "DESATURATED" in content
+        assert "filmicrgb.saturation -15..-30" in content
+        assert "keep vibrance 0" in content
+
+    def test_prompt_no_global_saturation_no_block(self) -> None:
+        """Without global_saturation in the analysis the prompt must not
+        reference it (backwards compatible)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_sat": 0.04, "midtones_sat": 0.08, "highlights_sat": 0.06,
+            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
+            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
+            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+        }
+        msgs = build_prompt(
+            analysis, [], "editorial", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        assert "global_saturation" not in msgs[1]["content"]
 
 
 class TestPresetExposureFilter:
