@@ -2,21 +2,21 @@
 
 > ## ⚠️ DISCLAIMERS
 >
-> ### 1. Proyecto experimental
+> ### 1. Experimental project
 >
-> **Este proyecto es TOTALMENTE EXPERIMENTAL.** Está construido con una fuerte base de *vibe-coding*: el código y los formatos binarios se han deducido, verificado y ajustado de forma iterativa contra el código fuente de darktable. Puede **fallar al crear estilos**, generar resultados inesperados, o producir archivos `.dtstyle` que no se comporten como se espera. Úsalo con precaución, revisa siempre el resultado visual y haz copias de seguridad de tus ediciones. No lo uses en flujos de trabajo profesionales sin validar antes cada estilo generado.
+> **This project is TOTALLY EXPERIMENTAL.** It is built on a strong *vibe-coding* foundation: the code and binary formats have been reverse-engineered, verified, and adjusted iteratively against the darktable source code. It can **fail when creating styles**, produce unexpected results, or generate `.dtstyle` files that do not behave as expected. Use it with caution, always review the visual result, and back up your edits. Do not use it in professional workflows without validating each generated style first.
 >
-> ### 2. Aviso ético sobre estilos de fotógrafos
+> ### 2. Ethical notice about photographers' styles
 >
-> **ESTE SOFTWARE NO ESTÁ PENSADO PARA COPIAR ESTILOS DE FOTÓGRAFOS. ESTÁ ENFOCADO PARA APRENDER CÓMO EDITAN A NIVEL TÉCNICO ESOS FOTÓGRAFOS. SI TE GUSTAN, COMPRA SUS PRESETS O SUS FOTOGRAFÍAS.**
+> **THIS SOFTWARE IS NOT MEANT TO COPY PHOTOGRAPHERS' STYLES. IT IS FOCUSED ON LEARNING HOW THOSE PHOTOGRAPHERS EDIT AT A TECHNICAL LEVEL. IF YOU LIKE THEM, BUY THEIR PRESETS OR THEIR PHOTOGRAPHS.**
 >
-> Las fotografías de referencia se utilizan únicamente con fines educativos y técnicos: entender qué decisiones de edición (exposición, contraste, gradación de color por zona tonal, saturación…) producen un determinado look. El objetivo es que aprendas a editar, no que repliques el trabajo comercial de nadie.
+> Reference photographs are used solely for educational and technical purposes: understanding which editing decisions (exposure, contrast, per-zone tonal color grading, saturation…) produce a given look. The goal is for you to learn how to edit, not to replicate anyone's commercial work.
 >
-> ### 3. Compromiso con el software libre
+> ### 3. Commitment to free software
 >
-> **DESTACAR QUE ESTE SOFTWARE SE HA HECHO PARA DARKTABLE, PARA COLABORAR CON UN SOFTWARE LIBRE Y QUE TODO EL MUNDO PUEDA EDITAR SUS RAWS DE FORMA "GRATUITA" Y LIBRE.**
+> **EMPHASIS: THIS SOFTWARE WAS MADE FOR DARKTABLE, TO CONTRIBUTE TO FREE SOFTWARE AND SO THAT EVERYONE CAN EDIT THEIR RAWS FOR "FREE" AND IN AN OPEN WAY.**
 >
-> dtstylekit existe para la comunidad de darktable: democratizar la edición de fotografía RAW, enseñar técnicas de etalonaje y permitir que cualquiera, sin pagar licencias ni presets comerciales, entienda y aplique las técnicas de los grandes fotógrafos. Si un look te gusta de verdad, apoya a su autor comprando su trabajo.
+> dtstylekit exists for the darktable community: democratizing RAW photography editing, teaching color-grading techniques, and letting anyone — without paying for licenses or commercial presets — understand and apply the techniques of great photographers. If you truly like a look, support its author by buying their work.
 
 ## Overall Goal
 Build a Python CLI tool `dtstylekit` that uses a Vision Language Model (VLM) via Ollama to analyze photographs, select and compose from 534 existing Darktable `.dtstyle` presets, apply scalar adjustments on verified IOP structs (filmicrgb, colorbalancergb, sigmoid, exposure, atrous), and output valid `.dtstyle` files with explanatory markdown reports.
@@ -63,5 +63,5 @@ This project pivots from "LLM generates binary blobs" to "VLM selects/composes v
 | 5 | VLM Integration — Prompt, Query, Parse | Backend/Logic | COMPLETED | vlm/ (client, orchestrator, parser, prompt_builder, schema_renderer, validator) | JSON-schema validation of VLM output | phases/phase-5.md | ✅ |
 | 6 | Composer & Orchestrator — style_composer, report, CLI, tests | Backend/Logic | COMPLETED | composer/ (generator, merger, report, roundtrip) + cli.py | end-to-end pipeline + round-trip validation | phases/phase-6.md | ✅ |
 | 7 | Curves Module — curve templates + pack/unpack (post-plan) | Backend/Logic | COMPLETED | curves/ (templates, packing, cli) | tonecurve/rgbcurve/colorzones pack/unpack | — | ✅ |
-| 8 | Reference-Photo Analysis & Narrative Explanation Docs | Backend/Logic | COMPLETED | analyzer/pipeline.py (hues por zona + detección bimodal), composer/explanation.py, cli.py `--lang` | documentos `*_EXPLICACION.md` en lenguaje natural (es/en) generados automáticamente a partir de las referencias; `--lang es` por defecto | — | ✅ |
-| 9 | Reference Saturation Fix (global HSV) | Backend/Logic | COMPLETED | orchestrator.py `global_saturation`, prompt_builder.py bloque HSV, validator.py guard Hito 2.4, tests | las referencias low-key ya no se perciben como desaturadas; el validador clampea `filmicrgb.saturation<0` a 0 cuando las refs son coloridas (≥0.25 HSV) | — | ✅ |
+| 8 | Reference-Photo Analysis & Narrative Explanation Docs | Backend/Logic | COMPLETED | analyzer/pipeline.py (per-zone hues + bimodal detection), composer/explanation.py, cli.py `--lang` | natural-language `*_EXPLICACION.md` documents (es/en) auto-generated from the references; `--lang es` by default | — | ✅ |
+| 9 | Reference Saturation Fix (global HSV) | Backend/Logic | COMPLETED | orchestrator.py `global_saturation`, prompt_builder.py HSV block, validator.py Hito 2.4 guard, tests | low-key references are no longer perceived as desaturated; the validator clamps `filmicrgb.saturation<0` to 0 when references are colorful (≥0.25 HSV) | — | ✅ |

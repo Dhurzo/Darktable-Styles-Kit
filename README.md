@@ -4,21 +4,21 @@ A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze p
 
 > ## ⚠️ DISCLAIMERS
 >
-> ### 1. Proyecto experimental
+> ### 1. Experimental project
 >
-> **Este proyecto es TOTALMENTE EXPERIMENTAL.** Está construido con una fuerte base de *vibe-coding*: el código y los formatos binarios se han deducido, verificado y ajustado de forma iterativa contra el código fuente de darktable. Puede **fallar al crear estilos**, generar resultados inesperados, o producir archivos `.dtstyle` que no se comporten como se espera. Úsalo con precaución, revisa siempre el resultado visual y haz copias de seguridad de tus ediciones. No lo uses en flujos de trabajo profesionales sin validar antes cada estilo generado.
+> **This project is TOTALLY EXPERIMENTAL.** It is built on a strong *vibe-coding* foundation: the code and binary formats have been reverse-engineered, verified, and adjusted iteratively against the darktable source code. It can **fail when creating styles**, produce unexpected results, or generate `.dtstyle` files that do not behave as expected. Use it with caution, always review the visual result, and back up your edits. Do not use it in professional workflows without validating each generated style first.
 >
-> ### 2. Aviso ético sobre estilos de fotógrafos
+> ### 2. Ethical notice about photographers' styles
 >
-> **ESTE SOFTWARE NO ESTÁ PENSADO PARA COPIAR ESTILOS DE FOTÓGRAFOS. ESTÁ ENFOCADO PARA APRENDER CÓMO EDITAN A NIVEL TÉCNICO ESOS FOTÓGRAFOS. SI TE GUSTAN, COMPRA SUS PRESETS O SUS FOTOGRAFÍAS.**
+> **THIS SOFTWARE IS NOT MEANT TO COPY PHOTOGRAPHERS' STYLES. IT IS FOCUSED ON LEARNING HOW THOSE PHOTOGRAPHERS EDIT AT A TECHNICAL LEVEL. IF YOU LIKE THEM, BUY THEIR PRESETS OR THEIR PHOTOGRAPHS.**
 >
-> Las fotografías de referencia se utilizan únicamente con fines educativos y técnicos: entender qué decisiones de edición (exposición, contraste, gradación de color por zona tonal, saturación…) producen un determinado look. El objetivo es que aprendas a editar, no que repliques el trabajo comercial de nadie.
+> Reference photographs are used solely for educational and technical purposes: understanding which editing decisions (exposure, contrast, per-zone tonal color grading, saturation…) produce a given look. The goal is for you to learn how to edit, not to replicate anyone's commercial work.
 >
-> ### 3. Compromiso con el software libre
+> ### 3. Commitment to free software
 >
-> **DESTACAR QUE ESTE SOFTWARE SE HA HECHO PARA DARKTABLE, PARA COLABORAR CON UN SOFTWARE LIBRE Y QUE TODO EL MUNDO PUEDA EDITAR SUS RAWS DE FORMA "GRATUITA" Y LIBRE.**
+> **EMPHASIS: THIS SOFTWARE WAS MADE FOR DARKTABLE, TO CONTRIBUTE TO FREE SOFTWARE AND SO THAT EVERYONE CAN EDIT THEIR RAWS FOR "FREE" AND IN AN OPEN WAY.**
 >
-> dtstylekit existe para la comunidad de darktable: democratizar la edición de fotografía RAW, enseñar técnicas de etalonaje y permitir que cualquiera, sin pagar licencias ni presets comerciales, entienda y aplique las técnicas de los grandes fotógrafos. Si un look te gusta de verdad, apoya a su autor comprando su trabajo.
+> dtstylekit exists for the darktable community: democratizing RAW photography editing, teaching color-grading techniques, and letting anyone — without paying for licenses or commercial presets — understand and apply the techniques of great photographers. If you truly like a look, support its author by buying their work.
 
 ## Overview
 
