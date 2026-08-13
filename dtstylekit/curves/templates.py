@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Sequence
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -158,7 +156,7 @@ def _simple_crush(crush: float = 0.05, n: int = 5) -> list[tuple[float, float]]:
     """
     crush = max(0.0, min(0.3, crush))
     # Mix between identity (a=1) and crisp S (a=∞), parameterised by crush.
-    a = 1.0 + crush * 6.0
+    1.0 + crush * 6.0
     return _resample(
         n,
         lambda x: 0.5 + (math.sin(math.pi * (x - 0.5))) * crush * 0.5 + (x - 0.5) * (1 - crush),
@@ -188,7 +186,7 @@ def _highlights_rolloff(target: float = 0.95, n: int = 5) -> list[tuple[float, f
     return pts
 
 
-def _shadow_tint(channel: str, strength: float = 0.08, n: int = 5) -> list[tuple[float, float]]:
+def _shadow_tint(_channel: str, strength: float = 0.08, n: int = 5) -> list[tuple[float, float]]:
     """Lift the shadow region of the curve only.
 
     For ``tonecurve`` and ``colorzones`` use ``channel`` to pick a

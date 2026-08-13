@@ -11,14 +11,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dtstylekit.analyzer.pipeline import analyze_reference_hues
+
 from .client import VLMClient
 from .iterative_refiner import iterative_refine
-from .models import encode_image_b64
 from .parser import parse_response
 from .prompt_builder import build_prompt
 from .schema_renderer import render_iop_schema
 from .validator import validate_style
-from dtstylekit.analyzer.pipeline import analyze_reference_hues
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 
 def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 88) -> str:
     """Encode image as base64 JPEG, downscaled to max_dim."""
-    from PIL import Image
     import io
+
+    from PIL import Image
 
     img = Image.open(image_path)
     if img.mode in ("RGBA", "LA", "P"):
@@ -293,7 +294,7 @@ def generate_style_spec(
 
         # Build a generate function that the refiner can call
         def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]):
-            refine_messages = build_prompt(
+            build_prompt(
                 analysis, presets, refine_direction, schema, image_b64,
                 reference_b64s=ref_b64s or None,
             )
@@ -305,7 +306,7 @@ def generate_style_spec(
         # Encode references for refiner
         ref_b64s = reference_b64s if reference_b64s else []
         for ref in references or []:
-            if ref not in [r for r in references or []]:  # avoid double-encoding
+            if ref not in list(references or []):  # avoid double-encoding
                 try:
                     ref_b64s.append(_encode_resized(ref))
                 except Exception:

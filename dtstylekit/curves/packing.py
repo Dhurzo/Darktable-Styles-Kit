@@ -29,8 +29,8 @@ explicit sized records.  Round-trip can therefore be checked by
 from __future__ import annotations
 
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 # Local curve templates import (no circular dependency)
 from .templates import CurveTemplate, get_template
@@ -73,7 +73,7 @@ class ColorzonesParams:
     def validate(self) -> None:
         assert len(self.curve_x) == 3, "curve_x must have 3 channels"
         assert len(self.curve_y) == 3, "curve_y must have 3 channels"
-        for ch_x, ch_y in zip(self.curve_x, self.curve_y):
+        for ch_x, ch_y in zip(self.curve_x, self.curve_y, strict=False):
             assert len(ch_x) == len(ch_y), "x/y per channel length mismatch"
             assert 2 <= len(ch_x) <= MAX_CURVE_NODES, "node count out of range"
             assert all(0.0 <= x <= 1.0 for x in ch_x), "x out of [0,1]"
@@ -97,7 +97,7 @@ class RGBCurveParams:
     def validate(self) -> None:
         assert len(self.curve_nodes_x) == 3
         assert len(self.curve_nodes_y) == 3
-        for ch_x, ch_y in zip(self.curve_nodes_x, self.curve_nodes_y):
+        for ch_x, ch_y in zip(self.curve_nodes_x, self.curve_nodes_y, strict=False):
             n = len(ch_x)
             assert n == len(ch_y), "x/y per channel length mismatch"
             assert 2 <= n <= MAX_CURVE_NODES
@@ -121,7 +121,7 @@ class TonecurveParams:
     def validate(self) -> None:
         assert len(self.tonecurve_x) == 3
         assert len(self.tonecurve_y) == 3
-        for ch_x, ch_y in zip(self.tonecurve_x, self.tonecurve_y):
+        for ch_x, ch_y in zip(self.tonecurve_x, self.tonecurve_y, strict=False):
             n = len(ch_x)
             assert n == len(ch_y), "x/y per channel length mismatch"
             assert 2 <= n <= MAX_CURVE_NODES

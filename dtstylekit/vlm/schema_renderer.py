@@ -8,7 +8,6 @@ instead of trying to write spline coordinates by hand.
 
 from __future__ import annotations
 
-
 _CURVE_OPERATIONS = ("colorzones", "rgbcurve", "tonecurve")
 
 

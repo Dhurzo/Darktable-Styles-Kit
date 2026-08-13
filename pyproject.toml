@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dtstylekit"
-version = "0.1.0"
+version = "0.3.0"
 description = "AI-Powered Darktable Style Generator using Vision Language Models"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "dtstylekit contributors"}
+    {name = "dtstylekit contributors", email = "dtstylekit@users.noreply.github.com"}
 ]
 keywords = ["darktable", "photography", "style", "preset", "vlm", "ollama", "ai"]
 classifiers = [
@@ -49,9 +49,10 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/darktable-org/darktable"
-Repository = "https://github.com/darktable-org/darktable"
-Issues = "https://github.com/darktable-org/darktable/issues"
+# TODO: replace with the real repository once it is published.
+Homepage = "https://github.com/<your-user>/dtstylekit"
+Repository = "https://github.com/<your-user>/dtstylekit"
+Issues = "https://github.com/<your-user>/dtstylekit/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -103,7 +104,10 @@ skip-magic-trailing-comma = false
 line-ending = "lf"
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12 because numpy>=2.5 ships PEP 695 `type` statements in its stubs,
+# which mypy cannot parse with a 3.11 target (even though the package
+# itself supports Python >=3.11).
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

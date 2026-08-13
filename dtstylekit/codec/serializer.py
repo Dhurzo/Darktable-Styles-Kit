@@ -5,16 +5,15 @@ complete .dtstyle XML documents.
 """
 
 import xml.etree.ElementTree as ET
-from typing import Any
 
-from .xmp_codec import encode_xmp
-from .blendop import DEFAULT_BLENDOP_DISPLAY, DEFAULT_BLENDOP_SCENE, DEFAULT_BLENDOP_LAB
+from .blendop import DEFAULT_BLENDOP_DISPLAY, DEFAULT_BLENDOP_LAB, DEFAULT_BLENDOP_SCENE
 from .iop_registry import get_registry, pack_params
+from .xmp_codec import encode_xmp
 
 
 def encode_plugin(plugin_dict: dict) -> dict:
     """Encode a plugin dictionary for XML output.
-    
+
     Takes a plugin dict with keys:
         - operation (required): IOP name (e.g., "filmicrgb")
         - enabled (optional, default 1): 0 or 1
@@ -30,7 +29,7 @@ def encode_plugin(plugin_dict: dict) -> dict:
         - blendop_override (optional): Custom blendop encoded string
         - blendop_version (optional, default 13): Blendop version
         - module (optional, default 0): Module version field
-    
+
     Returns:
         Dictionary with XML-ready fields including op_params_encoded and blendop_encoded
     """
@@ -41,11 +40,11 @@ def encode_plugin(plugin_dict: dict) -> dict:
     multi_priority = plugin_dict.get("multi_priority", 0)
     module = plugin_dict.get("module", 0)
     blendop_version = plugin_dict.get("blendop_version", 13)
-    
+
     # Get registry to determine blendop_cst
     reg = get_registry(operation)
     blendop_cst = reg.blendop_cst if reg else 4
-    
+
     # Pack op_params — caller may have already encoded them.
     op_params_override = plugin_dict.get("op_params_override")
     if op_params_override is not None:
@@ -57,7 +56,7 @@ def encode_plugin(plugin_dict: dict) -> dict:
         # Unknown operation — only acceptable when the caller also
         # passes op_params_override, otherwise we error out.
         raise ValueError(f"Unknown operation: {operation}")
-    
+
     # Handle blendop
     blendop_override = plugin_dict.get("blendop_override")
     if blendop_override:
@@ -71,7 +70,7 @@ def encode_plugin(plugin_dict: dict) -> dict:
             blendop_encoded = DEFAULT_BLENDOP_LAB
         else:
             blendop_encoded = DEFAULT_BLENDOP_DISPLAY
-    
+
     return {
         "num": plugin_dict.get("num", 0),
         "module": module,
@@ -93,34 +92,34 @@ def build_dtstyle_xml(
     iop_list: str | None = None
 ) -> str:
     """Build a complete .dtstyle XML document.
-    
+
     Args:
         name: Style name (e.g., "My Style" or "_l10n_darktable|_l10n_colors|Sepia")
         description: Style description (can be empty string)
         plugins: List of plugin dicts (will be passed through encode_plugin)
         iop_list: Optional CSV string of "operation,priority" pairs
-    
+
     Returns:
         Complete XML string with <?xml ...?> declaration
-    
+
     Per format_analysis.md §2 and §10.
     """
     root = ET.Element("darktable_style", version="1.0")
-    
+
     # Info section
     info = ET.SubElement(root, "info")
     ET.SubElement(info, "name").text = name
     ET.SubElement(info, "description").text = description
     if iop_list:
         ET.SubElement(info, "iop_list").text = iop_list
-    
+
     # Style section
     style = ET.SubElement(root, "style")
-    
-    for i, plugin_dict in enumerate(plugins):
+
+    for _i, plugin_dict in enumerate(plugins):
         # Encode plugin to get XML-ready fields
         encoded = encode_plugin(plugin_dict)
-        
+
         plugin = ET.SubElement(style, "plugin")
         ET.SubElement(plugin, "num").text = str(encoded["num"])
         ET.SubElement(plugin, "module").text = str(encoded["module"])
@@ -132,7 +131,7 @@ def build_dtstyle_xml(
         ET.SubElement(plugin, "multi_priority").text = str(encoded["multi_priority"])
         ET.SubElement(plugin, "multi_name").text = encoded["multi_name"]
         ET.SubElement(plugin, "multi_name_hand_edited").text = str(encoded["multi_name_hand_edited"])
-    
+
     # Convert to string with XML declaration
     xml_str = ET.tostring(root, encoding="unicode")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
@@ -146,7 +145,7 @@ def write_dtstyle_file(
     iop_list: str | None = None
 ) -> None:
     """Write a .dtstyle file to disk.
-    
+
     Convenience wrapper around build_dtstyle_xml.
     """
     xml = build_dtstyle_xml(name, description, plugins, iop_list)

@@ -5,7 +5,8 @@ See blob_size_calibration.md §3 for verified structure.
 """
 
 import struct
-from .xmp_codec import encode_xmp, decode_xmp
+
+from .xmp_codec import decode_xmp, encode_xmp
 
 
 def _patch_field(encoded: str, offset: int, value: int | float, fmt: str) -> str:
@@ -31,7 +32,7 @@ DEFAULT_BLENDOP_LAB = _patch_field(_BASE_BLENDOP, 4, 2, '<i')        # blend_cst
 
 def patch_opacity(encoded: str, opacity_pct: float) -> str:
     """Patch opacity field at offset 16 (float32, percentage 0-100).
-    
+
     Darktable stores opacity as 0-100 percentage, not 0.0-1.0.
     """
     return _patch_field(encoded, 16, opacity_pct, '<f')
@@ -39,7 +40,7 @@ def patch_opacity(encoded: str, opacity_pct: float) -> str:
 
 def patch_blend_mode(encoded: str, mode: int) -> str:
     """Patch blend_mode field at offset 8 (uint32).
-    
+
     Common modes:
     - 0: DEVELOP_BLEND_NORMAL (legacy)
     - 24: DEVELOP_BLEND_NORMAL2 (current default)

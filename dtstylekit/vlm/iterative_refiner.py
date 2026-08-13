@@ -11,7 +11,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import logging
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -97,6 +96,7 @@ def _import_style_into_library(style_path: Path, name: str, work: Path) -> None:
     """Register the style in the isolated library DB (inlined from visual_check)."""
     import sqlite3
     import xml.etree.ElementTree as ET
+
     from dtstylekit.codec.xmp_codec import decode_xmp
 
     dbs = sorted((work / "cfg" / "darktable").glob("*.db"))
@@ -220,7 +220,7 @@ def render_with_style(
 def evaluate_metrics(
     metrics: RenderMetrics,
     target_analysis: ImageAnalysis,
-    tolerance: float = 0.15,
+    _tolerance: float = 0.15,  # reserved: evaluation strictness knob
 ) -> tuple[bool, list[str]]:
     """Evaluate render metrics against target analysis.
 
@@ -231,7 +231,7 @@ def evaluate_metrics(
 
     target_lum = getattr(getattr(target_analysis, "luminance", None), "mean", 0.5)
     target_sat = getattr(getattr(target_analysis, "luminance", None), "saturation_mean", 0.2)
-    target_shadows = getattr(getattr(target_analysis, "luminance", None), "shadows_pct", 0.1)
+    getattr(getattr(target_analysis, "luminance", None), "shadows_pct", 0.1)
 
     # Luminance preservation (style shouldn't drastically change exposure)
     lum_ratio = metrics.mean_luminance / max(target_lum, 0.01)
@@ -380,7 +380,6 @@ def iterative_refine(
 
         # Save temporary .dtstyle for rendering
         from dtstylekit.composer.generator import generate_dtstyle
-        from dtstylekit.codec.iop_registry import IOP_REGISTRY
 
         style_path = work_dir / f"iter_{iteration}.dtstyle"
         generate_dtstyle(spec, [], style_path, target_analysis)

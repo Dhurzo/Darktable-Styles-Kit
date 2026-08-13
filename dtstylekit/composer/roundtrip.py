@@ -17,8 +17,6 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import tempfile
-import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -160,7 +158,7 @@ def validate_iop_list_consistency(dtstyle_path: Path) -> list[str]:
     # Parse iop_list: "operation,priority,operation,priority,..."
     try:
         parts = iop_list_text.split(",")
-        iop_ops = set(parts[i] for i in range(0, len(parts), 2))
+        iop_ops = {parts[i] for i in range(0, len(parts), 2)}
     except Exception as exc:
         errors.append(f"Cannot parse <iop_list>: {exc}")
         return errors

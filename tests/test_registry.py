@@ -3,21 +3,21 @@
 import pytest
 
 from dtstylekit.codec import (
-    IOPRegistry,
     IOP_REGISTRY,
+    IOPRegistry,
     get_registry,
+    list_registered,
+    list_unverified,
+    list_verified,
     pack_params,
     unpack_params,
     verify_size,
-    list_registered,
-    list_verified,
-    list_unverified,
 )
 
 
 class TestRegistryAccess:
     """Tests for registry lookup and listing functions."""
-    
+
     def test_get_registry_existing(self):
         """get_registry returns IOPRegistry for known operations."""
         for op in ["exposure", "filmicrgb", "colorbalancergb", "sigmoid", "atrous"]:
@@ -25,12 +25,12 @@ class TestRegistryAccess:
             assert reg is not None
             assert reg.operation == op
             assert isinstance(reg, IOPRegistry)
-    
+
     def test_get_registry_unknown(self):
         """get_registry returns None for unknown operations."""
         assert get_registry("nonexistent") is None
         assert get_registry("") is None
-    
+
     def test_list_registered(self):
         """list_registered returns all registered operations."""
         registered = list_registered()
@@ -38,7 +38,7 @@ class TestRegistryAccess:
         assert "exposure" in registered
         assert "filmicrgb" in registered
         assert registered == sorted(registered)  # Should be sorted
-    
+
     def test_list_verified(self):
         """list_verified returns only operations with verified sizes."""
         verified = list_verified()
@@ -55,7 +55,7 @@ class TestRegistryAccess:
         assert "vibrance" not in verified
         # Now includes bilat (20B), basecurve (520B), plus the originals
         assert len(verified) == 10
-    
+
     def test_list_unverified(self):
         """list_unverified returns operations without verified sizes."""
         unverified = list_unverified()
@@ -63,14 +63,14 @@ class TestRegistryAccess:
         assert "velvia" in unverified
         assert "filmicrgb" not in unverified
         assert len(unverified) > 0
-    
+
     def test_all_verified_have_size(self):
         """All verified IOPs should have size_bytes set."""
         for op in list_verified():
             reg = get_registry(op)
             assert reg.size_bytes is not None, f"{op} is verified but has no size_bytes"
             assert reg.size_bytes > 0, f"{op} has invalid size_bytes"
-    
+
     def test_all_unverified_have_none_size(self):
         """All unverified IOPs should have size_bytes = None."""
         for op in list_unverified():
@@ -80,13 +80,13 @@ class TestRegistryAccess:
 
 class TestPackParams:
     """Tests for pack_params function."""
-    
+
     def test_pack_exposure_defaults(self):
         """Pack exposure with defaults produces correct size."""
         blob = pack_params("exposure", {})
         assert len(blob) == 28
         assert verify_size("exposure", blob)
-    
+
     def test_pack_exposure_custom(self):
         """Pack exposure with custom values."""
         blob = pack_params("exposure", {
@@ -99,13 +99,13 @@ class TestPackParams:
         })
         assert len(blob) == 28
         assert verify_size("exposure", blob)
-    
+
     def test_pack_filmicrgb_defaults(self):
         """Pack filmicrgb with defaults produces 116 bytes."""
         blob = pack_params("filmicrgb", {})
         assert len(blob) == 116
         assert verify_size("filmicrgb", blob)
-    
+
     def test_pack_filmicrgb_custom(self):
         """Pack filmicrgb with custom values."""
         blob = pack_params("filmicrgb", {
@@ -115,13 +115,13 @@ class TestPackParams:
         })
         assert len(blob) == 116
         assert verify_size("filmicrgb", blob)
-    
+
     def test_pack_colorbalancergb_defaults(self):
         """Pack colorbalancergb with defaults produces 132 bytes."""
         blob = pack_params("colorbalancergb", {})
         assert len(blob) == 132
         assert verify_size("colorbalancergb", blob)
-    
+
     def test_pack_colorbalancergb_custom(self):
         """Pack colorbalancergb with custom values."""
         blob = pack_params("colorbalancergb", {
@@ -131,13 +131,13 @@ class TestPackParams:
         })
         assert len(blob) == 132
         assert verify_size("colorbalancergb", blob)
-    
+
     def test_pack_sigmoid_defaults(self):
         """Pack sigmoid with defaults produces 56 bytes."""
         blob = pack_params("sigmoid", {})
         assert len(blob) == 56
         assert verify_size("sigmoid", blob)
-    
+
     def test_pack_sigmoid_custom(self):
         """Pack sigmoid with custom values."""
         blob = pack_params("sigmoid", {
@@ -146,13 +146,13 @@ class TestPackParams:
         })
         assert len(blob) == 56
         assert verify_size("sigmoid", blob)
-    
+
     def test_pack_atrous_defaults(self):
         """Pack atrous with defaults produces 248 bytes."""
         blob = pack_params("atrous", {})
         assert len(blob) == 248
         assert verify_size("atrous", blob)
-    
+
     def test_pack_atrous_custom(self):
         """Pack atrous with custom values."""
         blob = pack_params("atrous", {
@@ -161,7 +161,7 @@ class TestPackParams:
         })
         assert len(blob) == 248
         assert verify_size("atrous", blob)
-    
+
     def test_pack_simple_iops(self):
         """Pack simple IOPs (unverified sizes)."""
         for op in list_unverified():
@@ -170,20 +170,20 @@ class TestPackParams:
             assert isinstance(blob, bytes)
             # verify_size returns True for unverified
             assert verify_size(op, blob)
-    
+
     def test_pack_unknown_operation(self):
         """Pack unknown operation raises ValueError."""
         with pytest.raises(ValueError, match="Unknown operation"):
             pack_params("nonexistent", {})
-    
+
     def test_pack_invalid_range(self):
         """Pack with out-of-range value raises ValueError."""
         with pytest.raises(ValueError, match="out of range"):
             pack_params("exposure", {"exposure": 100.0})  # max is 18.0
-        
+
         with pytest.raises(ValueError, match="out of range"):
             pack_params("filmicrgb", {"contrast": 10.0})  # max is 5.0
-    
+
     def test_pack_merges_defaults(self):
         """Pack merges provided params with defaults."""
         blob = pack_params("vibrance", {"amount": 50.0})
@@ -195,7 +195,7 @@ class TestPackParams:
 
 class TestUnpackParams:
     """Tests for unpack_params function."""
-    
+
     def test_unpack_exposure(self):
         """Unpack exposure blob recovers values."""
         original = {
@@ -208,13 +208,13 @@ class TestUnpackParams:
         }
         blob = pack_params("exposure", original)
         unpacked = unpack_params("exposure", blob)
-        
+
         for key, val in original.items():
             if isinstance(val, float):
                 assert abs(unpacked[key] - val) < 1e-6, f"{key}: {unpacked[key]} != {val}"
             else:
                 assert unpacked[key] == val, f"{key}: {unpacked[key]} != {val}"
-    
+
     def test_unpack_filmicrgb(self):
         """Unpack filmicrgb blob recovers values."""
         original = {
@@ -225,13 +225,13 @@ class TestUnpackParams:
         }
         blob = pack_params("filmicrgb", original)
         unpacked = unpack_params("filmicrgb", blob)
-        
+
         for key, val in original.items():
             if isinstance(val, float):
                 assert abs(unpacked[key] - val) < 1e-6, f"{key}: {unpacked[key]} != {val}"
             else:
                 assert unpacked[key] == val
-    
+
     def test_unpack_colorbalancergb(self):
         """Unpack colorbalancergb blob recovers values."""
         original = {
@@ -242,13 +242,13 @@ class TestUnpackParams:
         }
         blob = pack_params("colorbalancergb", original)
         unpacked = unpack_params("colorbalancergb", blob)
-        
+
         for key, val in original.items():
             if isinstance(val, float):
                 assert abs(unpacked[key] - val) < 1e-6, f"{key}: {unpacked[key]} != {val}"
             else:
                 assert unpacked[key] == val
-    
+
     def test_unpack_sigmoid(self):
         """Unpack sigmoid blob recovers values."""
         original = {
@@ -258,13 +258,13 @@ class TestUnpackParams:
         }
         blob = pack_params("sigmoid", original)
         unpacked = unpack_params("sigmoid", blob)
-        
+
         for key, val in original.items():
             if isinstance(val, float):
                 assert abs(unpacked[key] - val) < 1e-6, f"{key}: {unpacked[key]} != {val}"
             else:
                 assert unpacked[key] == val
-    
+
     def test_unpack_atrous(self):
         """Unpack atrous blob recovers values."""
         original = {
@@ -275,13 +275,13 @@ class TestUnpackParams:
         }
         blob = pack_params("atrous", original)
         unpacked = unpack_params("atrous", blob)
-        
+
         for key, val in original.items():
             if isinstance(val, float):
                 assert abs(unpacked[key] - val) < 1e-6, f"{key}: {unpacked[key]} != {val}"
             else:
                 assert unpacked[key] == val
-    
+
     def test_unpack_simple_iops(self):
         """Unpack simple IOPs."""
         for op in list_unverified():
@@ -291,21 +291,21 @@ class TestUnpackParams:
             reg = get_registry(op)
             for field in reg.fields:
                 assert field in unpacked
-    
+
     def test_unpack_unknown_operation(self):
         """Unpack unknown operation raises ValueError."""
         with pytest.raises(ValueError, match="Unknown operation"):
             unpack_params("nonexistent", b"data")
-    
+
     def test_unpack_size_mismatch(self):
         """Unpack with wrong blob size raises ValueError (for verified IOPs)."""
         # exposure expects 24 bytes
         with pytest.raises(ValueError, match="Blob size mismatch"):
             unpack_params("exposure", b"x" * 20)
-        
+
         with pytest.raises(ValueError, match="Blob size mismatch"):
             unpack_params("exposure", b"x" * 30)
-    
+
     def test_unpack_no_size_check_unverified(self):
         """Unpack unverified IOP doesn't check size against registry."""
         # Should not raise size mismatch error since vibrance.size_bytes is None
@@ -317,7 +317,7 @@ class TestUnpackParams:
 
 class TestRoundTrip:
     """Round-trip tests: pack -> unpack should recover original values."""
-    
+
     @pytest.mark.parametrize(
         "op",
         [op for op in list_verified()
@@ -344,14 +344,14 @@ class TestRoundTrip:
             else:
                 assert unpacked_val == original_val, \
                     f"{op}.{field}: {unpacked_val} != {original_val}"
-    
+
     @pytest.mark.parametrize("op", list_unverified())
     def test_roundtrip_unverified_iops(self, op):
         """Round-trip for all unverified IOPs with defaults."""
         blob = pack_params(op, {})
         unpacked = unpack_params(op, blob)
         reg = get_registry(op)
-        
+
         for field in reg.fields:
             original_val = reg.defaults[field]
             unpacked_val = unpacked[field]
@@ -361,23 +361,23 @@ class TestRoundTrip:
             else:
                 assert unpacked_val == original_val, \
                     f"{op}.{field}: {unpacked_val} != {original_val}"
-    
+
     def test_roundtrip_filmicrgb_specific(self):
         """Specific test for filmicrgb with values from completion criteria."""
         # Completion criteria: pack_params("filmicrgb", {"contrast": 1.5, "latitude": 25.0})
         # → 116-byte blob, unpack recovers input
         blob = pack_params("filmicrgb", {"contrast": 1.5, "latitude": 25.0})
         assert len(blob) == 116
-        
+
         unpacked = unpack_params("filmicrgb", blob)
         assert abs(unpacked["contrast"] - 1.5) < 1e-6
         assert abs(unpacked["latitude"] - 25.0) < 1e-6
-    
+
     def test_roundtrip_exposure_specific(self):
         """Specific test for exposure."""
         blob = pack_params("exposure", {"exposure": 1.5, "black": 0.1})
         assert len(blob) == 28
-        
+
         unpacked = unpack_params("exposure", blob)
         assert abs(unpacked["exposure"] - 1.5) < 1e-6
         assert abs(unpacked["black"] - 0.1) < 1e-6
@@ -385,7 +385,7 @@ class TestRoundTrip:
 
 class TestVerifySize:
     """Tests for verify_size function."""
-    
+
     def test_verify_correct_size(self):
         """verify_size returns True for correct blob sizes."""
         for op in list_verified():
@@ -396,14 +396,14 @@ class TestVerifySize:
             params = {} if not getattr(reg, "is_curve_iop", False) else {"curve_preset": "identity"}
             blob = pack_params(op, params)
             assert verify_size(op, blob), f"verify_size failed for {op}"
-    
+
     def test_verify_wrong_size(self):
         """verify_size returns False for incorrect blob sizes."""
         for op in list_verified():
             reg = get_registry(op)
             wrong_blob = b"x" * (reg.size_bytes + 1)
             assert not verify_size(op, wrong_blob), f"verify_size should fail for wrong size {op}"
-    
+
     def test_verify_unverified_returns_true(self):
         """verify_size returns True for unverified IOPs (can't verify)."""
         for op in list_unverified():
@@ -413,36 +413,36 @@ class TestVerifySize:
 
 class TestRegistryStructure:
     """Tests for registry entry structure and consistency."""
-    
+
     def test_all_have_pack_format(self):
         """All registry entries should have pack_format."""
-        for op, reg in IOP_REGISTRY.items():
+        for _op, reg in IOP_REGISTRY.items():
             assert reg.pack_format
             assert reg.pack_format.startswith("<")
-    
+
     def test_all_have_fields(self):
         """All registry entries should have fields tuple."""
-        for op, reg in IOP_REGISTRY.items():
+        for _op, reg in IOP_REGISTRY.items():
             assert isinstance(reg.fields, tuple)
             assert len(reg.fields) > 0
-    
+
     def test_all_have_defaults(self):
         """All registry entries should have defaults dict."""
-        for op, reg in IOP_REGISTRY.items():
+        for _op, reg in IOP_REGISTRY.items():
             assert isinstance(reg.defaults, dict)
             assert set(reg.defaults.keys()) == set(reg.fields)
-    
+
     def test_all_have_ranges(self):
         """All registry entries should have ranges dict."""
-        for op, reg in IOP_REGISTRY.items():
+        for _op, reg in IOP_REGISTRY.items():
             assert isinstance(reg.ranges, dict)
             assert set(reg.ranges.keys()) == set(reg.fields)
-    
+
     def test_all_have_blendop_cst(self):
         """All registry entries should have blendop_cst (2, 3, or 4)."""
         for op, reg in IOP_REGISTRY.items():
             assert reg.blendop_cst in (2, 3, 4), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
-    
+
     def test_verified_iops_blendop_cst(self):
         """Verified IOPs should have correct blendop_cst (per blend.h:
         2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE)."""
@@ -454,13 +454,13 @@ class TestRegistryStructure:
         # Display-referred RGB (blendop_cst=3)
         # exposure uses RGB_DISPLAY per src/iop/exposure.c:324
         reg = get_registry("exposure")
-        assert reg.blendop_cst == 3, f"exposure should be display-referred (3)"
+        assert reg.blendop_cst == 3, "exposure should be display-referred (3)"
 
         # Lab-based (blendop_cst=2)
         for op in ["atrous", "bilat"]:
             reg = get_registry(op)
             assert reg.blendop_cst == 2, f"{op} should be Lab-based (2)"
-    
+
     def test_version_numbers(self):
         """Version numbers should match known versions."""
         assert get_registry("exposure").version == 7
@@ -472,7 +472,7 @@ class TestRegistryStructure:
 
 class TestEdgeCases:
     """Edge case and error handling tests."""
-    
+
     def test_pack_with_extra_params_ignored(self):
         """Extra params not in fields should be ignored (merged but not packed)."""
         # This should not raise - extra params are filtered by field order
@@ -480,7 +480,7 @@ class TestEdgeCases:
         unpacked = unpack_params("vibrance", blob)
         assert "extra_field" not in unpacked
         assert unpacked["amount"] == 50.0
-    
+
     def test_unpack_returns_all_fields(self):
         """Unpack should return all fields defined in registry."""
         for op in list_registered():
@@ -492,7 +492,7 @@ class TestEdgeCases:
             blob = pack_params(op, params)
             unpacked = unpack_params(op, blob)
             assert set(unpacked.keys()) == set(reg.fields)
-    
+
     def test_int_fields_packed_correctly(self):
         """Integer fields should pack as integers, not floats."""
         blob = pack_params("exposure", {"mode": 1, "compensate_exposure_bias": 1})
@@ -501,7 +501,7 @@ class TestEdgeCases:
         assert isinstance(unpacked["compensate_exposure_bias"], int)
         assert unpacked["mode"] == 1
         assert unpacked["compensate_exposure_bias"] == 1
-    
+
     def test_gboolean_fields(self):
         """gboolean fields (0/1 ints) should pack correctly."""
         blob = pack_params("filmicrgb", {"auto_hardness": 1, "custom_grey": 0})

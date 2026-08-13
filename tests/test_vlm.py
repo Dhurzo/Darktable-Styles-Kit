@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
 from dtstylekit.codec.iop_registry import IOP_REGISTRY
 from dtstylekit.presets.models import PluginRef, Preset
 from dtstylekit.vlm.models import Plugin, StyleSpec
@@ -378,7 +379,7 @@ class TestPromptBuilder:
         """Create a properly mocked analysis with luminance and histogram attributes."""
         analysis = MagicMock()
         analysis.to_prompt_dict.return_value = {"luminance": {"mean": mean}}
-        
+
         # Create a proper mock for luminance with all needed attributes
         luminance = MagicMock()
         luminance.mean = mean
@@ -389,14 +390,14 @@ class TestPromptBuilder:
         luminance.midtones_pct = 0.6
         luminance.highlights_pct = 0.2
         analysis.luminance = luminance
-        
+
         # Create a proper mock for histogram with all needed attributes
         histogram = MagicMock()
         histogram.mean_red = mean * 0.9
         histogram.mean_green = mean
         histogram.mean_blue = mean * 1.1
         analysis.histogram = histogram
-        
+
         return analysis
 
     def test_build_prompt_messages(self) -> None:
@@ -804,14 +805,13 @@ class TestE2EValidatorGuardsWithVLMResponse:
             "shadows_sat": 0.0, "midtones_sat": 0.0, "highlights_sat": 0.0,
         }
 
-    def _portrait_target(self) -> "ImageAnalysis":
-        from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
+    def _portrait_target(self) -> ImageAnalysis:
         return ImageAnalysis(
             histogram=HistogramStats(mean_red=0.55, mean_green=0.50, mean_blue=0.35),
         )
 
     def _parse_and_validate(
-        self, vlm_json: str, ref: dict, target: "ImageAnalysis | None" = None,
+        self, vlm_json: str, ref: dict, target: ImageAnalysis | None = None,
     ) -> tuple[StyleSpec, list[str]]:
         spec, _report = parse_response(vlm_json)
         return validate_style(

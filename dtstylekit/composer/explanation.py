@@ -14,7 +14,6 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Small interpretation helpers
 # ---------------------------------------------------------------------------
@@ -413,7 +412,7 @@ def _explain_colorbalance(lang: str, params: dict, ref_analysis: dict | None) ->
     return out
 
 
-def _explain_curve(lang: str, operation: str, params: dict) -> list[str]:
+def _explain_curve(_lang: str, _operation: str, params: dict) -> list[str]:
     out: list[str] = []
     preset = params.get("curve_preset")
     if preset and preset != "identity":
@@ -429,7 +428,7 @@ def _explain_curve(lang: str, operation: str, params: dict) -> list[str]:
 def generate_explanation(
     spec,
     presets: list,
-    analysis,  # ImageAnalysis | None (target image)
+    _analysis,  # ImageAnalysis | None (target image) — reserved for context
     reference_analysis: dict | None,
     reference_paths: list[Path],
     output_path: Path,

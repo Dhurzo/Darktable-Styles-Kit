@@ -7,7 +7,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 from collections import defaultdict
 
@@ -49,7 +48,7 @@ def add_curves_parser(subparsers) -> None:
 
 def cmd_curves_list(args) -> int:
     """List all curve templates, optionally filtered by category."""
-    from dtstylekit.curves import list_templates, REGISTRY
+    from dtstylekit.curves import REGISTRY, list_templates
 
     try:
         templates = list_templates(args.category)
@@ -61,7 +60,7 @@ def cmd_curves_list(args) -> int:
         if args.category:
             print(
                 f"No templates found for category '{args.category}'. "
-                f"Available categories: {sorted(set(t.category for t in REGISTRY))}",
+                f"Available categories: {sorted({t.category for t in REGISTRY})}",
                 file=sys.stderr,
             )
         else:
@@ -131,11 +130,11 @@ def cmd_curves_info(args) -> int:
     print("Pack into any of these curve-based IOPs:")
     print("  colorzones, rgbcurve, tonecurve")
     print()
-    print(f"Example JSON:")
-    print(f'  {{"operation": "tonecurve", "params": {{')
+    print("Example JSON:")
+    print('  {"operation": "tonecurve", "params": {')
     print(f'    "curve_preset": "{tmpl.name}",')
-    print(f'    ...other scalars...')
-    print(f'  }}}}')
+    print('    ...other scalars...')
+    print('  }}')
 
     return 0
 

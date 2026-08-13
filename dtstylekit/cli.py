@@ -200,7 +200,13 @@ def cmd_generate(args) -> int:
     if not db_path.exists() or not emb_path.exists():
         logger.error("Preset index not built. Run: dtstylekit preset index")
         print(
-            "ERROR: Preset index not built. Run: dtstylekit preset index",
+            "ERROR: Preset index not built.\n"
+            "  The semantic search index (presets.db + preset_embeddings.npy) is missing.\n"
+            "  Fix it in one of three ways:\n"
+            "    1. ./setup.sh                     (automatic: locate styles + build index)\n"
+            "    2. dtstylekit preset index        (after symlinking a preset library)\n"
+            "    3. export DTSTYLEKIT_PRESETS_DIR=/path/to/darktable/data/styles\n"
+            "  See the 'Preset library setup' section of the README for details.",
             file=sys.stderr,
         )
         return 1
@@ -228,7 +234,7 @@ def cmd_generate(args) -> int:
             analyzer=analyze_image,
             registry=IOP_REGISTRY,
             model=args.model,
-            references=references,
+            references=[str(p) for p in references],  # str | Path union
             refine_iterations=args.refine_iterations,
             refine_raw_path=args.refine_raw,
         )

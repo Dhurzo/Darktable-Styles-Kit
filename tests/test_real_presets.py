@@ -33,8 +33,6 @@ from dtstylekit.codec.iop_registry import (
     unpack_params,
 )
 from dtstylekit.codec.xmp_codec import decode_xmp
-from dtstylekit.curves import curve_iop_size
-
 
 # ---------------------------------------------------------------------------
 # Fixture discovery
@@ -281,7 +279,7 @@ class TestStructFormatMatchesReality:
 
 
 @pytest.mark.skipif(not HAS_PRESETS, reason="real presets missing")
-def test_coverage_report(parsed_presets: list[dict], capsys) -> None:
+def test_coverage_report(parsed_presets: list[dict], capsys) -> None:  # noqa: ARG001
     """Print a quick coverage report of which real-world IOPs we support."""
     from collections import Counter
     counts = Counter(e["operation"] for e in parsed_presets)

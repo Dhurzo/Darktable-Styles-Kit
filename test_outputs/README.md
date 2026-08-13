@@ -56,9 +56,9 @@ Markdown report containing:
 
 ```bash
 # Remove all test outputs
-rm -rf /home/juan/Repos/darktable/dtstylekit/test_outputs/*
+rm -rf <DTSTYLEKIT_ROOT>/test_outputs/*
 
 # Or recreate the directory
-rm -rf /home/juan/Repos/darktable/dtstylekit/test_outputs
-mkdir /home/juan/Repos/darktable/dtstylekit/test_outputs
+rm -rf <DTSTYLEKIT_ROOT>/test_outputs
+mkdir <DTSTYLEKIT_ROOT>/test_outputs
 ```

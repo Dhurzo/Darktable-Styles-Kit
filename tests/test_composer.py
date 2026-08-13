@@ -8,6 +8,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.codec.iop_registry import pack_params
 from dtstylekit.codec.xmp_codec import encode_xmp
 from dtstylekit.composer.generator import generate_dtstyle
@@ -19,9 +20,7 @@ from dtstylekit.composer.roundtrip import (
     validate_xml_structure,
 )
 from dtstylekit.presets.models import PluginRef, Preset
-from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.vlm.models import Plugin, StyleSpec
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -6,7 +6,6 @@ preset suggestions, and user style direction. Targets ≤6000 tokens total.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -293,7 +292,7 @@ def build_prompt(
     Returns:
         List of message dicts compatible with ollama.chat().
     """
-    analysis_dict = analysis.to_prompt_dict()
+    analysis.to_prompt_dict()
     # Compact preset list (top 5)
     from dtstylekit.presets.models import clean_description, derive_display_name
 
@@ -330,7 +329,7 @@ def build_prompt(
     lum = getattr(analysis, "luminance", None)
     hist = getattr(analysis, "histogram", None)
     diagnosis_parts = []
-    
+
     if lum is not None:
         # Tonal diagnosis
         contrast_level = "low" if (lum.std or 0) < 0.15 else ("high" if (lum.std or 0) > 0.25 else "medium")
@@ -339,7 +338,7 @@ def build_prompt(
             f"TONAL: {brightness} (mean={lum.mean:.2f}), {contrast_level} contrast (std={lum.std:.2f}), "
             f"shadows={lum.shadows_pct:.0%}, midtones={lum.midtones_pct:.0%}, highlights={lum.highlights_pct:.0%}"
         )
-        
+
         # Color diagnosis
         wb = lum.white_balance_ratio_rb or 1.0
         wb_desc = "neutral" if 0.95 < wb < 1.05 else ("warm" if wb > 1.05 else "cool")
@@ -347,7 +346,7 @@ def build_prompt(
         diagnosis_parts.append(
             f"COLOR: {wb_desc} cast (R/B={wb:.2f}), {sat_level} saturation (mean={lum.saturation_mean:.2f})"
         )
-        
+
         # Mood diagnosis
         if (lum.mean or 0) < 0.3 and (lum.std or 0) < 0.2:
             mood = "flat/dark - needs contrast + shadow definition"
@@ -409,14 +408,14 @@ def build_prompt(
     # CRITICAL: Curve template names (cinematic_teal_orange, inverted_s_strong, etc.) are NOT preset filenames.
     # They are used ONLY in adjustments.tonecurve.curve_preset or adjustments.colorzones.curve_preset.
     preset_note = (
-        f"\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
-        f"Curve template names like 'cinematic_teal_orange', 'inverted_s_strong', 's_curve_mild', "
-        f"'lift_shadows', 'muted_earth', 'cool_shadows_warm_highs', 'vintage_faded', 'skin_tone_protect' "
-        f"are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
-        f"adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
-        f"[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
-        f"and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
-        f"add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
+        "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
+        "Curve template names like 'cinematic_teal_orange', 'inverted_s_strong', 's_curve_mild', "
+        "'lift_shadows', 'muted_earth', 'cool_shadows_warm_highs', 'vintage_faded', 'skin_tone_protect' "
+        "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
+        "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
+        "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
+        "and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
+        "add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
     )
     # PIPELINE RULE: This style will be applied to RAW files via darktable-cli.
     # darktable adds a DEFAULT filmicrgb instance to RAW files automatically.
@@ -424,13 +423,13 @@ def build_prompt(
     # INSTEAD: Use filmicrgb for tone mapping (it will OVERRIDE the default).
     # Use colorbalancergb for color grading (match reference hues), tonecurve/colorzones for curves.
     pipeline_note = (
-        f"\n[PIPELINE RULE - RAW COMPATIBILITY] This style targets RAW files. "
-        f"darktable-cli applies a DEFAULT filmicrgb to RAW automatically. "
-        f"• DO NOT use sigmoid - it stacks with default filmicrgb = double tone-mapping = crushed/blue images. "
-        f"• USE filmicrgb for tone mapping: contrast=1.4–1.7 (moderate cinematic), latitude=2–4, saturation=-15 to -35, balance=-3 to +3 (NEVER ≤ -10). "
-        f"• This filmicrgb will REPLACE the default, not stack. "
-        f"• Use colorbalancergb for color grading (shadows/midtones/highlights split - MATCH reference hues). "
-        f"• Use tonecurve.curve_preset='s_curve_mild' and colorzones.curve_preset='identity' for curves."
+        "\n[PIPELINE RULE - RAW COMPATIBILITY] This style targets RAW files. "
+        "darktable-cli applies a DEFAULT filmicrgb to RAW automatically. "
+        "• DO NOT use sigmoid - it stacks with default filmicrgb = double tone-mapping = crushed/blue images. "
+        "• USE filmicrgb for tone mapping: contrast=1.4–1.7 (moderate cinematic), latitude=2–4, saturation=-15 to -35, balance=-3 to +3 (NEVER ≤ -10). "
+        "• This filmicrgb will REPLACE the default, not stack. "
+        "• Use colorbalancergb for color grading (shadows/midtones/highlights split - MATCH reference hues). "
+        "• Use tonecurve.curve_preset='s_curve_mild' and colorzones.curve_preset='identity' for curves."
     )
 
     if reference_b64s:
@@ -577,7 +576,6 @@ def build_prompt(
 
             ref_hues = "\n[No reliable pre-computed hues - use NEUTRAL: shadows=0°, midtones=0°, highlights=0° (respect target colors)]\n"
 
-
         reference_note = (
 
             f"{ref_hues}"
@@ -594,17 +592,17 @@ def build_prompt(
 
             + _chroma_caps_block(reference_analysis) + "\n"
 
-            f"[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
+            "[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
 
-            f"[WARNING]  NEUTRALITY RULE: If reference hues are NOT confident (>=0.7), keep shadows_H/midtones_H/highlights_H = 0°.\n"
+            "[WARNING]  NEUTRALITY RULE: If reference hues are NOT confident (>=0.7), keep shadows_H/midtones_H/highlights_H = 0°.\n"
 
-            f"   Apply color grading ONLY when references show CLEAR grading (e.g. Nolan Batman blues ~200°, Blade Runner).\n"
+            "   Apply color grading ONLY when references show CLEAR grading (e.g. Nolan Batman blues ~200°, Blade Runner).\n"
 
-            f"   Photographers like Alen Palander have neutral references - RESPECT the target photo's original colors.\n"
+            "   Photographers like Alen Palander have neutral references - RESPECT the target photo's original colors.\n"
 
-            f"The LAST attached image is the TARGET PHOTO. Design style so target matches reference look.\n"
+            "The LAST attached image is the TARGET PHOTO. Design style so target matches reference look.\n"
 
-            f"===============================================================\n"
+            "===============================================================\n"
 
         )
 
@@ -658,8 +656,6 @@ def build_prompt(
 
     user_content = "\n".join(user_content_parts)
 
-
-
     user_msg: dict = {"role": "user", "content": user_content}
 
     if image_b64:
@@ -669,8 +665,6 @@ def build_prompt(
         if reference_b64s:
 
             user_msg["images"] = list(reference_b64s) + [image_b64]
-
-
 
     return [
 
@@ -756,4 +750,3 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
         f"  -> SET midtones_C = {mc:.3f}   (capped to min(reference_sat, ceiling))\n"
         f"  -> SET highlights_C = {hc:.3f}   (capped to min(reference_sat, ceiling))"
     )
-

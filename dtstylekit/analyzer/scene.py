@@ -14,7 +14,6 @@ from typing import Any
 
 from .models import ImageAnalysis
 
-
 # All thresholds are unitless floats in [0, 1] or luminance-means. They
 # were chosen empirically from the architecture proposal §2.1; they can
 # be tuned later without touching callers (the function signature is

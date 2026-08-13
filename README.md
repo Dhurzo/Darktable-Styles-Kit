@@ -79,6 +79,52 @@ pip install -e .[dev]
 > source /path/to/venv/bin/activate
 > ```
 
+### Preset library setup
+
+dtstylekit indexes the **534 official darktable styles** (the `.dtstyle`
+files in `data/styles/` of the darktable source tree) to build its
+semantic search index. Those styles are *not* vendored into this
+repository — you need a darktable checkout (or any directory containing
+`.dtstyle` files) on your machine.
+
+**Option A — automatic (recommended):**
+
+```bash
+./setup.sh
+```
+
+The script locates the preset library (via `DTSTYLEKIT_PRESETS_DIR`, or a
+darktable checkout containing `data/styles`, or an interactive prompt),
+creates/repairs the `data/presets` symlink, verifies the files are
+reachable, and builds the search index. It is idempotent — safe to run
+again any time.
+
+**Option B — manual:**
+
+```bash
+# 1. Clone darktable (or point at an existing checkout)
+git clone https://github.com/darktable-org/darktable /path/to/darktable
+
+# 2. Symlink the official styles into the expected location
+ln -s /path/to/darktable/data/styles data/presets
+
+# 3. Build the search index
+dtstylekit preset index
+```
+
+**Option C — no symlink at all:** keep the library anywhere and point the
+tool at it with the `DTSTYLEKIT_PRESETS_DIR` environment variable (or
+`dtstylekit preset index --preset-dir <dir>`):
+
+```bash
+export DTSTYLEKIT_PRESETS_DIR=/path/to/darktable/data/styles
+```
+
+> The `data/presets` symlink in this repository points at
+> `../../data/styles`, which only resolves when dtstylekit lives *inside*
+> a darktable checkout (the layout this project was developed in). Use
+> `./setup.sh` or `DTSTYLEKIT_PRESETS_DIR` for any other layout.
+
 ### Usage
 
 ```bash
@@ -140,11 +186,12 @@ absent).
 # Run tests
 pytest
 
-# Type check
-mypy dtstylekit
-
-# Lint
+# Lint (must stay clean — CI enforces it)
 ruff check .
+
+# Type check (best-effort — the codebase has pre-existing typing debt;
+# do not expect a fully clean run yet)
+mypy dtstylekit --follow-imports=skip --ignore-missing-imports
 ```
 
 ## Architecture

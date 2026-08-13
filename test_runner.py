@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 TEST_CASES: list[dict[str, Any]] = [
     {
         "image": "thumb_A14I7406.jpg",
@@ -117,11 +116,11 @@ def main() -> int:
 
     results = []
     for i, case in enumerate(TEST_CASES):
-        print(f"\n{'='*60}")
-        print(f"Test {i+1}/{len(TEST_CASES)}: {case['image']} -> {case['direction']}")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print(f"Test {i + 1}/{len(TEST_CASES)}: {case['image']} -> {case['direction']}")
+        print(f"{'=' * 60}")
 
-        output_dir = output_base / f"test_{i+1}_{Path(case['image']).stem}"
+        output_dir = output_base / f"test_{i + 1}_{Path(case['image']).stem}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         success, output, dtstyle_path = run_generation(
@@ -161,9 +160,9 @@ def main() -> int:
             })
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     passed = sum(1 for r in results if r.get("success", False))
     total = len(results)
     print(f"Passed: {passed}/{total}")

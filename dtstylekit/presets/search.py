@@ -1,8 +1,8 @@
 """Preset search functionality: keyword (FTS5), semantic (embeddings), and hybrid search."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 import numpy as np
 

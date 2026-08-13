@@ -7,61 +7,46 @@ from __future__ import annotations
 
 import math
 import struct
-import json
 from pathlib import Path
 from xml.etree import ElementTree as ET
-from io import StringIO
-from unittest.mock import patch
 
 import pytest
 
-from dtstylekit.curves import (
-    # Templates
-    CurveTemplate,
-    REGISTRY,
-    get_template,
-    list_templates,
-    render_template_summary,
-    # Packing
-    ColorzonesParams,
-    RGBCurveParams,
-    TonecurveParams,
-    COLORZONES_SIZE,
-    RGBCURVE_SIZE,
-    TONECURVE_SIZE,
-    CUBIC_SPLINE,
-    CATMULL_ROM,
-    MONOTONE_HERMITE,
-    apply_curve_template,
-    apply_curve_template_colorzones,
-    apply_curve_template_rgbcurve,
-    apply_curve_template_tonecurve,
-    pack_colorzones,
-    unpack_colorzones,
-    pack_rgbcurve,
-    unpack_rgbcurve,
-    pack_tonecurve,
-    unpack_tonecurve,
-    curve_iop_size,
-)
 from dtstylekit.codec.iop_registry import (
     IOP_REGISTRY,
     pack_params,
     unpack_params,
 )
-from dtstylekit.codec.xmp_codec import decode_xmp, encode_xmp
 from dtstylekit.codec.serializer import build_dtstyle_xml
-from dtstylekit.codec.blendop import DEFAULT_BLENDOP_DISPLAY
-from dtstylekit.curves import REGISTRY as CURVE_TEMPLATES
+from dtstylekit.codec.xmp_codec import decode_xmp, encode_xmp
+from dtstylekit.composer.generator import generate_dtstyle
+from dtstylekit.curves import (
+    COLORZONES_SIZE,
+    REGISTRY,
+    RGBCURVE_SIZE,
+    TONECURVE_SIZE,
+    # Packing
+    apply_curve_template,
+    apply_curve_template_colorzones,
+    apply_curve_template_rgbcurve,
+    apply_curve_template_tonecurve,
+    curve_iop_size,
+    get_template,
+    list_templates,
+    pack_colorzones,
+    pack_rgbcurve,
+    pack_tonecurve,
+    render_template_summary,
+    unpack_colorzones,
+    unpack_rgbcurve,
+    unpack_tonecurve,
+)
+from dtstylekit.curves.cli import (
+    cmd_curves_info,
+    cmd_curves_list,
+)
 from dtstylekit.vlm.models import Plugin, StyleSpec
 from dtstylekit.vlm.validator import validate_style
-from dtstylekit.composer.merger import merge_presets
-from dtstylekit.composer.generator import generate_dtstyle
-from dtstylekit.curves.cli import (
-    cmd_curves_list,
-    cmd_curves_info,
-)
-
 
 # ---------------------------------------------------------------------------
 # Template tests
@@ -136,7 +121,7 @@ class TestTemplateCurves:
         assert lift_nodes[0] == (0.0, 0.0)
         assert lift_nodes[-1] == (1.0, 1.0)
 
-        shadow_pts = list(zip(id_nodes[1:-1], lift_nodes[1:-1]))
+        shadow_pts = list(zip(id_nodes[1:-1], lift_nodes[1:-1], strict=False))
         first_half = shadow_pts[: len(shadow_pts) // 2 + 1]
         assert first_half, "Need at least one shadow point"
         for id_node, lift_node in first_half:
@@ -160,7 +145,7 @@ class TestTemplateCurves:
 
 def _assert_close_lists(a: list[float], b: list[float], tol: float = 1e-5) -> None:
     assert len(a) == len(b)
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=False):
         assert math.isclose(x, y, abs_tol=tol), f"values differ: {x} vs {y}"
 
 

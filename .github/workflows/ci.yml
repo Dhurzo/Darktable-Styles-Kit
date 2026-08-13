@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Sparse-checkout darktable styles for real-preset tests
+        # test_real_presets.py + test_version_drift.py verify blob sizes and
+        # IOP versions against the real darktable style library.  The tests
+        # skip cleanly when the checkout is absent, so this step is an
+        # enhancement, not a requirement.
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/darktable-org/darktable /tmp/darktable
+          git -C /tmp/darktable sparse-checkout set data/styles src/iop
+        continue-on-error: true
+
+      - name: Run tests
+        env:
+          DTSTYLEKIT_PRESETS_DIR: /tmp/darktable/data/styles
+        run: pytest -q
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: Type check (best-effort, informational)
+        # The codebase has pre-existing typing debt; this job is
+        # informational and never blocks merges.
+        continue-on-error: true
+        run: mypy dtstylekit --follow-imports=skip --ignore-missing-imports

@@ -124,7 +124,7 @@ def _ensure_rgb(image: Image.Image) -> Image.Image:
     return image.convert("RGB")
 
 
-def _to_float_array(image: Image.Image) -> "object":  # numpy.ndarray — kept untyped
+def _to_float_array(image: Image.Image) -> object:  # numpy.ndarray — kept untyped
     """Return the RGB image as a ``(H, W, 3)`` float32 array in [0, 1]."""
     import numpy as np
 
@@ -206,7 +206,7 @@ def _detect_bimodal(hues_deg: list[float], weights: list[float]) -> tuple[float,
         return None
     # 12 bins of 30°, circular layout
     bins = np.zeros(12, dtype=np.float32)
-    for hi, wi in zip(h, w):
+    for hi, wi in zip(h, w, strict=False):
         bin_idx = int(hi // 30) % 12
         bins[bin_idx] += wi
     # Find top 2 bins
@@ -291,7 +291,7 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             midtones_mask = (lum >= 0.25) & (lum < 0.75)
             highlights_mask = lum >= 0.75
 
-            def analyze_tonal_range(mask):
+            def analyze_tonal_range(mask, arr=arr):
                 """Returns (hue_list, sat_weights, mean_sat, valid_count, confidence, hue_mode)."""
                 if not np.any(mask):
                     return [], [], 0.0, 0, 0.0, "neutral"

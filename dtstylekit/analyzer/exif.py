@@ -12,7 +12,6 @@ from typing import Any
 
 import exifread
 
-
 # Base tags the test suite and prompt builder care about.
 # Anything else is still pulled in (under an ``exif:<id>`` key) but the
 # the prompt filter module decides what to keep.

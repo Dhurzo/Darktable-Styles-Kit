@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
-from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.analyzer.histogram import compute_histogram
 from dtstylekit.analyzer.luminance import compute_luminance_stats
-from dtstylekit.analyzer.exif import extract_exif
-from dtstylekit.analyzer.scene import detect_scene
-from dtstylekit.analyzer.noise import estimate_noise
+from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.analyzer.pipeline import (
+    _circular_dispersion,
+    _circular_mean,
+    _detect_bimodal,
     analyze_image,
     analyze_reference_hues,
-    _circular_mean,
-    _circular_dispersion,
-    _detect_bimodal,
 )
+from dtstylekit.analyzer.scene import detect_scene
 
 
 def make_image(mode: str = "RGB", size: tuple[int, int] = (64, 64),
@@ -101,8 +99,6 @@ class TestPipeline:
 # ---------------------------------------------------------------------------
 # Helpers for reference-hue tests
 # ---------------------------------------------------------------------------
-
-import numpy as np
 
 
 def _solid_color_image(path: Path, size: tuple[int, int] = (128, 128),

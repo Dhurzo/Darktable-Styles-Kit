@@ -13,7 +13,7 @@ returns a :class:`LuminanceStats` instance covering:
 from __future__ import annotations
 
 import colorsys
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -106,7 +106,6 @@ def _white_balance_ratio(mean_r: float, mean_b: float) -> float:
 
 def _tonal_distribution(luma: np.ndarray) -> tuple[float, float, float]:
     """Return (shadows%, midtones%, highlights%) summing to ~1.0."""
-    n = luma.size
     shadows = float(np.mean(luma < SHADOWS_MAX))
     highlights = float(np.mean(luma >= HIGHLIGHTS_MIN))
     midtones = float(np.mean((luma >= SHADOWS_MAX) & (luma < HIGHLIGHTS_MIN)))

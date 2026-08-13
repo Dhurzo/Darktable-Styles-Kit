@@ -28,7 +28,7 @@ def validate_style(
     spec: StyleSpec,
     registry: dict,
     reference_analysis: dict | None = None,
-    target_analysis: "object | None" = None,
+    target_analysis: object | None = None,
 ) -> tuple[StyleSpec, list[str]]:
     """Validate the StyleSpec.
 
@@ -159,7 +159,8 @@ def validate_style(
         # unintended warm/red tint.  Force C to 0 in that case so the
         # target photo's original colors are respected.
         if plg.operation == "colorbalancergb":
-            _neutral_hue = lambda h: abs(float(h or 0.0)) < 1e-3 or float(h or 0.0) > 359.999
+            def _neutral_hue(h):
+                return abs(float(h or 0.0)) < 1e-3 or float(h or 0.0) > 359.999
             # Global additive offset (most dangerous - tints EVERY pixel).
             gc = float(clamped_params.get("global_C") or 0.0)
             gh = float(clamped_params.get("global_H") or 0.0)
@@ -254,6 +255,7 @@ def validate_style(
             hues = [float(clamped_params.get(f"{z}_H") or 0.0) for z in _zones]
             chroms = [float(clamped_params.get(f"{z}_C") or 0.0) for z in _zones]
             # Circular pairwise distance
+
             def _circular_diff(a: float, b: float) -> float:
                 d = abs(a - b) % 360.0
                 return min(d, 360.0 - d)
@@ -293,7 +295,7 @@ def validate_style(
                                 f"colorbalancergb monochrome-dominance: "
                                 f"{c_key}={old:.3f} at hue {hues[_zones.index(zone)]:.1f}° "
                                 f"matches the other zones' hue — collapsing "
-                                f"to a global tint. Halved to {old/2:.3f}. "
+                                f"to a global tint. Halved to {old / 2:.3f}. "
                                 f"(Reference analysis does not declare this an "
                                 f"intentional monochrome grade.)"
                             )

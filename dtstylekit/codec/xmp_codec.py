@@ -4,21 +4,20 @@ Replicates dt_exif_xmp_encode / dt_exif_xmp_decode from darktable source.
 See format_analysis.md §3 and §9 for algorithm details.
 """
 
-import zlib
 import base64
-import struct
+import zlib
 
 
 def encode_xmp(data: bytes, compress_threshold: int = 100) -> str:
     """Encode binary data to XMP string format.
-    
+
     Args:
         data: Raw binary data (struct.pack output)
         compress_threshold: Use gz+base64 if len(data) > threshold (default 100)
-    
+
     Returns:
         Hex string (if <= threshold) or gzXX<base64> string (if > threshold)
-    
+
     Per format_analysis.md §3:
     - Hex: no prefix, each byte -> 2 hex chars
     - gz+base64: prefix "gz" + 2-digit factor + base64(zlib.compress(data))
@@ -34,17 +33,17 @@ def encode_xmp(data: bytes, compress_threshold: int = 100) -> str:
 
 def decode_xmp(s: str) -> bytes:
     """Decode XMP string back to binary data.
-    
+
     Args:
         s: Encoded string (hex or gzXX<base64>)
-    
+
     Returns:
         Decoded binary data
-    
+
     Per format_analysis.md §3 and §9:
     - If starts with "gz": extract factor (2 digits), base64 decode, zlib decompress
     - Else: hex decode
-    
+
     Raises:
         ValueError: If input format is invalid
     """
@@ -55,7 +54,7 @@ def decode_xmp(s: str) -> bytes:
         try:
             factor = 10 * (ord(s[2]) - ord('0')) + (ord(s[3]) - ord('0'))
         except (ValueError, IndexError):
-            raise ValueError(f"Invalid gz factor in: {s!r}")
+            raise ValueError(f"Invalid gz factor in: {s!r}") from None
         b64_data = s[4:]
         if not b64_data:
             raise ValueError(f"Missing base64 data in: {s!r}")

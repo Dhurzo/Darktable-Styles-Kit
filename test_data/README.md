@@ -32,7 +32,7 @@ dtstylekit/
 
 2. **dtstylekit installed** in development mode:
    ```bash
-   cd /home/juan/Repos/darktable/dtstylekit
+   cd <DTSTYLEKIT_ROOT>
    pip install -e .
    ```
 
@@ -46,7 +46,7 @@ dtstylekit/
 Run generation on one image (~2-3 minutes on CPU):
 
 ```bash
-cd /home/juan/Repos/darktable/dtstylekit
+cd <DTSTYLEKIT_ROOT>
 
 # Dark moody cinematic (Palander-style)
 python3 -m dtstylekit.cli generate test_data/thumb_A14I7406.jpg \
@@ -70,7 +70,7 @@ python3 -m dtstylekit.cli generate test_data/thumb_UPBUNDLE.jpg \
 Run all 6 test cases (~15-20 minutes on CPU):
 
 ```bash
-cd /home/juan/Repos/darktable/dtstylekit
+cd <DTSTYLEKIT_ROOT>
 python3 test_runner.py
 ```
 
