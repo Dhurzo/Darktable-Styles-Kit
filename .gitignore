@@ -66,4 +66,7 @@ Thumbs.db
 # Generated artifacts (rebuild with: dtstylekit preset index)
 outputs/
 generated_styles/
-logs/
+logs/test_outputs/
+
+# E2E test-runner artifacts (recreated by test_runner.py)
+test_outputs/

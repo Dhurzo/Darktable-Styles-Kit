@@ -1,13 +1,13 @@
 # dtstylekit Test Data & Test Runner
 
 This directory contains test images and automated tests for the dtstylekit style generation pipeline.
-**Contents are gitignored** — they exist only locally for development/testing.
+**The thumbnail images are committed** as fixtures for `test_runner.py`; `test_outputs/` is gitignored (generated at runtime).
 
 ## Directory Structure
 
 ```
 dtstylekit/
-├── test_data/          # Input test images (gitignored)
+├── test_data/          # Input test images (committed fixtures)
 │   ├── thumb_A14I7406.jpg
 │   ├── thumb_AE7A8477.jpg
 │   ├── thumb_AE7A8490-2.jpg
