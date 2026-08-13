@@ -2,9 +2,27 @@
 
 A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze photographs, select and compose from 534 existing Darktable presets, apply safe scalar adjustments on verified IOP structs, and output valid `.dtstyle` files with explanatory markdown reports.
 
+> ## ⚠️ DISCLAIMERS
+>
+> ### 1. Proyecto experimental
+>
+> **Este proyecto es TOTALMENTE EXPERIMENTAL.** Está construido con una fuerte base de *vibe-coding*: el código y los formatos binarios se han deducido, verificado y ajustado de forma iterativa contra el código fuente de darktable. Puede **fallar al crear estilos**, generar resultados inesperados, o producir archivos `.dtstyle` que no se comporten como se espera. Úsalo con precaución, revisa siempre el resultado visual y haz copias de seguridad de tus ediciones. No lo uses en flujos de trabajo profesionales sin validar antes cada estilo generado.
+>
+> ### 2. Aviso ético sobre estilos de fotógrafos
+>
+> **ESTE SOFTWARE NO ESTÁ PENSADO PARA COPIAR ESTILOS DE FOTÓGRAFOS. ESTÁ ENFOCADO PARA APRENDER CÓMO EDITAN A NIVEL TÉCNICO ESOS FOTÓGRAFOS. SI TE GUSTAN, COMPRA SUS PRESETS O SUS FOTOGRAFÍAS.**
+>
+> Las fotografías de referencia se utilizan únicamente con fines educativos y técnicos: entender qué decisiones de edición (exposición, contraste, gradación de color por zona tonal, saturación…) producen un determinado look. El objetivo es que aprendas a editar, no que repliques el trabajo comercial de nadie.
+>
+> ### 3. Compromiso con el software libre
+>
+> **DESTACAR QUE ESTE SOFTWARE SE HA HECHO PARA DARKTABLE, PARA COLABORAR CON UN SOFTWARE LIBRE Y QUE TODO EL MUNDO PUEDA EDITAR SUS RAWS DE FORMA "GRATUITA" Y LIBRE.**
+>
+> dtstylekit existe para la comunidad de darktable: democratizar la edición de fotografía RAW, enseñar técnicas de etalonaje y permitir que cualquiera, sin pagar licencias ni presets comerciales, entienda y aplique las técnicas de los grandes fotógrafos. Si un look te gusta de verdad, apoya a su autor comprando su trabajo.
+
 ## Overview
 
-This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The 534 presets in `data/styles/` provide a validated library of Darktable styles. The VLM (default: `gemma3:12b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets, and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
+This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The 534 presets in `data/styles/` provide a validated library of Darktable styles. The VLM (default: `gemma3:27b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets, and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
 
 **Output:** Valid `.dtstyle` file + markdown report explaining the choices.
 
@@ -36,13 +54,13 @@ ollama serve  # starts the server (usually auto-starts after install)
 Pull the default vision model:
 
 ```bash
-ollama pull gemma3:12b
+ollama pull gemma3:27b
 ```
 
 Verify it's working:
 
 ```bash
-ollama run gemma3:12b "Describe this image" --image /path/to/a/photo.jpg
+ollama run gemma3:27b "Describe this image" --image /path/to/a/photo.jpg
 ```
 
 > Other compatible models: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB). Switch with `--model` when running dtstylekit.
@@ -64,7 +82,7 @@ pip install -e .[dev]
 ### Usage
 
 ```bash
-# Analyze an image and generate a style (uses default model: gemma3:12b)
+# Analyze an image and generate a style (uses default model: gemma3:27b)
 dtstylekit generate path/to/photo.jpg -o my_style.dtstyle
 
 # Use a different VLM model
@@ -83,7 +101,7 @@ dtstylekit curves --help
 dtstylekit generate photo.jpg --references 'refs/*.jpg' --direction "cinematic warm portrait" --lang es
 ```
 
-> **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `gemma3:12b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
+> **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `gemma3:27b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
 
 ### Supported darktable version
 
@@ -144,7 +162,7 @@ dtstylekit/
 └── data/presets/          # Symlink to 534 .dtstyle files (darktable style library)
 ```
 
-The default VLM is `gemma3:12b` (override with `--model`). Preset library,
+The default VLM is `gemma3:27b` (override with `--model`). Preset library,
 `outputs/` (SQLite index + embeddings) and `generated_styles/` are resolved
 relative to the project root via `dtstylekit/paths.py` and can be overridden
 with the `DTSTYLEKIT_PRESETS_DIR` / `DTSTYLEKIT_OUTPUTS_DIR` environment
