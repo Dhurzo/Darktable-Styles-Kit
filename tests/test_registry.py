@@ -1,5 +1,7 @@
 """Tests for IOP Registry: pack_params, unpack_params, verify_size."""
 
+from pathlib import Path
+
 import pytest
 
 from dtstylekit.codec import (
@@ -54,7 +56,9 @@ class TestRegistryAccess:
         # Simple IOPs should NOT be in verified
         assert "vibrance" not in verified
         # Now includes bilat (20B), basecurve (520B), plus the originals
-        assert len(verified) == 10
+        # and the v0.4.0 refinement IOPs (temperature, basicadj,
+        # toneequal, colorequal) — all with verified sizes.
+        assert len(verified) == 14
 
     def test_list_unverified(self):
         """list_unverified returns operations without verified sizes."""
@@ -508,6 +512,147 @@ class TestEdgeCases:
         unpacked = unpack_params("filmicrgb", blob)
         assert unpacked["auto_hardness"] == 1
         assert unpacked["custom_grey"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Refinement IOPs (v0.4.0): temperature, basicadj, toneequal, colorequal
+# ---------------------------------------------------------------------------
+
+
+class TestRefinementIops:
+    """Round-trip pack/unpack for the v0.4.0 refinement IOPs."""
+
+    REFINEMENT_OPS = [
+        ("temperature", 20, "<4fi", 5),
+        ("basicadj", 44, "<5fi5f", 11),
+        ("toneequal", 72, "<15f3i", 18),
+        ("colorequal", 128, "<6fi24ff", 32),
+    ]
+
+    @pytest.mark.parametrize("op,size,fmt,nfields", REFINEMENT_OPS)
+    def test_registered_with_verified_size(self, op, size, fmt, nfields):
+        reg = get_registry(op)
+        assert reg is not None
+        assert reg.size_bytes == size
+        assert reg.pack_format == fmt
+        assert len(reg.fields) == nfields
+        assert len(reg.ranges) == nfields
+        assert len(reg.defaults) == nfields
+
+    @pytest.mark.parametrize("op,size,_fmt,_nfields", REFINEMENT_OPS)
+    def test_pack_defaults_roundtrip(self, op, size, _fmt, _nfields):
+        blob = pack_params(op, {})
+        assert len(blob) == size
+        unpacked = unpack_params(op, blob)
+        assert set(unpacked.keys()) == set(get_registry(op).fields)
+        for field, default in get_registry(op).defaults.items():
+            assert abs(float(unpacked[field]) - float(default)) < 1e-4, field
+
+    def test_temperature_custom_values(self):
+        blob = pack_params("temperature", {"red": 1.5, "green": 0.9, "preset": 2})
+        p = unpack_params("temperature", blob)
+        assert abs(p["red"] - 1.5) < 1e-5
+        assert abs(p["green"] - 0.9) < 1e-5
+        assert p["preset"] == 2
+        assert isinstance(p["preset"], int)
+
+    def test_basicadj_enum_mid_struct(self):
+        """preserve_colors is an int enum sitting mid-struct (<5fi5f)."""
+        blob = pack_params("basicadj", {"preserve_colors": 3, "exposure": 1.0})
+        p = unpack_params("basicadj", blob)
+        assert p["preserve_colors"] == 3
+        assert isinstance(p["preserve_colors"], int)
+        assert abs(p["exposure"] - 1.0) < 1e-5
+        # Fields after the enum must still decode in order
+        assert abs(p["middle_grey"] - 18.42) < 1e-2
+
+    def test_toneequal_bands_and_enums(self):
+        blob = pack_params("toneequal", {
+            "midtones": 0.8, "blacks": -0.5, "feathering": 100.0,
+            "iterations": 3, "details": 2, "method": 1,
+        })
+        p = unpack_params("toneequal", blob)
+        assert abs(p["midtones"] - 0.8) < 1e-5
+        assert abs(p["blacks"] + 0.5) < 1e-5
+        assert abs(p["feathering"] - 100.0) < 1e-3
+        assert p["iterations"] == 3
+        assert p["details"] == 2
+        assert p["method"] == 1
+
+    def test_colorequal_custom_values(self):
+        blob = pack_params("colorequal", {
+            "hue_blue": 45.0, "sat_red": 1.5, "threshold": 0.2,
+            "hue_shift": 12.0, "use_filter": 0,
+        })
+        p = unpack_params("colorequal", blob)
+        assert abs(p["hue_blue"] - 45.0) < 1e-5
+        assert abs(p["sat_red"] - 1.5) < 1e-5
+        assert abs(p["threshold"] - 0.2) < 1e-5
+        assert abs(p["hue_shift"] - 12.0) < 1e-5
+        assert p["use_filter"] == 0
+        assert isinstance(p["use_filter"], int)
+
+    def test_clamps_out_of_range(self):
+        """Ranges are enforced by pack_params."""
+        with pytest.raises(ValueError):
+            pack_params("colorequal", {"threshold": 0.9})  # max 0.3
+        with pytest.raises(ValueError):
+            pack_params("toneequal", {"iterations": 0})  # min 1
+
+
+class TestColorequalRealBlobs:
+    """Verify our colorequal layout against REAL blobs from official
+    darktable styles (committed as fixtures so CI can verify without
+    the 534-preset library)."""
+
+    FIXTURES = Path(__file__).parent / "fixtures"
+
+    def _first_colorequal_blob(self, path: Path) -> bytes:
+        import xml.etree.ElementTree as ET
+
+        from dtstylekit.codec.xmp_codec import decode_xmp
+
+        root = ET.parse(path).getroot()
+        for plugin in root.findall("style/plugin"):
+            if plugin.findtext("operation") == "colorequal":
+                return decode_xmp(plugin.findtext("op_params", "") or "")
+        raise AssertionError(f"no colorequal plugin in {path}")
+
+    @pytest.mark.parametrize(
+        "fixture_name",
+        [
+            "examples_colors_autumn.dtstyle",
+            "examples_spot color_blue.dtstyle",
+            "examples_spot color_red.dtstyle",
+        ],
+    )
+    def test_real_blob_size_and_unpack(self, fixture_name):
+        fixture = self.FIXTURES / fixture_name
+        assert fixture.exists(), f"missing fixture {fixture_name}"
+        blob = self._first_colorequal_blob(fixture)
+        assert len(blob) == 128
+        assert verify_size("colorequal", blob)
+        unpacked = unpack_params("colorequal", blob)
+        assert len(unpacked) == 32
+
+    def test_autumn_blob_semantics(self):
+        """examples_colors_autumn: shifts greens to yellow and yellows to
+        orange — green/yellow saturation up, green hue rotated negative
+        (toward yellow)."""
+        fixture = self.FIXTURES / "examples_colors_autumn.dtstyle"
+        p = unpack_params("colorequal", self._first_colorequal_blob(fixture))
+        # Defaults preserved
+        assert abs(p["threshold"] - 0.1) < 1e-5
+        assert abs(p["smoothing_hue"] - 1.0) < 1e-5
+        assert p["use_filter"] == 1
+        # Green/yellow boosted (autumn foliage)
+        assert p["sat_green"] > 1.2
+        assert p["sat_yellow"] > 1.2
+        # Green hue rotated negative → toward yellow
+        assert p["hue_green"] < -30.0
+        assert p["hue_yellow"] < -30.0
+        # Node placement neutral
+        assert abs(p["hue_shift"]) < 1e-4
 
 
 if __name__ == "__main__":

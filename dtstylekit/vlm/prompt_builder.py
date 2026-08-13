@@ -162,6 +162,33 @@ STEP 3 - MAP TO MODULES WITH STRONG VALUES (use FULL ranges, not timid defaults)
   │ colorbalancergb.vibrance:        -1.0 to +1.0 (smart saturation)      │
   │   -> Natural saturation                     -> +0.2 to +0.4             │
   ├─────────────────────────────────────────────────────────────────────────┤
+  │ REFINEMENT IOPs - fine tonal/color shaping (v0.4.0)                    │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │ temperature (v4): raw WB coefficients. [WARNING] REPLACES the camera's │
+  │   white balance — (1,1,1,1) = NO WB = wrong colors. ONLY use with      │
+  │   intentional coefficients: warm skin red≈1.8/green≈1.0/blue≈1.2,      │
+  │   cool mood red≈1.1/blue≈1.9, or D65 (2.01/1.0/1.40). Skip otherwise.  │
+  │ basicadj (v2): scene-referred basics (before filmicrgb).               │
+  │   black_point(-1..1) lift/crush blacks, exposure(-18..18 EV),          │
+  │   hlcompr(0..500) highlight compression, contrast(-1..5),              │
+  │   preserve_colors(0=none..6=power), middle_grey(0.05..100, 18.42=def), │
+  │   brightness(-4..4), saturation(-1..1), vibrance(-1..1).               │
+  │   -> Modest: exposure ±0.3, contrast 0.1–0.3, vibrance 0.1–0.2.        │
+  │ toneequal (v2): 9-zone tonal equalizer (AFTER exposure).               │
+  │   bands: noise, ultra_deep_blacks, deep_blacks, blacks, shadows,       │
+  │   midtones, highlights, whites, speculars — each -2..2 (0=neutral).    │
+  │   blending(0.01..100, def 5), smoothing(0.01..10, def √2),             │
+  │   feathering(0.01..10000, def 1), quantization(0..2),                  │
+  │   contrast_boost/exposure_boost(-16..16), iterations(1..20, def 1).    │
+  │   -> Lift shadows +0.3..+0.8, warm highlights +0.2..+0.5, never >2.    │
+  │ colorequal (v4): per-hue saturation/hue/brightness (8 channels: red,   │
+  │   orange, yellow, green, cyan, blue, lavender, magenta) AFTER filmic.  │
+  │   sat_*(0..2, 1=neutral), hue_*(-180..180°, 0=neutral),                │
+  │   bright_*(0..2, 1=neutral), threshold(0..0.3, def 0.1),               │
+  │   hue_shift(-23..23° global rotation).                                 │
+  │   -> Boost foliage sat_green 1.2–1.5; warm skin sat_red/orange 1.1–1.3 │
+  │   -> Cool shadows: hue_blue +10..+20; NEVER hue_shift > ±15 alone.     │
+  ├─────────────────────────────────────────────────────────────────────────┤
   │ CURVE-BASED (Lab) - use NAMED TEMPLATES only                          │
   ├─────────────────────────────────────────────────────────────────────────┤
   │ tonecurve.curve_preset:          "inverted_s_strong" = crushed shadows│
@@ -260,6 +287,16 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
        entire tonal range - rare: sepia, cyanotype). If unsure, keep midtones neutral.
     -> The Python reference analysis flags this case with hue_mode='mono' for all 3 zones AND matching
        hues - trust that explicit signal; otherwise diversify or neutralize.
+19. TEMPERATURE = WB REPLACEMENT (C-code reality): the temperature module's
+    coefficients REPLACE the camera's white balance. Coeffs (1,1,1,1) mean
+    "no WB correction" and produce WRONG colors (e.g. red channel ~0.04 on
+    a Sony RAW). NEVER emit temperature unless you have an intentional WB
+    (warm skin: red≈1.8/blue≈1.2; cool mood: red≈1.1/blue≈1.9; D65:
+    2.01/1.0/1.40). When in doubt, omit it entirely.
+20. MODEST REFINEMENT: basicadj/toneequal/colorequal are fine-tuning tools.
+    Prefer 2-3 of them over stacking all four; toneequal bands ±0.8 max,
+    colorequal sat_* 1.1-1.5 max, basicadj exposure ±0.3. Each must be
+    traceable to a reference trait.
 """
 
 

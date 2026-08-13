@@ -324,6 +324,44 @@ def validate_style(
                 )
                 clamped_params["saturation"] = 0.0
 
+        # ---- Hito 2.5: temperature white-balance guard ----
+        # The temperature module REPLACES the camera's white balance:
+        # neutral coefficients (1,1,1,1) mean "no WB correction" and
+        # produce wrong colors on RAW (red channel collapses — verified
+        # E2E on a Sony ARW).  Only allow the module when the VLM chose
+        # an intentional WB (coeffs clearly off neutral or a preset like
+        # D65).  Otherwise drop it: omitting temperature keeps the
+        # camera's as-shot WB, which is always the safe default.
+        if plg.operation == "temperature":
+            red = float(clamped_params.get("red") or 0.0)
+            green = float(clamped_params.get("green") or 0.0)
+            blue = float(clamped_params.get("blue") or 0.0)
+            various = float(clamped_params.get("various") or 0.0)
+            preset = int(clamped_params.get("preset") or 0)
+            coeffs_neutral = (
+                abs(red - 1.0) < 0.05
+                and abs(green - 1.0) < 0.05
+                and abs(blue - 1.0) < 0.05
+                and abs(various - 1.0) < 0.05
+            )
+            # Coeffs off-neutral (e.g. warm red 1.8/blue 1.2) are a
+            # deliberate WB choice -> keep.  Neutral coeffs with any
+            # preset except D65 (which darktable late-corrects) are the
+            # "identity" trap -> drop the whole plugin.
+            if coeffs_neutral and preset != 3:
+                warnings.append(
+                    "temperature: neutral coefficients (1,1,1,1) would "
+                    "REPLACE the camera white balance with identity "
+                    "(wrong colors on RAW) — dropping the module; "
+                    "camera as-shot WB is kept"
+                )
+                continue  # skip this plugin entirely
+            if coeffs_neutral and preset == 3:
+                warnings.append(
+                    "temperature: neutral coefficients with D65 preset "
+                    "kept (darktable applies late D65 correction)"
+                )
+
         validated_plugins.append(
             Plugin(
                 operation=plg.operation,

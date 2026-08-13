@@ -535,6 +535,199 @@ _SIMPLE_IOPS = {
 
 
 # ---------------------------------------------------------------------------
+# Refinement IOPs — fine-tuning modules beyond the core 27.
+# Added for v0.4.0: temperature (white balance), basicadj (Lightroom-like
+# basics), toneequal (9-band tonal equalizer) and colorequal (8-channel
+# per-color saturation/hue/brightness).  All four use flat float/int
+# structs (the colorequal GUI arrays are *not* part of the serialized
+# blob — fields are individual), so the standard pack/unpack path applies.
+# Sizes: temperature 20B, basicadj 44B, toneequal 72B (struct.calcsize,
+# cross-checked against the C structs); colorequal 128B verified against
+# 9 real official style blobs.
+# ---------------------------------------------------------------------------
+_REFINEMENT_IOPS = {
+    "temperature": IOPRegistry(
+        operation="temperature",
+        version=4,
+        # 4 floats + 1 int = 20 bytes (temperature.c:70-74)
+        pack_format="<4fi",
+        fields=("red", "green", "blue", "various", "preset"),
+        defaults={
+            "red": 1.0,
+            "green": 1.0,
+            "blue": 1.0,
+            "various": 1.0,
+            "preset": 0,  # DT_IOP_TEMP_AS_SHOT
+        },
+        ranges={
+            "red": (0.0, 8.0),
+            "green": (0.0, 8.0),
+            "blue": (0.0, 8.0),
+            "various": (0.0, 8.0),
+            "preset": (-1, 4),  # UNKNOWN=-1, AS_SHOT=0, SPOT=1, USER=2, D65=3, D65_LATE=4
+        },
+        size_bytes=20,
+        blendop_cst=4,  # RGB_SCENE (temperature works scene-referred)
+    ),
+    "basicadj": IOPRegistry(
+        operation="basicadj",
+        version=2,
+        # 10 floats + 1 enum(int) = 44 bytes (basicadj.c:35-47).
+        # preserve_colors sits mid-struct → <5fi5f
+        pack_format="<5fi5f",
+        fields=(
+            "black_point", "exposure", "hlcompr", "hlcomprthresh", "contrast",
+            "preserve_colors", "middle_grey", "brightness", "saturation",
+            "vibrance", "clip"
+        ),
+        defaults={
+            "black_point": 0.0,
+            "exposure": 0.0,
+            "hlcompr": 0.0,
+            "hlcomprthresh": 0.0,
+            "contrast": 0.0,
+            "preserve_colors": 1,  # DT_RGB_NORM_LUMINANCE
+            "middle_grey": 18.42,
+            "brightness": 0.0,
+            "saturation": 0.0,
+            "vibrance": 0.0,
+            "clip": 0.0,
+        },
+        ranges={
+            "black_point": (-1.0, 1.0),
+            "exposure": (-18.0, 18.0),
+            "hlcompr": (0.0, 500.0),
+            "hlcomprthresh": (0.0, 100.0),
+            "contrast": (-1.0, 5.0),
+            "preserve_colors": (0, 6),  # DT_RGB_NORM_* 0..6
+            "middle_grey": (0.05, 100.0),
+            "brightness": (-4.0, 4.0),
+            "saturation": (-1.0, 1.0),
+            "vibrance": (-1.0, 1.0),
+            "clip": (-1.0, 1.0),
+        },
+        size_bytes=44,
+        blendop_cst=3,  # RGB_DISPLAY (basicadj is display-referred)
+    ),
+    "toneequal": IOPRegistry(
+        operation="toneequal",
+        version=2,
+        # 15 floats + 2 enums(int) + 1 int = 72 bytes (toneequal.c:129-147)
+        pack_format="<15f3i",
+        fields=(
+            "noise", "ultra_deep_blacks", "deep_blacks", "blacks", "shadows",
+            "midtones", "highlights", "whites", "speculars", "blending",
+            "smoothing", "feathering", "quantization", "contrast_boost",
+            "exposure_boost", "details", "method", "iterations"
+        ),
+        defaults={
+            "noise": 0.0,
+            "ultra_deep_blacks": 0.0,
+            "deep_blacks": 0.0,
+            "blacks": 0.0,
+            "shadows": 0.0,
+            "midtones": 0.0,
+            "highlights": 0.0,
+            "whites": 0.0,
+            "speculars": 0.0,
+            "blending": 5.0,
+            "smoothing": 1.414213562,  # sqrtf(2.0f)
+            "feathering": 1.0,
+            "quantization": 0.0,
+            "contrast_boost": 0.0,
+            "exposure_boost": 0.0,
+            "details": 4,  # DT_TONEEQ_EIGF
+            "method": 4,   # DT_TONEEQ_NORM_2
+            "iterations": 1,
+        },
+        ranges={
+            "noise": (-2.0, 2.0),
+            "ultra_deep_blacks": (-2.0, 2.0),
+            "deep_blacks": (-2.0, 2.0),
+            "blacks": (-2.0, 2.0),
+            "shadows": (-2.0, 2.0),
+            "midtones": (-2.0, 2.0),
+            "highlights": (-2.0, 2.0),
+            "whites": (-2.0, 2.0),
+            "speculars": (-2.0, 2.0),
+            "blending": (0.01, 100.0),
+            "smoothing": (0.01, 10.0),
+            "feathering": (0.01, 10000.0),
+            "quantization": (0.0, 2.0),
+            "contrast_boost": (-16.0, 16.0),
+            "exposure_boost": (-16.0, 16.0),
+            "details": (0, 4),  # DT_TONEEQ_NONE..EIGF
+            "method": (0, 6),   # DT_TONEEQ_MEAN..GEOMEAN
+            "iterations": (1, 20),
+        },
+        size_bytes=72,
+        blendop_cst=3,  # RGB_DISPLAY (toneequal is display-referred)
+    ),
+    "colorequal": IOPRegistry(
+        operation="colorequal",
+        version=4,
+        # 6 floats + 1 int(gboolean) + 24 floats + 1 float = 128 bytes
+        # (colorequal.c:101-145).  GUI arrays are per-field in the blob.
+        pack_format="<6fi24ff",
+        fields=(
+            "threshold", "smoothing_hue", "contrast", "white_level",
+            "chroma_size", "param_size", "use_filter",
+            "sat_red", "sat_orange", "sat_yellow", "sat_green", "sat_cyan",
+            "sat_blue", "sat_lavender", "sat_magenta",
+            "hue_red", "hue_orange", "hue_yellow", "hue_green", "hue_cyan",
+            "hue_blue", "hue_lavender", "hue_magenta",
+            "bright_red", "bright_orange", "bright_yellow", "bright_green",
+            "bright_cyan", "bright_blue", "bright_lavender", "bright_magenta",
+            "hue_shift"
+        ),
+        defaults={
+            "threshold": 0.1,
+            "smoothing_hue": 1.0,
+            "contrast": 0.0,
+            "white_level": 1.0,
+            "chroma_size": 1.5,
+            "param_size": 1.0,
+            "use_filter": 1,  # gboolean TRUE
+            "sat_red": 1.0, "sat_orange": 1.0, "sat_yellow": 1.0,
+            "sat_green": 1.0, "sat_cyan": 1.0, "sat_blue": 1.0,
+            "sat_lavender": 1.0, "sat_magenta": 1.0,
+            "hue_red": 0.0, "hue_orange": 0.0, "hue_yellow": 0.0,
+            "hue_green": 0.0, "hue_cyan": 0.0, "hue_blue": 0.0,
+            "hue_lavender": 0.0, "hue_magenta": 0.0,
+            "bright_red": 1.0, "bright_orange": 1.0, "bright_yellow": 1.0,
+            "bright_green": 1.0, "bright_cyan": 1.0, "bright_blue": 1.0,
+            "bright_lavender": 1.0, "bright_magenta": 1.0,
+            "hue_shift": 0.0,
+        },
+        ranges={
+            "threshold": (0.0, 0.3),
+            "smoothing_hue": (0.05, 2.0),
+            "contrast": (-1.0, 1.0),
+            "white_level": (-2.0, 16.0),
+            "chroma_size": (1.0, 10.0),
+            "param_size": (1.0, 128.0),
+            "use_filter": (0, 1),
+            "sat_red": (0.0, 2.0), "sat_orange": (0.0, 2.0),
+            "sat_yellow": (0.0, 2.0), "sat_green": (0.0, 2.0),
+            "sat_cyan": (0.0, 2.0), "sat_blue": (0.0, 2.0),
+            "sat_lavender": (0.0, 2.0), "sat_magenta": (0.0, 2.0),
+            "hue_red": (-180.0, 180.0), "hue_orange": (-180.0, 180.0),
+            "hue_yellow": (-180.0, 180.0), "hue_green": (-180.0, 180.0),
+            "hue_cyan": (-180.0, 180.0), "hue_blue": (-180.0, 180.0),
+            "hue_lavender": (-180.0, 180.0), "hue_magenta": (-180.0, 180.0),
+            "bright_red": (0.0, 2.0), "bright_orange": (0.0, 2.0),
+            "bright_yellow": (0.0, 2.0), "bright_green": (0.0, 2.0),
+            "bright_cyan": (0.0, 2.0), "bright_blue": (0.0, 2.0),
+            "bright_lavender": (0.0, 2.0), "bright_magenta": (0.0, 2.0),
+            "hue_shift": (-23.0, 23.0),
+        },
+        size_bytes=128,
+        blendop_cst=3,  # RGB_DISPLAY (colorequal is display-referred)
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # Curve-based IOPs.
 # These IOPs store 3 × 20-node splines in addition to (small) scalar
 # fields.  Because the binary layout is multiple hundred floats long and
@@ -645,6 +838,7 @@ _CURVE_IOPS = {
 IOP_REGISTRY: dict[str, IOPRegistry] = {}
 IOP_REGISTRY.update(_VERIFIED_IOPS)
 IOP_REGISTRY.update(_SIMPLE_IOPS)
+IOP_REGISTRY.update(_REFINEMENT_IOPS)
 IOP_REGISTRY.update(_CURVE_IOPS)
 
 

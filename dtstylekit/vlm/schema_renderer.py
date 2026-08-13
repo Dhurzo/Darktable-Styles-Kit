@@ -11,7 +11,7 @@ from __future__ import annotations
 _CURVE_OPERATIONS = ("colorzones", "rgbcurve", "tonecurve")
 
 
-def render_iop_schema(registry: dict, max_iops: int = 12) -> str:
+def render_iop_schema(registry: dict, max_iops: int = 16) -> str:
     """Render a compact IOP schema as markdown.
 
     Args:
@@ -46,9 +46,16 @@ def render_iop_schema(registry: dict, max_iops: int = 12) -> str:
         "colorbalance",
         "shadhi",
     ]
+    # Refinement IOPs (v0.4.0) — fine tonal/color shaping on top of the
+    # core pipeline.  temperature sits BEFORE exposure in the pipeline
+    # (raw WB), toneequal after exposure, colorequal after filmicrgb.
+    refinement = ["temperature", "basicadj", "toneequal", "colorequal"]
 
     included: list[str] = []
     for op in verified:
+        if op in registry and len(included) < max_iops:
+            included.append(op)
+    for op in refinement:
         if op in registry and len(included) < max_iops:
             included.append(op)
     for op in other_simple:

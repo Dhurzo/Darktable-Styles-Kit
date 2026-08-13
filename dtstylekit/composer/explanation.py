@@ -146,6 +146,31 @@ _TEXT = {
         "cbr_zone_neutral": "**{zone}** (H=0°, C=0): neutro — las referencias no mostraban una gradación fiable en esta zona (confianza {conf:.2f} < 0.7), así que se respeta el color original.",
         "cbr_chroma_global": "**chroma_global = {v}**: desaturación global suave (multiplicativa, sin desplazar el matiz), acabado film.",
         "cbr_global_c": "**global_C = {v}**: sin offset aditivo global de color (un valor >0 con matiz 0° teñiría toda la imagen de rojo).",
+        "temp_warm": "**red = {red} / blue = {blue}**: coeficientes de balance de blancos cálido — el estilo calienta deliberadamente la imagen subiendo el rojo y bajando el azul (sustituye al WB as-shot de la cámara).",
+        "temp_cool": "**red = {red} / blue = {blue}**: coeficientes de balance de blancos frío — el estilo enfría deliberadamente la imagen bajando el rojo y subiendo el azul (sustituye al WB as-shot de la cámara).",
+        "temp_custom": "**red = {red} / green = {green} / blue = {blue}**: coeficientes de balance de blancos personalizados elegidos para igualar el look de las referencias (sustituyen al WB as-shot de la cámara).",
+        "temp_d65": "**preset = D65**: balance de blancos estándar de luz de día, aplicado como corrección tardía sobre el WB de cámara.",
+        "temp_identity_warn": "*(un WB de identidad eliminaría el balance de blancos de la cámara — omitido por seguridad)*",
+        "badj_exposure": "**exposure = {v:+.2f} EV**: compensación de exposición scene-referred aplicada antes del mapeo tonal.",
+        "badj_black": "**black_point = {v:+.2f}**: ajuste del punto negro (negativo eleva los negros, positivo los aplasta).",
+        "badj_contrast": "**contrast = {v}**: aumento de contraste scene-referred antes del mapeo tonal.",
+        "badj_vibrance": "**vibrance = {v}**: aumento inteligente de saturación protegiendo los tonos de piel, aplicado antes del etalonaje.",
+        "badj_saturation": "**saturation = {v}**: ajuste global de saturación en el módulo de básicos.",
+        "badj_brightness": "**brightness = {v}**: desplazamiento global de brillo.",
+        "badj_hlcompr": "**hlcompr = {v}**: compresión de altas luces — protege las altas de recortes.",
+        "badj_midgrey": "**middle_grey = {v}**: desplaza el pivote de gris medio del mapeo tonal.",
+        "teq_bands": "**Bandas**: {bands} — el ecualizador tonal eleva/compacta rangos específicos de luminancia (de ruido a especulares) fundiendo los bordes suavemente.",
+        "teq_contrast_boost": "**contrast_boost = {v}**: énfasis de contraste local en las zonas ecualizadas.",
+        "teq_exposure_boost": "**exposure_boost = {v}**: énfasis de exposición local en las zonas ecualizadas.",
+        "teq_feathering": "**feathering = {v}**: suaviza la transición entre zonas ecualizadas.",
+        "teq_iterations": "**iterations = {v}**: pasadas de refinamiento del filtro edge-aware.",
+        "teq_neutral": "*(todas las bandas neutras — sin cambios del ecualizador tonal)*",
+        "ceq_sat": "sat {v:.2f}",
+        "ceq_hue": "hue {v:+.0f}°",
+        "ceq_bright": "bright {v:.2f}",
+        "ceq_channel": "**{ch}**: {detail} — ajuste por matiz de saturación/matiz/brillo para este rango de color.",
+        "ceq_hue_shift": "**hue_shift = {v:+.0f}°**: rotación global de matiz aplicada tras el etalonaje.",
+        "ceq_neutral": "*(todos los canales de color neutros — sin cambios del ecualizador por matiz)*",
         "exp_tonal_bright": "ligeramente más brillante",
         "exp_tonal_dark": "ligeramente más oscura",
         "exp_tonal_same": "con un brillo similar",
@@ -224,6 +249,31 @@ _TEXT = {
         "cbr_zone_neutral": "**{zone}** (H=0°, C=0): neutral — the references showed no reliable grade in this zone (confidence {conf:.2f} < 0.7), so the original colour is respected.",
         "cbr_chroma_global": "**chroma_global = {v}**: gentle global desaturation (multiplicative, no hue shift), film finish.",
         "cbr_global_c": "**global_C = {v}**: no additive global colour offset (a value >0 with hue 0° would tint the whole image red).",
+        "temp_warm": "**red = {red} / blue = {blue}**: warm white-balance coefficients — the style deliberately warms the image by boosting red and cutting blue (replaces the camera's as-shot WB).",
+        "temp_cool": "**red = {red} / blue = {blue}**: cool white-balance coefficients — the style deliberately cools the image by cutting red and boosting blue (replaces the camera's as-shot WB).",
+        "temp_custom": "**red = {red} / green = {green} / blue = {blue}**: custom white-balance coefficients chosen to match the reference look (replaces the camera's as-shot WB).",
+        "temp_d65": "**preset = D65**: standard daylight white balance, applied as a late correction over the camera WB.",
+        "temp_identity_warn": "*(identity WB would strip the camera's white balance — omitted for safety)*",
+        "badj_exposure": "**exposure = {v:+.2f} EV**: scene-referred exposure compensation applied before tone mapping.",
+        "badj_black": "**black_point = {v:+.2f}**: black-point adjustment (negative lifts blacks, positive crushes them).",
+        "badj_contrast": "**contrast = {v}**: scene-referred contrast boost before tone mapping.",
+        "badj_vibrance": "**vibrance = {v}**: smart saturation boost protecting skin tones, applied before grading.",
+        "badj_saturation": "**saturation = {v}**: global saturation adjustment in the basics module.",
+        "badj_brightness": "**brightness = {v}**: overall brightness offset.",
+        "badj_hlcompr": "**hlcompr = {v}**: highlight compression — protects highlights from clipping.",
+        "badj_midgrey": "**middle_grey = {v}**: shifts the middle-grey pivot of the tone mapping.",
+        "teq_bands": "**Bands**: {bands} — the tonal equalizer lifts/crushes specific luminance ranges (noise→speculars) while blending edges smoothly.",
+        "teq_contrast_boost": "**contrast_boost = {v}**: local contrast emphasis on the equalized zones.",
+        "teq_exposure_boost": "**exposure_boost = {v}**: local exposure emphasis on the equalized zones.",
+        "teq_feathering": "**feathering = {v}**: softens the transition between equalized zones.",
+        "teq_iterations": "**iterations = {v}**: refinement passes of the edge-aware filter.",
+        "teq_neutral": "*(all bands neutral — no tonal equalizer change)*",
+        "ceq_sat": "sat {v:.2f}",
+        "ceq_hue": "hue {v:+.0f}°",
+        "ceq_bright": "bright {v:.2f}",
+        "ceq_channel": "**{ch}**: {detail} — per-hue saturation/hue/brightness tuning for this colour range.",
+        "ceq_hue_shift": "**hue_shift = {v:+.0f}°**: global hue rotation applied after grading.",
+        "ceq_neutral": "*(all colour channels neutral — no per-hue equalizer change)*",
         "exp_tonal_bright": "slightly brighter",
         "exp_tonal_dark": "slightly darker",
         "exp_tonal_same": "similar brightness",
@@ -420,6 +470,95 @@ def _explain_curve(_lang: str, _operation: str, params: dict) -> list[str]:
     return out
 
 
+def _explain_temperature(lang: str, params: dict) -> list[str]:
+    """temperature replaces the camera WB — explain the intentional coeffs."""
+    out: list[str] = []
+    red = float(params.get("red") or 1.0)
+    blue = float(params.get("blue") or 1.0)
+    green = float(params.get("green") or 1.0)
+    preset = int(params.get("preset") or 0)
+    if abs(red - 1.0) > 0.05 or abs(blue - 1.0) > 0.05:
+        warm = red > 1.15 and blue < 1.05
+        cool = blue > 1.15 and red < 1.05
+        if warm:
+            out.append(_t(lang, "temp_warm").format(red=red, blue=blue))
+        elif cool:
+            out.append(_t(lang, "temp_cool").format(red=red, blue=blue))
+        else:
+            out.append(_t(lang, "temp_custom").format(
+                red=red, green=green, blue=blue))
+    elif preset == 3:
+        out.append(_t(lang, "temp_d65"))
+    else:
+        out.append(_t(lang, "temp_identity_warn"))
+    return out
+
+
+def _explain_basicadj(lang: str, params: dict) -> list[str]:
+    out: list[str] = []
+    if "exposure" in params and abs(float(params["exposure"])) > 0.01:
+        out.append(_t(lang, "badj_exposure").format(v=params["exposure"]))
+    if "black_point" in params and abs(float(params["black_point"])) > 0.001:
+        out.append(_t(lang, "badj_black").format(v=params["black_point"]))
+    if "contrast" in params and abs(float(params["contrast"])) > 0.01:
+        out.append(_t(lang, "badj_contrast").format(v=params["contrast"]))
+    if "vibrance" in params and abs(float(params["vibrance"])) > 0.01:
+        out.append(_t(lang, "badj_vibrance").format(v=params["vibrance"]))
+    if "saturation" in params and abs(float(params["saturation"])) > 0.01:
+        out.append(_t(lang, "badj_saturation").format(v=params["saturation"]))
+    if "brightness" in params and abs(float(params["brightness"])) > 0.01:
+        out.append(_t(lang, "badj_brightness").format(v=params["brightness"]))
+    if "hlcompr" in params and float(params["hlcompr"]) > 1.0:
+        out.append(_t(lang, "badj_hlcompr").format(v=params["hlcompr"]))
+    if "middle_grey" in params and abs(float(params["middle_grey"]) - 18.42) > 0.5:
+        out.append(_t(lang, "badj_midgrey").format(v=params["middle_grey"]))
+    return out
+
+
+def _explain_toneequal(lang: str, params: dict) -> list[str]:
+    out: list[str] = []
+    _BANDS = ("noise", "ultra_deep_blacks", "deep_blacks", "blacks", "shadows",
+              "midtones", "highlights", "whites", "speculars")
+    changed = [(b, float(params[b])) for b in _BANDS if b in params
+               and abs(float(params[b])) > 0.01]
+    if changed:
+        parts = ", ".join(f"{b} {v:+.2f}" for b, v in changed)
+        out.append(_t(lang, "teq_bands").format(bands=parts))
+    if "contrast_boost" in params and abs(float(params["contrast_boost"])) > 0.05:
+        out.append(_t(lang, "teq_contrast_boost").format(v=params["contrast_boost"]))
+    if "exposure_boost" in params and abs(float(params["exposure_boost"])) > 0.05:
+        out.append(_t(lang, "teq_exposure_boost").format(v=params["exposure_boost"]))
+    if "feathering" in params and abs(float(params["feathering"]) - 1.0) > 0.01:
+        out.append(_t(lang, "teq_feathering").format(v=params["feathering"]))
+    if "iterations" in params and int(params["iterations"]) > 1:
+        out.append(_t(lang, "teq_iterations").format(v=params["iterations"]))
+    if not out:
+        out.append(_t(lang, "teq_neutral"))
+    return out
+
+
+def _explain_colorequal(lang: str, params: dict) -> list[str]:
+    out: list[str] = []
+    _CHANNELS = ("red", "orange", "yellow", "green", "cyan", "blue",
+                 "lavender", "magenta")
+    for ch in _CHANNELS:
+        sk, hk, bk = f"sat_{ch}", f"hue_{ch}", f"bright_{ch}"
+        parts: list[str] = []
+        if sk in params and abs(float(params[sk]) - 1.0) > 0.03:
+            parts.append(_t(lang, "ceq_sat").format(v=params[sk]))
+        if hk in params and abs(float(params[hk])) > 1.0:
+            parts.append(_t(lang, "ceq_hue").format(v=params[hk]))
+        if bk in params and abs(float(params[bk]) - 1.0) > 0.03:
+            parts.append(_t(lang, "ceq_bright").format(v=params[bk]))
+        if parts:
+            out.append(_t(lang, "ceq_channel").format(ch=ch, detail=", ".join(parts)))
+    if "hue_shift" in params and abs(float(params["hue_shift"])) > 1.0:
+        out.append(_t(lang, "ceq_hue_shift").format(v=params["hue_shift"]))
+    if not out:
+        out.append(_t(lang, "ceq_neutral"))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -551,6 +690,14 @@ def generate_explanation(
             explains = _explain_exposure(lang, plg.params)
         elif plg.operation == "colorbalancergb":
             explains = _explain_colorbalance(lang, plg.params, reference_analysis)
+        elif plg.operation == "temperature":
+            explains = _explain_temperature(lang, plg.params)
+        elif plg.operation == "basicadj":
+            explains = _explain_basicadj(lang, plg.params)
+        elif plg.operation == "toneequal":
+            explains = _explain_toneequal(lang, plg.params)
+        elif plg.operation == "colorequal":
+            explains = _explain_colorequal(lang, plg.params)
         elif plg.operation in ("tonecurve", "rgbcurve", "colorzones"):
             explains = _explain_curve(lang, plg.operation, plg.params)
         else:
