@@ -12,8 +12,10 @@ from dtstylekit.analyzer.histogram import compute_histogram
 from dtstylekit.analyzer.luminance import compute_luminance_stats
 from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.analyzer.pipeline import (
+    _circular_diff,
     _circular_dispersion,
     _circular_mean,
+    _consensus_vote,
     _detect_bimodal,
     analyze_image,
     analyze_reference_hues,
@@ -332,3 +334,186 @@ class TestAnalyzeReferenceHues:
         result = analyze_reference_hues([tmp_path / "nope.jpg", p])
         # Should return whatever the gray image gives (neutral everywhere)
         assert result["shadows_hue_mode"] == "neutral"
+
+
+def _triple_zone_image(
+    path: Path,
+    sh_hue: float,
+    mt_hue: float,
+    hi_hue: float,
+    size: tuple[int, int] = (128, 384),
+) -> Path:
+    """Three vertical bands with the given hues, one per tonal zone.
+
+    Shadows band: hue ``sh_hue`` at low value (luma < 0.25).
+    Midtones band: hue ``mt_hue`` at mid value (luma 0.25–0.75).
+    Highlights band: hue ``hi_hue`` at high value (luma >= 0.75).
+
+    Saturation is fixed at 0.9. Returns the written JPEG path.  Used by
+    the Hito 6C global-grade tests: one coherent tint across the whole
+    tonal range (all zone hues within ±45°).
+    """
+    import colorsys
+
+    w, h = size
+    arr = np.zeros((h, w, 3), dtype=np.uint8)
+    band = h // 3
+
+    def fill(y0: int, y1: int, hue: float, v0: float, v1: float) -> None:
+        for y in range(y0, y1):
+            t = (y - y0) / max(y1 - y0 - 1, 1)
+            v = v0 + (v1 - v0) * t
+            r, g, b = colorsys.hsv_to_rgb((hue % 360) / 360.0, 0.9, v)
+            arr[y, :, :] = (int(r * 255), int(g * 255), int(b * 255))
+
+    # hue 15°: luma ≈ 0.40*V → V 0.25–0.55 keeps luma < 0.25 (shadows).
+    fill(0, band, sh_hue, 0.25, 0.55)
+    # hue 38°: luma ≈ 0.78*V → V 0.60–0.85 keeps luma in 0.47–0.66 (midtones).
+    fill(band, 2 * band, mt_hue, 0.60, 0.85)
+    # hue 45°: luma ≈ 0.83*V → V 0.95–1.00 keeps luma >= 0.79 (highlights).
+    fill(2 * band, h, hi_hue, 0.95, 1.00)
+
+    Image.fromarray(arr, "RGB").save(path, format="JPEG")
+    return path
+
+
+class TestConsensusVote:
+    """Hito 6A: majority-consensus circular vote over per-reference hues."""
+
+    def test_disagreeing_minority_does_not_veto_majority(self) -> None:
+        # 4 refs at 200° + 1 at 90° → consensus must be ~200°, not neutral.
+        consensus, agree_flat, agree_weighted = _consensus_vote(
+            [200.0, 200.0, 200.0, 200.0, 90.0], [1.0] * 5
+        )
+        assert abs(consensus - 200.0) < 1e-6
+        assert agree_flat == 0.8
+        assert agree_weighted == 0.8
+
+    def test_minority_reference_becomes_neutral(self) -> None:
+        # 2 refs at 200° + 3 at 90° → the vote finds the 90° camp (3/5).
+        # The *gate* (`agree_weighted > 0.6` in `_zone_combine`) then
+        # rejects it: 0.6 is not a strict majority, so the zone goes
+        # neutral instead of inventing a tint. Here we only assert the
+        # vote itself reports the majority camp.
+        consensus, agree_flat, agree_weighted = _consensus_vote(
+            [200.0, 200.0, 90.0, 90.0, 90.0], [1.0] * 5
+        )
+        assert agree_flat == 0.6
+        assert agree_weighted == 0.6
+        assert abs(consensus - 90.0) < 1e-3
+
+    def test_weights_give_saturated_refs_more_say(self) -> None:
+        # 2 nearly-gray refs at 200° (low conf) + 3 saturated refs at 90°:
+        # weighted support favours the 90° camp (0.882 vs 0.118).
+        consensus, agree_flat, agree_weighted = _consensus_vote(
+            [200.0, 200.0, 90.0, 90.0, 90.0],
+            [0.2, 0.2, 1.0, 1.0, 1.0],
+        )
+        assert agree_flat == 0.6
+        assert abs(agree_weighted - 0.882) < 0.01
+        assert abs(consensus - 90.0) < 1e-3
+
+    def test_wraparound_consensus(self) -> None:
+        consensus, agree_flat, _ = _consensus_vote([350.0, 10.0, 5.0])
+        assert abs(consensus - 1.7) < 2.0
+        assert agree_flat == 1.0
+
+
+class TestGlobalGradeDetection:
+    """Hito 6C: 'global' hue_mode — one coherent tint across tonal zones."""
+
+    def test_coherent_warm_grade_is_global(self, tmp_path: Path) -> None:
+        # 3 refs, each with a warm grade across all 3 zones (hues within
+        # ±45° of their joint mean): 15/38/45, 10/35/42, 20/40/48.
+        refs = [
+            _triple_zone_image(tmp_path / f"warm{i}.jpg", sh, mt, hi)
+            for i, (sh, mt, hi) in enumerate(
+                [(15, 38, 45), (10, 35, 42), (20, 40, 48)]
+            )
+        ]
+        result = analyze_reference_hues(refs)
+        for zone in ("shadows", "midtones", "highlights"):
+            assert result[f"{zone}_hue_mode"] == "global", zone
+            assert result[f"{zone}_hue"] is not None, zone
+            assert result[f"{zone}_hue_confidence"] >= 0.7, zone
+        # Consensus hues per zone ≈ the band inputs
+        assert abs(result["shadows_hue"] - 15.0) < 10.0
+        assert abs(result["midtones_hue"] - 38.0) < 10.0
+        assert abs(result["highlights_hue"] - 45.0) < 10.0
+
+    def test_split_grade_is_not_global(self, tmp_path: Path) -> None:
+        # One ref: teal shadows (200°) only; another: warm highlights (30°)
+        # only. No ref has a coherent tint across ALL zones → not global.
+        teal = _dark_saturated_color(200, scale=0.2)          # shadows-only
+        warm_hi = _hue_to_rgb(30, sat=0.9, lum=0.9)           # highlights-only
+        p1 = _solid_color_image(tmp_path / "teal.jpg", color=teal)
+        p2 = _solid_color_image(tmp_path / "warmhi.jpg", color=warm_hi)
+        result = analyze_reference_hues([p1, p2])
+        for zone in ("shadows", "midtones", "highlights"):
+            assert result[f"{zone}_hue_mode"] != "global", zone
+        # Shadows still resolve to the teal hue (mono, one ref with data)
+        assert result["shadows_hue_mode"] == "mono"
+        assert abs(result["shadows_hue"] - 200.0) < 15.0
+
+
+class TestReferenceVoteAggregation:
+    """Hito 6A end-to-end: one disagreeing reference no longer vetoes."""
+
+    def test_one_disagreeing_ref_keeps_majority_hue(self, tmp_path: Path) -> None:
+        # 4 teal refs (200°) + 1 green ref (90°), all in shadows.
+        refs = []
+        for i in range(4):
+            refs.append(_solid_color_image(
+                tmp_path / f"teal{i}.jpg",
+                color=_dark_saturated_color(200, scale=0.2),
+            ))
+        refs.append(_solid_color_image(
+            tmp_path / "green.jpg",
+            color=_dark_saturated_color(90, scale=0.2),
+        ))
+        result = analyze_reference_hues(refs)
+        sh = result["shadows_hue"]
+        assert sh is not None
+        assert abs(sh - 200.0) < 15.0, f"expected ~200, got {sh}"
+        assert result["shadows_hue_confidence"] >= 0.6
+        assert result["shadows_hue_mode"] in ("mono", "global")
+
+    def test_minority_majority_split_stays_neutral(self, tmp_path: Path) -> None:
+        # 2 teal + 3 green → 40% agreement → neutral (no tint invented).
+        refs = []
+        for i in range(2):
+            refs.append(_solid_color_image(
+                tmp_path / f"teal{i}.jpg",
+                color=_dark_saturated_color(200, scale=0.2),
+            ))
+        for i in range(3):
+            refs.append(_solid_color_image(
+                tmp_path / f"green{i}.jpg",
+                color=_dark_saturated_color(90, scale=0.2),
+            ))
+        result = analyze_reference_hues(refs)
+        assert result["shadows_hue_mode"] == "neutral"
+        assert result["shadows_hue"] is None
+        assert result["shadows_hue_confidence"] == 0.0
+
+
+class TestVolumeSaturationRule:
+    """Hito 6B: volume rule — low mean saturation with real pixel volume."""
+
+    def test_low_sat_zone_with_volume_emits_hue(self, tmp_path: Path) -> None:
+        # 70% gray + 30% dark red in shadows: mean_sat ≈ 0.075 < 0.10 but
+        # ~4900 px with delta > 0.05 → hue must be analyzed (old gate 0.15
+        # discarded it).
+        h, w = 128, 128
+        arr = np.zeros((h, w, 3), dtype=np.uint8)
+        arr[:, :, :] = (60, 60, 60)  # gray, luma 0.06 < 0.25 (shadows)
+        red = _dark_saturated_color(0, scale=0.25)  # (64, 0, 0), luma 0.053
+        arr[: int(h * 0.3), :, :] = red
+        Image.fromarray(arr, "RGB").save(tmp_path / "vol.jpg", format="JPEG")
+
+        result = analyze_reference_hues([tmp_path / "vol.jpg"])
+        sh = result["shadows_hue"]
+        assert sh is not None, "volume rule must recover the hue"
+        assert min(abs(sh - 0), abs(sh - 360)) < 20.0
+        assert result["shadows_hue_mode"] == "mono"
+        assert result["shadows_hue_confidence"] > 0.0

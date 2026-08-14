@@ -168,6 +168,68 @@ def _circular_mean(hues_deg: list[float], weights: list[float] | None = None) ->
     return float(np.rad2deg(np.arctan2(s, c)) % 360.0)
 
 
+def _circular_diff(a: float, b: float) -> float:
+    """Shortest circular distance between two hue angles in degrees."""
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def _consensus_vote(
+    ref_hues: list[float],
+    ref_weights: list[float] | None = None,
+    tolerance: float = 30.0,
+) -> tuple[float, float, float]:
+    """Majority-consensus circular vote over per-reference hues.
+
+    Seeds candidate consensus centers from *every reference's own hue*
+    (a plain circular mean of all refs lands between two disagreeing
+    camps and can miss both), keeps the candidate with the largest
+    confidence-weighted support, then iteratively re-means over its
+    inliers (±``tolerance``) until stable.  This is the Hito 6A fix for
+    "one disagreeing reference vetoes the whole set".
+
+    Returns:
+        (consensus_hue, agree_flat, agree_weighted) — ``agree_flat`` is
+        the share of references inside the final consensus band;
+        ``agree_weighted`` is the same share weighted by each reference's
+        confidence (a nearly-gray reference counts less than a saturated
+        one).
+    """
+    if not ref_hues:
+        return 0.0, 0.0, 0.0
+    weights = ref_weights if ref_weights is not None else [1.0] * len(ref_hues)
+    total_w = max(float(sum(weights)), 1e-9)
+
+    # Seed: pick the reference hue with the largest weighted support band.
+    best_center = ref_hues[0]
+    best_flat = 0.0
+    best_w = 0.0
+    for i, hi in enumerate(ref_hues):
+        inl = [j for j in range(len(ref_hues))
+               if _circular_diff(ref_hues[j], hi) <= tolerance]
+        flat = len(inl) / len(ref_hues)
+        wsum = sum(weights[j] for j in inl) / total_w
+        if wsum > best_w or (wsum == best_w and flat > best_flat):
+            best_center, best_flat, best_w = hi, flat, wsum
+
+    # Refine: iterative re-mean over the winner's inliers until stable.
+    cur = best_center
+    inliers: list[bool] | None = None
+    for _ in range(12):
+        new_inliers = [_circular_diff(h, cur) <= tolerance for h in ref_hues]
+        if new_inliers == inliers:
+            break
+        inliers = new_inliers
+        cur = _circular_mean(
+            [h for h, keep in zip(ref_hues, inliers) if keep],
+            [w for w, keep in zip(weights, inliers) if keep],
+        )
+    assert inliers is not None
+    agree_flat = float(sum(inliers)) / len(ref_hues)
+    agree_weighted = sum(w for w, keep in zip(weights, inliers) if keep) / total_w
+    return cur, agree_flat, agree_weighted
+
+
 def _circular_dispersion(hues_deg: list[float], weights: list[float] | None = None) -> float:
     """Circular dispersion R̄ in [0, 1]. 1.0 = all hues identical, 0.0 = uniform.
 
@@ -250,12 +312,18 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
         new `*_hue_secondary` field carries the secondary. The prompt /
         validator can decide how to apply (typically: use primary as the
         zone's hue, keep chroma modest to avoid over-tinting).
+      - hue_mode = "global": >=60% of the references carry ONE coherent
+        tint across the whole tonal range (all three zone hues within ±45°
+        of their joint circular mean — e.g. a warm grade 15°/38°/33°, not a
+        split-tone). Each zone still keeps its own consensus hue; the mode
+        tells the prompt/validator this is an intentional uniform grade.
 
-    Across references, hues are combined with weighted circular mean (not
-    arithmetic). Circular dispersion R̄ is used to **lower** confidence when
-    references disagree: if dispersion < 0.4 (saturated pixels disagree on
-    direction), confidence is forced to 0 — neutral wins. This prevents
-    the system from inventing a tint when handed a mixed reference set.
+    Across references, hues are combined with a **majority-consensus
+    circular vote** (Hito 6A): the consensus band (±30°) is found
+    iteratively over per-reference hues, and the share of references
+    inside it becomes the confidence (``conf = max(mean_conf, agree)``).
+    A single disagreeing reference no longer vetoes the set; only a
+    minority < 60% agreement falls back to neutral.
 
     Args:
         reference_paths: List of paths to reference JPEG/PNG images.
@@ -271,11 +339,12 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
     import numpy as np
     from PIL import Image
 
-    # Configuration — tighter than before to demand real evidence of a grade.
-    MIN_SATURATION_FOR_HUE = 0.15      # Min saturation to compute meaningful hue
+    # Configuration — Hito 6B: lower saturation bar + volume rule so
+    # mildly-saturated but voluminous zones (e.g. r4s warm shadows at sat
+    # 0.10–0.14 over 550k px) are analyzed instead of discarded.
+    MIN_SATURATION_FOR_HUE = 0.10      # Min saturation to compute meaningful hue
     MIN_VALID_PIXELS = 200             # Min pixels with valid color in tonal range
     SATURATION_WEIGHT_POWER = 2.0      # Power for saturation weighting
-    DISPERSION_MIN = 0.7               # R̄ below this = refs disagree → neutral
 
     ref_data = []
 
@@ -303,10 +372,12 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 sat_in_range = delta[mask]
                 mean_sat = float(np.mean(sat_in_range))
 
-                if mean_sat < MIN_SATURATION_FOR_HUE:
-                    return [], [], mean_sat, 0, 0.0, "neutral"
-
-                valid_mask = mask & (delta > MIN_SATURATION_FOR_HUE * 0.5)
+                # Hito 6B — volume rule: a zone whose mean saturation sits
+                # below MIN_SATURATION_FOR_HUE but that still holds a large
+                # volume of mildly-saturated pixels (delta > 0.05) is real
+                # color data (e.g. warm shadows at sat 0.10–0.14 over 550k
+                # px). Only veto when there is NO volume of saturated pixels.
+                valid_mask = mask & (delta > 0.05)
                 valid_count = int(np.sum(valid_mask))
                 if valid_count < MIN_VALID_PIXELS:
                     return [], [], mean_sat, valid_count, 0.0, "neutral"
@@ -333,7 +404,8 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 w_list = weights.tolist()
 
                 # Confidence: combined valid-pixel count + saturation level
-                conf = min(1.0, valid_count / (MIN_VALID_PIXELS * 10)) * min(1.0, mean_sat / 0.3)
+                # (Hito 6B: softer saturation scale, /0.20 instead of /0.30).
+                conf = min(1.0, valid_count / (MIN_VALID_PIXELS * 10)) * min(1.0, mean_sat / 0.20)
                 return hues_list, w_list, mean_sat, valid_count, conf, "unknown"
 
             sh = analyze_tonal_range(shadows_mask)
@@ -348,17 +420,42 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 # the former should propagate as `bi`; the latter must collapse to
                 # neutral so we don't invent a tint.
                 bi = _detect_bimodal(z[0], z[1]) if z[0] else None
+                # Per-reference circular mean hue — the unit the Hito 6A vote
+                # operates on. A bimodal reference's average is meaningless for
+                # voting, so it contributes None (Case 1 handles it separately).
+                hue_mean = None
+                if bi is None and z[0]:
+                    hue_mean = _circular_mean(z[0], z[1])
                 return {
                     "hues": z[0], "weights": z[1], "sat": z[2],
                     "count": z[3], "conf": z[4],
+                    "hue_mean": hue_mean,
                     "is_bi": bi is not None,
                     "bi_primary": bi[0] if bi else None,
                     "bi_secondary": bi[1] if bi else None,
                 }
 
-            ref_data.append({
+            ref_entry = {
                 "shadows": _pack(sh), "midtones": _pack(mt), "highlights": _pack(hi),
-            })
+            }
+
+            # Hito 6C — per-reference "global grade" detection: the three zone
+            # hues of THIS reference all sit within ±45° of their joint circular
+            # mean → one coherent tint across the whole tonal range (e.g. a warm
+            # grade 15°/38°/33°), as opposed to a split-tone.
+            zone_hues = []
+            for key in ("shadows", "midtones", "highlights"):
+                hm = ref_entry[key].get("hue_mean")
+                if hm is None:
+                    zone_hues = None
+                    break
+                zone_hues.append(hm)
+            ref_entry["is_global"] = bool(zone_hues is not None) and all(
+                _circular_diff(h, _circular_mean(zone_hues)) <= 45.0
+                for h in zone_hues
+            )
+
+            ref_data.append(ref_entry)
 
         except Exception as e:
             print(f"Warning: failed to analyze reference {ref_path}: {e}")
@@ -373,6 +470,10 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             "shadows_hue_mode": "neutral", "midtones_hue_mode": "neutral", "highlights_hue_mode": "neutral",
         }
 
+    # Hito 6C — aggregate "global grade" share: fraction of references that
+    # carry one coherent tint across the whole tonal range.
+    global_share = sum(1 for d in ref_data if d.get("is_global")) / len(ref_data)
+
     def _zone_combine(zone_key: str) -> dict:
         """Combine one zone across all references with circular stats + bimodal detection.
 
@@ -381,10 +482,12 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
              with two distinct color grades), aggregate its peaks + the
              monomodal hues of the rest into a `bi` result. This is the
              intentional-orange-and-teal case.
-          2. Otherwise (all refs individually monomodal), if the AGGREGATE hue
-             dispersion is low (R̄ >= 0.4) → `mono` with the circular mean.
-             High dispersion (R̄ < 0.4) means refs disagree on hue → `neutral`,
-             no tint is forced.
+          2. Otherwise (all refs individually monomodal), run a majority-
+             consensus circular vote (Hito 6A): the consensus band ±30° is
+             found iteratively over per-reference hues and the share of refs
+             inside it is the confidence. `agree > 0.6` → `mono` (or `global`
+             when most refs share one coherent tint across zones, Hito 6C);
+             `agree <= 0.6` → `neutral`, no tint is forced.
         """
         all_hues = []
         all_weights = []
@@ -427,18 +530,37 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 "conf": max(mean_conf, 0.55), "mode": "bi",
             }
 
-        # Case 2: all refs monomodal → use dispersion to decide mono vs neutral
-        disp = _circular_dispersion(all_hues, all_weights)
-        primary = _circular_mean(all_hues, all_weights)
-        if disp < DISPERSION_MIN:
+        # Case 2: all refs monomodal → majority-consensus vote (Hito 6A).
+        # A single disagreeing reference no longer vetoes the set: the vote
+        # finds the majority band (±30°) iteratively and the share of refs
+        # inside it becomes the confidence.
+        ref_zone_hues = [
+            d[zone_key]["hue_mean"] for d in ref_data
+            if d[zone_key].get("hue_mean") is not None
+        ]
+        ref_zone_weights = [
+            d[zone_key]["conf"] for d in ref_data
+            if d[zone_key].get("hue_mean") is not None
+        ]
+        consensus, agree_flat, agree_weighted = _consensus_vote(
+            ref_zone_hues, ref_zone_weights
+        )
+        if agree_weighted <= 0.6:  # no weighted majority → neutral
             return {
                 "hue": None, "hue_secondary": None, "sat": mean_sat,
                 "conf": 0.0, "mode": "neutral",
             }
-        conf = mean_conf * float(disp)
+        # Confidence: majority share of references (agree_flat, per the
+        # plan "voto 4/5 → 0.8"), unless a single reference carries the
+        # whole signal (then mean_conf is the honest estimate).
+        conf = max(mean_conf, agree_flat) if len(ref_zone_hues) > 1 else mean_conf
+        # Hito 6C: most references share one coherent tint across the whole
+        # tonal range → report the mode as 'global' (each zone keeps its own
+        # consensus hue; the mode marks it an intentional uniform grade).
+        mode = "global" if global_share >= 0.6 else "mono"
         return {
-            "hue": primary, "hue_secondary": None, "sat": mean_sat,
-            "conf": conf, "mode": "mono",
+            "hue": consensus, "hue_secondary": None, "sat": mean_sat,
+            "conf": conf, "mode": mode,
         }
 
     shc = _zone_combine("shadows")
