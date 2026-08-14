@@ -606,6 +606,42 @@ def build_prompt(
                         f"all three zones carry chroma>0.05."
                     )
 
+            # Hito 6E — GLOBAL WARM/COOL GRADE: one coherent tint across the
+            # whole tonal range (hue_mode='global' in all 3 zones, confident).
+            # Unlike the rare 'mono' case this is a *graded* look with
+            # per-zone hue variation (e.g. warm 15°/38°/45°): the VLM should
+            # apply the three zone hues with modest chroma, never the
+            # additive global offset.
+            if (all(m == "global" for m in modes)
+                    and all(h is not None for h in hues_trio)
+                    and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))):
+
+                def _circ_diff(a, b):
+                    d = abs(a - b) % 360
+                    return min(d, 360 - d)
+
+                def _circ_mean(hs):
+                    import math
+                    s = sum(math.sin(math.radians(h)) for h in hs)
+                    c = sum(math.cos(math.radians(h)) for h in hs)
+                    return math.degrees(math.atan2(s, c)) % 360
+
+                g_mean = _circ_mean(list(hues_trio))
+                # Warm: red/orange/yellow/pink band (0°–90° and 315°–360°).
+                # Cool: green/cyan/blue band (90°–315°).
+                warm = g_mean <= 90.0 or g_mean >= 315.0
+                label = "WARM" if warm else "COOL"
+                ref_instructions.append(
+                    f"  [GLOBAL {label} GRADE] The references are consistently "
+                    f"{label.lower()} across the tonal range (hue_mode='global', "
+                    f"confidence {sh_conf:.2f}/{mh_conf:.2f}/{hh_conf:.2f}): "
+                    f"shadows_H={sh:.0f}°, midtones_H={mh:.0f}°, "
+                    f"highlights_H={hh:.0f}°. This IS an intentional uniform "
+                    f"grade — apply these THREE zone hues with MODEST chroma "
+                    f"(the CHROMA CAPS block below), and keep global_C=0.0 "
+                    f"(never use the additive global offset for this look)."
+                )
+
         if ref_hues_lines:
 
             ref_hues = (
