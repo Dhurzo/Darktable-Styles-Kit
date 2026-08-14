@@ -216,6 +216,23 @@ def validate_style(
             # reference whose hue was borderline detectable.
             _zone_caps_default = {"shadows": 0.10, "midtones": 0.08, "highlights": 0.05}
             _zone_caps_highconf = {"shadows": 0.15, "midtones": 0.15, "highlights": 0.10}
+            # Hito 6F: a *global* uniform grade (one coherent tint across all
+            # three zones — hue_mode='global') tints EVERYTHING. The zone caps
+            # above are tuned for split-tone grading and over-tint when applied
+            # to a uniform grade (r4s renders came out +56..+138 R-B vs +9..+29
+            # in the references; even the first 6F caps 0.05/0.04/0.03 still
+            # doubled the reference warmth: +39 vs ~+19). Cap global grades at
+            # a SUBTLE level and never exceed a quarter of the measured zone
+            # saturation — a tint must stay WELL below the reference's own
+            # colorfulness.
+            _zone_caps_global = {"shadows": 0.02, "midtones": 0.015, "highlights": 0.012}
+            _is_global_grade = (
+                reference_analysis is not None
+                and all(
+                    (reference_analysis.get(f"{z}_hue_mode") or "") == "global"
+                    for z in _zone_caps_default
+                )
+            )
             for zone, default_cap in _zone_caps_default.items():
                 c_key = f"{zone}_C"
                 conf_key = f"{zone}_hue_confidence"
@@ -227,6 +244,22 @@ def validate_style(
                 conf = (
                     float((reference_analysis or {}).get(conf_key) or 0.0)
                 )
+                if _is_global_grade:
+                    # Uniform-grade cap: subtle ceiling, scaled by a QUARTER
+                    # of the measured saturation of the zone (0 when absent).
+                    sat = float((reference_analysis or {}).get(f"{zone}_sat") or 0.0)
+                    cap = _zone_caps_global[zone]
+                    if sat > 0.0:
+                        cap = min(cap, sat * 0.25)
+                    if cz > cap:
+                        if c_key in plg.params:
+                            warnings.append(
+                                f"colorbalancergb.{c_key}={cz:.3f} exceeds "
+                                f"GLOBAL-GRADE cap {cap:.2f} (uniform tint must "
+                                f"stay subtle; reference {zone}_sat={sat:.3f}) — clamped"
+                            )
+                        clamped_params[c_key] = cap
+                    continue
                 cap = _zone_caps_highconf[zone] if conf >= 0.85 else default_cap
                 if cz > cap:
                     if c_key in plg.params:

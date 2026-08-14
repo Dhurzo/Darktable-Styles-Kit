@@ -368,14 +368,18 @@ class TestValidateAntiTintGuards:
 
 
 class TestValidateGlobalGrade:
-    """Hito 6D: the monochrome-dominance exception accepts 'global' refs.
+    """Hito 6D + 6F: global-grade references and their chroma caps.
 
     A 'global' reference (one coherent tint across the tonal range, zone
     hues spread up to ±45° — e.g. warm 15°/38°/45°) marks a uniform
-    VLM hue as *intentional*; the validator must NOT halve it.  But a
-    uniform spec hue that disagrees with the reference's actual grade
-    (e.g. teal 200° on a warm-global reference) is still an invented
-    tint and must be halved.
+    VLM hue as *intentional*; the validator must NOT halve it (6D).
+
+    Hito 6F: a uniform tint with zone-level chroma over-tints the whole
+    image (r4s renders came out +56..+138 R-B vs +9..+29 in the refs).
+    So for 'global' references the dynamic ceiling (2.1) drops to a
+    SUBTLE cap — min(0.02/0.015/0.012, sat*0.25) per zone — before the
+    dominance check ever runs.  A wrong-hue spec (teal 200° on a warm
+    reference) is thus capped to a subtle tint instead of halved.
     """
 
     def _warm_global_ref(self) -> dict:
@@ -391,8 +395,9 @@ class TestValidateGlobalGrade:
 
     def test_global_ref_allows_uniform_warm_spec(self) -> None:
         """Warm-global reference + uniform warm spec (15/20/25, spread
-        within ±15° so 2.3 fires) → the 'global' exception allows it.
-        Chroma 0.12/0.10/0.08 survives: conf 0.90 lifts the 2.1 caps."""
+        within ±15° so 2.3 would fire) → the 'global' exception allows it
+        and the 6F global caps clamp chroma to a subtle level
+        (min(0.02/0.015/0.012, sat*0.25=0.075) → 0.02/0.015/0.012)."""
         spec = StyleSpec(style_name="t", plugins=[
             Plugin(operation="colorbalancergb", params={
                 "shadows_C": 0.12, "shadows_H": 15.0,
@@ -405,14 +410,17 @@ class TestValidateGlobalGrade:
         )
         assert not any("monochrome-dominance" in w for w in warnings)
         params = validated.plugins[0].params
-        assert params["shadows_C"] == 0.12
-        assert params["midtones_C"] == 0.10
-        assert params["highlights_C"] == 0.08
+        assert params["shadows_C"] == 0.02
+        assert params["midtones_C"] == 0.015
+        assert params["highlights_C"] == 0.012
+        assert any("GLOBAL-GRADE cap" in w for w in warnings)
 
-    def test_global_ref_wrong_hue_spec_still_halved(self) -> None:
+    def test_global_ref_wrong_hue_spec_capped_to_subtle(self) -> None:
         """Warm-global reference but the VLM applies teal 200° uniformly →
-        the spec's hue does not match the reference grade (±45° check) →
-        NOT intentional → halved."""
+        NOT an intentional match.  The 6F global cap still clamps the
+        chroma to the subtle level (a wrong-hue uniform tint must not be
+        strong either); no halving happens because highlights_C=0.03 no
+        longer trips the strict >0.05 gate."""
         spec = StyleSpec(style_name="t", plugins=[
             Plugin(operation="colorbalancergb", params={
                 "shadows_C": 0.12, "shadows_H": 200.0,
@@ -423,11 +431,12 @@ class TestValidateGlobalGrade:
         validated, warnings = validate_style(
             spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
         )
-        assert any("monochrome-dominance" in w for w in warnings)
         params = validated.plugins[0].params
-        assert params["shadows_C"] == 0.06
-        assert params["midtones_C"] == 0.05
-        assert params["highlights_C"] == 0.04
+        assert params["shadows_C"] == 0.02
+        assert params["midtones_C"] == 0.015
+        assert params["highlights_C"] == 0.012
+        # The cap (not the dominance halving) did the clamping
+        assert any("GLOBAL-GRADE cap" in w for w in warnings)
 
     def test_global_ref_spread_beyond_15_degrees_allowed(self) -> None:
         """The reference's own zone hues may spread up to ±45° (warm grade
@@ -435,9 +444,9 @@ class TestValidateGlobalGrade:
         rejected this warm-global reference and halved the spec."""
         spec = StyleSpec(style_name="t", plugins=[
             Plugin(operation="colorbalancergb", params={
-                "shadows_C": 0.12, "shadows_H": 30.0,
-                "midtones_C": 0.10, "midtones_H": 30.0,
-                "highlights_C": 0.08, "highlights_H": 30.0,
+                "shadows_C": 0.05, "shadows_H": 30.0,
+                "midtones_C": 0.04, "midtones_H": 30.0,
+                "highlights_C": 0.03, "highlights_H": 30.0,
             }),
         ])
         validated, warnings = validate_style(
@@ -445,7 +454,28 @@ class TestValidateGlobalGrade:
         )
         # spec_mean = 30°, ref_mean ≈ 32.7° → within 45° → allowed
         assert not any("monochrome-dominance" in w for w in warnings)
-        assert validated.plugins[0].params["shadows_C"] == 0.12
+        params = validated.plugins[0].params
+        # Within the global caps already → untouched
+        assert params["shadows_C"] == 0.02
+        assert params["midtones_C"] == 0.015
+        assert params["highlights_C"] == 0.012
+
+    def test_global_ref_cap_scaled_by_half_zone_saturation(self) -> None:
+        """When the measured zone saturation is below the global cap, the
+        cap tightens further: cap = min(0.02, sat*0.25).  sat=0.06 →
+        cap 0.015 for shadows."""
+        ref = dict(self._warm_global_ref())
+        ref["shadows_sat"] = 0.06
+        spec = StyleSpec(style_name="t", plugins=[
+            Plugin(operation="colorbalancergb", params={
+                "shadows_C": 0.08, "shadows_H": 20.0,
+            }),
+        ])
+        validated, warnings = validate_style(
+            spec, IOP_REGISTRY, reference_analysis=ref,
+        )
+        assert validated.plugins[0].params["shadows_C"] == 0.015
+        assert any("GLOBAL-GRADE cap" in w for w in warnings)
 
 
 class TestSchemaRenderer:
@@ -773,7 +803,16 @@ class TestPromptAntiTintRules:
         assert "shadows_H=15°" in content
         assert "midtones_H=38°" in content
         assert "highlights_H=45°" in content
-        assert "keep global_C=0.0" in content
+        assert "global_C=0.0" in content
+        # Hito 6F: the instruction must carry the SUBTLE global caps and the
+        # caps block must echo the same numbers (sat 0.30 → min(cap, 0.15)).
+        assert "shadows_C<=0.02" in content
+        assert "midtones_C<=0.015" in content
+        assert "highlights_C<=0.012" in content
+        assert "SET shadows_C = 0.020" in content
+        assert "SET midtones_C = 0.015" in content
+        assert "SET highlights_C = 0.012" in content
+        assert "GLOBAL GRADE (uniform tint)" in content
 
     def test_prompt_emits_global_cool_grade(self) -> None:
         """A blue global grade must be labelled COOL, not WARM."""

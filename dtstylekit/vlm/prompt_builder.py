@@ -637,8 +637,11 @@ def build_prompt(
                     f"confidence {sh_conf:.2f}/{mh_conf:.2f}/{hh_conf:.2f}): "
                     f"shadows_H={sh:.0f}°, midtones_H={mh:.0f}°, "
                     f"highlights_H={hh:.0f}°. This IS an intentional uniform "
-                    f"grade — apply these THREE zone hues with MODEST chroma "
-                    f"(the CHROMA CAPS block below), and keep global_C=0.0 "
+                    f"grade — apply these THREE zone hues with SUBTLE chroma: "
+                    f"shadows_C<=0.02, midtones_C<=0.015, highlights_C<=0.012 "
+                    f"(the CHROMA CAPS block below enforces these numbers). "
+                    f"NEVER exceed them: a uniform tint with zone-level chroma "
+                    f"over-tints the whole image red/orange. Keep global_C=0.0 "
                     f"(never use the additive global offset for this look)."
                 )
 
@@ -772,8 +775,28 @@ _SOFT_CAPS = {"shadows": 0.10, "midtones": 0.08, "highlights": 0.05}
 # get the relaxed ceiling; the others stay soft.
 _HIGH_CAPS = {"shadows": 0.15, "midtones": 0.15, "highlights": 0.10}
 
+# Hito 6F: uniform ("global") grade caps. A single coherent tint across the
+# whole tonal range tints EVERYTHING — the zone caps above are tuned for
+# split-tone grading and over-tint a uniform grade (r4s renders came out
+# +56..+138 R-B vs +9..+29 in the references; the first 6F attempt
+# 0.05/0.04/0.03 still doubled the reference warmth: +39 vs ~+19). Cap
+# global grades at a SUBTLE level, and never above a QUARTER of the
+# measured zone saturation. Matches validator._zone_caps_global.
+_GLOBAL_CAPS = {"shadows": 0.02, "midtones": 0.015, "highlights": 0.012}
+
 _HIGH_CONF_THRESHOLD = 0.85
 _NEUTRAL_CONF_THRESHOLD = 0.70  # below this -> chroma 0 (neutral)
+
+
+def _is_global_grade(reference_analysis: dict | None) -> bool:
+    """True when the reference analysis declares hue_mode='global' in all
+    three zones (one coherent tint across the whole tonal range)."""
+    if not reference_analysis:
+        return False
+    return all(
+        (reference_analysis.get(f"{z}_hue_mode") or "") == "global"
+        for z in _SOFT_CAPS
+    )
 
 
 def _chroma_caps_block(reference_analysis: dict | None) -> str:
@@ -806,6 +829,13 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
     def _zone_cap(zone: str) -> float:
         conf = float(reference_analysis.get(f"{zone}_hue_confidence", 0) or 0)
         sat = float(reference_analysis.get(f"{zone}_sat", 0) or 0)
+        if _is_global_grade(reference_analysis):
+            # Hito 6F: uniform grade → subtle cap, scaled by half the
+            # measured zone saturation (mirrors the validator).
+            cap = _GLOBAL_CAPS[zone]
+            if sat > 0.0:
+                cap = min(cap, sat * 0.25)
+            return cap
         if conf >= _HIGH_CONF_THRESHOLD:
             cap = _HIGH_CAPS[zone]
         elif conf >= _NEUTRAL_CONF_THRESHOLD:
@@ -815,6 +845,15 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
         return min(sat, cap)
 
     def _zone_note(zone: str) -> str:
+        if _is_global_grade(reference_analysis):
+            sat = float(reference_analysis.get(f"{zone}_sat", 0) or 0)
+            cap = _GLOBAL_CAPS[zone]
+            if sat > 0.0:
+                cap = min(cap, sat * 0.25)
+            return (
+                f"GLOBAL GRADE (uniform tint) -> cap = {cap:.2f} "
+                f"(min({_GLOBAL_CAPS[zone]:.2f}, sat*0.25={sat * 0.25:.2f}))"
+            )
         conf = float(reference_analysis.get(f"{zone}_hue_confidence", 0) or 0)
         if conf >= _HIGH_CONF_THRESHOLD:
             return f"high-confidence (conf={conf:.2f} >= 0.85) -> cap = {_HIGH_CAPS[zone]:.2f}"
