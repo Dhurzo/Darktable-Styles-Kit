@@ -102,6 +102,37 @@ En `prompt_builder.py`:
    existe; si sus refs son genuinamente neutras, siguen saliendo neutrales
    (comportamiento correcto).
 
+## Estado de implementación (2026-08-14)
+
+**Hitos 6A–6E: IMPLEMENTADOS y commiteados en `develop`.**
+
+| Hito | Commit | Verificación |
+|------|--------|--------------|
+| 6A voto circular + 6B umbral adaptativo + 6C modo `global` | `366793f` | `analyze_reference_hues(5 refs r4s)` → shadows 1.0° conf 0.80 / midtones 29.4° conf 0.86 / highlights 33.0° conf 1.00, mode=`global` en las 3 (criterio ✓) |
+| 6D validator excepción global (±45°, match con hue del spec) | `b84f58b` | `TestValidateGlobalGrade` 3/3 + regresión 11/11 anti-tint |
+| 6E prompt `[GLOBAL WARM/COOL GRADE]` | `441ab01` | `TestPromptAntiTintRules` 12/12 (4 nuevos) |
+
+Suite completa: **366 passed, 8 skipped** (skips preexistentes).
+
+**PENDIENTE (prueba de integración, criterios 2 y 3 del plan)** — abortado el
+2026-08-14 porque la GPU estaba ocupada; el proceso se detuvo con el log en
+`/tmp/r4s_run2.log` (llegó a "Calling VLM..." con los hues ya corregidos en el
+análisis Python: 1.0/29.4/33.0 conf 0.80/0.86/1.00):
+
+1. Re-lanzar la generación (cuando la gráfica esté libre):
+   ```
+   dtstylekit generate /tmp/r4s_target_preview.jpg \
+     --references "/home/juan/Documentos/Pruebas DT Style Kit/References/"*.jpg \
+     --output "/home/juan/Documentos/Pruebas DT Style Kit/Estilo_Generado" \
+     --direction "Match the color grading of the reference photos (Enric Ramirez r4s look): ..."
+   ```
+   (target preview ya renderizado: `/tmp/r4s_target_preview.jpg` desde `DSC05838.ARW`)
+2. Verificar el `.dtstyle` nuevo: colorbalancergb con hues cálidos (≈1°/29°/33°)
+   y chroma > 0 (NO neutral) — decodificar con `unpack_params`.
+3. Render en los 11 RAWs (`Renders_R4S_v2/`) → MAE vs `Renders_R4S/` (estilo
+   viejo) > 4/255 y paleta cálida (R>B en medios/altas).
+4. Verificación visual VLM manual del usuario.
+
 ## Fuera de alcance (opcional, discutir)
 - Parámetro de producto `--grading-strength` (0=neutral, 1=fiel) para que el
   usuario controle la intensidad del grading cuando la ref es ambigua.
