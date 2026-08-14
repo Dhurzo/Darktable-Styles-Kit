@@ -367,6 +367,87 @@ class TestValidateAntiTintGuards:
         assert any("monochrome-dominance" in w for w in warnings)
 
 
+class TestValidateGlobalGrade:
+    """Hito 6D: the monochrome-dominance exception accepts 'global' refs.
+
+    A 'global' reference (one coherent tint across the tonal range, zone
+    hues spread up to ±45° — e.g. warm 15°/38°/45°) marks a uniform
+    VLM hue as *intentional*; the validator must NOT halve it.  But a
+    uniform spec hue that disagrees with the reference's actual grade
+    (e.g. teal 200° on a warm-global reference) is still an invented
+    tint and must be halved.
+    """
+
+    def _warm_global_ref(self) -> dict:
+        return {
+            "shadows_hue": 15.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "global",
+            "midtones_hue": 38.0, "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "global",
+            "highlights_hue": 45.0, "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "global",
+            "shadows_sat": 0.30, "midtones_sat": 0.30, "highlights_sat": 0.30,
+        }
+
+    def test_global_ref_allows_uniform_warm_spec(self) -> None:
+        """Warm-global reference + uniform warm spec (15/20/25, spread
+        within ±15° so 2.3 fires) → the 'global' exception allows it.
+        Chroma 0.12/0.10/0.08 survives: conf 0.90 lifts the 2.1 caps."""
+        spec = StyleSpec(style_name="t", plugins=[
+            Plugin(operation="colorbalancergb", params={
+                "shadows_C": 0.12, "shadows_H": 15.0,
+                "midtones_C": 0.10, "midtones_H": 20.0,
+                "highlights_C": 0.08, "highlights_H": 25.0,
+            }),
+        ])
+        validated, warnings = validate_style(
+            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+        )
+        assert not any("monochrome-dominance" in w for w in warnings)
+        params = validated.plugins[0].params
+        assert params["shadows_C"] == 0.12
+        assert params["midtones_C"] == 0.10
+        assert params["highlights_C"] == 0.08
+
+    def test_global_ref_wrong_hue_spec_still_halved(self) -> None:
+        """Warm-global reference but the VLM applies teal 200° uniformly →
+        the spec's hue does not match the reference grade (±45° check) →
+        NOT intentional → halved."""
+        spec = StyleSpec(style_name="t", plugins=[
+            Plugin(operation="colorbalancergb", params={
+                "shadows_C": 0.12, "shadows_H": 200.0,
+                "midtones_C": 0.10, "midtones_H": 200.0,
+                "highlights_C": 0.08, "highlights_H": 200.0,
+            }),
+        ])
+        validated, warnings = validate_style(
+            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+        )
+        assert any("monochrome-dominance" in w for w in warnings)
+        params = validated.plugins[0].params
+        assert params["shadows_C"] == 0.06
+        assert params["midtones_C"] == 0.05
+        assert params["highlights_C"] == 0.04
+
+    def test_global_ref_spread_beyond_15_degrees_allowed(self) -> None:
+        """The reference's own zone hues may spread up to ±45° (warm grade
+        15°/38°/45° = 30° spread) — the OLD ±15° exception would have
+        rejected this warm-global reference and halved the spec."""
+        spec = StyleSpec(style_name="t", plugins=[
+            Plugin(operation="colorbalancergb", params={
+                "shadows_C": 0.12, "shadows_H": 30.0,
+                "midtones_C": 0.10, "midtones_H": 30.0,
+                "highlights_C": 0.08, "highlights_H": 30.0,
+            }),
+        ])
+        validated, warnings = validate_style(
+            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+        )
+        # spec_mean = 30°, ref_mean ≈ 32.7° → within 45° → allowed
+        assert not any("monochrome-dominance" in w for w in warnings)
+        assert validated.plugins[0].params["shadows_C"] == 0.12
+
+
 class TestSchemaRenderer:
     def test_renders_iop_schema(self) -> None:
         from dtstylekit.vlm.schema_renderer import render_iop_schema
@@ -667,6 +748,94 @@ class TestPromptAntiTintRules:
             image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
         )
         assert "global_saturation" not in msgs[1]["content"]
+
+    def test_prompt_emits_global_warm_grade(self) -> None:
+        """hue_mode='global' in all 3 zones with conf >= 0.7 → the prompt
+        emits a [GLOBAL WARM GRADE] instruction with the three zone hues
+        (Hito 6E)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 15.0, "shadows_hue_confidence": 0.80,
+            "shadows_hue_mode": "global", "shadows_sat": 0.30,
+            "midtones_hue": 38.0, "midtones_hue_confidence": 0.86,
+            "midtones_hue_mode": "global", "midtones_sat": 0.30,
+            "highlights_hue": 45.0, "highlights_hue_confidence": 1.00,
+            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "[GLOBAL WARM GRADE]" in content
+        assert "shadows_H=15°" in content
+        assert "midtones_H=38°" in content
+        assert "highlights_H=45°" in content
+        assert "keep global_C=0.0" in content
+
+    def test_prompt_emits_global_cool_grade(self) -> None:
+        """A blue global grade must be labelled COOL, not WARM."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "global", "shadows_sat": 0.30,
+            "midtones_hue": 205.0, "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "global", "midtones_sat": 0.30,
+            "highlights_hue": 210.0, "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "[GLOBAL COOL GRADE]" in content
+        assert "shadows_H=200°" in content
+
+    def test_prompt_no_global_grade_for_neutral_refs(self) -> None:
+        """Neutral or low-confidence references must NOT emit the global
+        grade instruction."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": None, "shadows_hue_confidence": 0.2,
+            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
+            "midtones_hue": None, "midtones_hue_confidence": 0.2,
+            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
+            "highlights_hue": None, "highlights_hue_confidence": 0.2,
+            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        content = msgs[1]["content"]
+        assert "[GLOBAL" not in content
+
+    def test_prompt_no_global_grade_when_confidence_low(self) -> None:
+        """hue_mode='global' but conf < 0.7 → no global grade instruction
+        (the model must stay neutral)."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(0.5)
+        ref = {
+            "shadows_hue": 15.0, "shadows_hue_confidence": 0.60,
+            "shadows_hue_mode": "global", "shadows_sat": 0.30,
+            "midtones_hue": 38.0, "midtones_hue_confidence": 0.55,
+            "midtones_hue_mode": "global", "midtones_sat": 0.30,
+            "highlights_hue": 45.0, "highlights_hue_confidence": 0.50,
+            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+        }
+        msgs = build_prompt(
+            analysis, [], "test", "schema",
+            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+        )
+        assert "[GLOBAL" not in msgs[1]["content"]
 
 
 class TestPresetExposureFilter:

@@ -18,6 +18,24 @@ from .models import Plugin, StyleSpec
 logger = logging.getLogger(__name__)
 
 
+def _circular_mean(hues_deg: list[float]) -> float:
+    """Circular mean of hue angles in degrees (handles wraparound).
+
+    Unweighted; used by the Hito 6D dominance exception to compare the
+    VLM's uniform hue against the reference's coherent grade.
+    """
+    import numpy as np
+
+    if not hues_deg:
+        return 0.0
+    rad = np.deg2rad(np.asarray(hues_deg, dtype=np.float32))
+    s = float(np.sin(rad).sum())
+    c = float(np.cos(rad).sum())
+    if abs(s) < 1e-9 and abs(c) < 1e-9:
+        return 0.0
+    return float(np.rad2deg(np.arctan2(s, c)) % 360.0)
+
+
 # String-valued virtual fields that must be handled separately from
 # numeric ranges.  Their "range" in the registry is a tuple of valid
 # string choices, NOT a numeric (lo, hi) pair.
@@ -266,7 +284,14 @@ def validate_style(
             )
             all_chroma = all(c > 0.05 for c in chroms)
             if same_hue and all_chroma:
-                # Exception: reference_analysis declare mono with same hue?
+                # Exception: reference_analysis declares an intentional
+                # uniform grade — either `mono` (Hito 2.3) or `global`
+                # (Hito 6D: one coherent tint across the tonal range,
+                # e.g. warm 15°/38°/33°).  The reference's zone hues may
+                # spread up to ±45° (a warm grade is not pixel-identical
+                # across zones), and the VLM's uniform hue must actually
+                # agree with the reference's mean hue — a teal spec on a
+                # warm-global reference is NOT intentional.
                 allow = False
                 if reference_analysis:
                     modes = [
@@ -275,16 +300,28 @@ def validate_style(
                     ref_hues = [
                         reference_analysis.get(f"{z}_hue") for z in _zones
                     ]
-                    if all(m == "mono" for m in modes) and all(
+                    if all(m in ("mono", "global") for m in modes) and all(
                         h is not None for h in ref_hues
                     ):
                         def _wrap(h: float) -> float:
                             return h % 360.0
                         ref_same = (
-                            _circular_diff(_wrap(ref_hues[0] or 0), _wrap(ref_hues[1] or 0)) < 15.0
-                            and _circular_diff(_wrap(ref_hues[1] or 0), _wrap(ref_hues[2] or 0)) < 15.0
+                            _circular_diff(_wrap(ref_hues[0] or 0), _wrap(ref_hues[1] or 0)) < 45.0
+                            and _circular_diff(_wrap(ref_hues[1] or 0), _wrap(ref_hues[2] or 0)) < 45.0
                         )
-                        if ref_same:
+                        # The spec's uniform hue must match the reference's
+                        # coherent grade (±45° between their circular means).
+                        spec_mean = float(
+                            _circular_mean(
+                                [_wrap(h) for h in hues],
+                            )
+                        )
+                        ref_mean = float(
+                            _circular_mean(
+                                [_wrap(h) for h in ref_hues],
+                            )
+                        )
+                        if ref_same and _circular_diff(spec_mean, ref_mean) <= 45.0:
                             allow = True
                 if not allow:
                     for zone in _zones:
