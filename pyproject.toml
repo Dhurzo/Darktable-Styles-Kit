@@ -49,10 +49,9 @@ test = [
 ]
 
 [project.urls]
-# TODO: replace with the real repository once it is published.
-Homepage = "https://github.com/<your-user>/dtstylekit"
-Repository = "https://github.com/<your-user>/dtstylekit"
-Issues = "https://github.com/<your-user>/dtstylekit/issues"
+Homepage = "https://github.com/Dhurzo/dtstylekit"
+Repository = "https://github.com/Dhurzo/dtstylekit"
+Issues = "https://github.com/Dhurzo/dtstylekit/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

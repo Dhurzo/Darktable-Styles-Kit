@@ -204,7 +204,7 @@ def _consensus_vote(
     best_center = ref_hues[0]
     best_flat = 0.0
     best_w = 0.0
-    for i, hi in enumerate(ref_hues):
+    for _i, hi in enumerate(ref_hues):
         inl = [j for j in range(len(ref_hues))
                if _circular_diff(ref_hues[j], hi) <= tolerance]
         flat = len(inl) / len(ref_hues)
@@ -221,12 +221,12 @@ def _consensus_vote(
             break
         inliers = new_inliers
         cur = _circular_mean(
-            [h for h, keep in zip(ref_hues, inliers) if keep],
-            [w for w, keep in zip(weights, inliers) if keep],
+            [h for h, keep in zip(ref_hues, inliers, strict=True) if keep],
+            [w for w, keep in zip(weights, inliers, strict=True) if keep],
         )
     assert inliers is not None
     agree_flat = float(sum(inliers)) / len(ref_hues)
-    agree_weighted = sum(w for w, keep in zip(weights, inliers) if keep) / total_w
+    agree_weighted = sum(w for w, keep in zip(weights, inliers, strict=True) if keep) / total_w
     return cur, agree_flat, agree_weighted
 
 
@@ -342,7 +342,6 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
     # Configuration — Hito 6B: lower saturation bar + volume rule so
     # mildly-saturated but voluminous zones (e.g. r4s warm shadows at sat
     # 0.10–0.14 over 550k px) are analyzed instead of discarded.
-    MIN_SATURATION_FOR_HUE = 0.10      # Min saturation to compute meaningful hue
     MIN_VALID_PIXELS = 200             # Min pixels with valid color in tonal range
     SATURATION_WEIGHT_POWER = 2.0      # Power for saturation weighting
 

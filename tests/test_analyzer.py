@@ -12,7 +12,6 @@ from dtstylekit.analyzer.histogram import compute_histogram
 from dtstylekit.analyzer.luminance import compute_luminance_stats
 from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis, LuminanceStats
 from dtstylekit.analyzer.pipeline import (
-    _circular_diff,
     _circular_dispersion,
     _circular_mean,
     _consensus_vote,
