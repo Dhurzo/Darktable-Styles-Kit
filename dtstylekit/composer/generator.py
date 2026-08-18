@@ -38,7 +38,7 @@ def generate_dtstyle(
     dark_image = False
     if analysis is not None:
         mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
-        if isinstance(mean_lum, (int, float)) and not isinstance(mean_lum, bool):
+        if isinstance(mean_lum, int | float) and not isinstance(mean_lum, bool):
             dark_image = mean_lum < 0.3
     plugins = merge_presets(presets, adjustments, dark_image=dark_image)
 

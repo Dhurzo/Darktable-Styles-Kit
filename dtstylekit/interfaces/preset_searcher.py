@@ -9,9 +9,12 @@ if TYPE_CHECKING:
     from dtstylekit.presets.models import PresetIndexEntry
     from dtstylekit.presets.search import SearchResult as ConcreteSearchResult
 
-
-# Use the concrete SearchResult from the implementation
-SearchResult = ConcreteSearchResult
+    # Use the concrete SearchResult from the implementation.
+    # Only needed for static analysis: all annotations are strings
+    # (PEP 563 via ``from __future__ import annotations``), so importing
+    # the concrete type at runtime would drag in heavyweight dependencies
+    # (sentence-transformers, numpy) and create a runtime NameError.
+    SearchResult = ConcreteSearchResult
 
 
 class PresetSearcher(ABC):

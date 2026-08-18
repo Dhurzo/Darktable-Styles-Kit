@@ -156,10 +156,10 @@ def _safe_float(value: Any) -> float | None:
     if isinstance(value, bool):
         # Treat True/False as non-numeric so we don't confuse them with 1/0.
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     # ``values`` may be a list from ``tag.values``; pick the first scalar.
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         for item in value:
             f = _safe_float(item)
             if f is not None:

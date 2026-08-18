@@ -57,12 +57,15 @@ class RenderMetrics:
 
 @dataclass
 class RefinementResult:
-    """Result of one refinement iteration."""
+    """Result of a refinement run: final spec plus how it ended.
 
-    spec: "StyleSpec"
-    metrics: RenderMetrics
+    ``iterations_completed`` counts completed generate → render → evaluate
+    cycles; ``passed`` is True when an iteration passed evaluation.
+    """
+
+    spec: StyleSpec
+    iterations_completed: int
     passed: bool
-    feedback: str
 
 
 def compute_render_metrics(image_path: Path) -> RenderMetrics:
@@ -123,8 +126,7 @@ def _import_style_into_library(style_path: Path, name: str, work: Path) -> None:
 
         style_id = cur.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {styles_tbl}").fetchone()[0]
         cur.execute(
-            f"INSERT INTO {styles_tbl} (id, name, description, iop_list) "
-            "VALUES (?, ?, '', NULL)",
+            f"INSERT INTO {styles_tbl} (id, name, description, iop_list) VALUES (?, ?, '', NULL)",
             (style_id, name),
         )
         root = ET.parse(style_path).getroot()
@@ -349,7 +351,7 @@ def iterative_refine(
     generate_func: Callable[[str, list[str]], StyleSpec],
     max_iterations: int = 3,
     work_dir: Path | None = None,
-) -> StyleSpec:
+) -> RefinementResult:
     """Iterative refinement loop: generate → render → evaluate → adjust.
 
     Args:
@@ -362,7 +364,8 @@ def iterative_refine(
         work_dir: Optional work directory (created if None)
 
     Returns:
-        Refined StyleSpec that passes evaluation.
+        RefinementResult with the refined StyleSpec plus metadata about
+        how the run ended (iterations completed, whether evaluation passed).
     """
     import base64
 
@@ -373,6 +376,10 @@ def iterative_refine(
 
     # Encode references once
     ref_b64s = [base64.b64encode(p.read_bytes()).decode("ascii") for p in reference_paths]
+
+    if max_iterations <= 0:
+        spec = generate_func(direction, ref_b64s)
+        return RefinementResult(spec=spec, iterations_completed=0, passed=False)
 
     current_direction = direction
     best_spec = None
@@ -396,7 +403,8 @@ def iterative_refine(
 
         if rendered is None:
             logger.warning("Render failed, stopping refinement")
-            break
+            assert best_spec is not None
+            return RefinementResult(spec=best_spec, iterations_completed=iteration, passed=False)
 
         # Evaluate
         metrics = compute_render_metrics(rendered)
@@ -415,7 +423,7 @@ def iterative_refine(
 
         if passed:
             logger.info("✓ Style passed evaluation on iteration %d", iteration + 1)
-            return spec
+            return RefinementResult(spec=spec, iterations_completed=iteration + 1, passed=True)
 
         # Keep best so far (least bad)
         if best_metrics is None or _score_metrics(metrics) > _score_metrics(best_metrics):
@@ -430,8 +438,8 @@ def iterative_refine(
 
     # Return best attempt even if not perfect
     logger.warning("Refinement completed without passing; returning best attempt")
-    assert best_spec is not None or spec is not None
-    return best_spec or spec  # type: ignore[return-value]
+    assert best_spec is not None
+    return RefinementResult(spec=best_spec, iterations_completed=max_iterations, passed=False)
 
 
 def _score_metrics(m: RenderMetrics) -> float:

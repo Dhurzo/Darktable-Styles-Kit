@@ -64,7 +64,7 @@ class TestValidateStyle:
                 Plugin(operation="vibrance", params={"amount": 50.0}),
             ],
         )
-        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        validated, _warnings = validate_style(spec, IOP_REGISTRY)
         assert len(validated.plugins) == 1
         assert validated.plugins[0].params["amount"] == 50.0
 
@@ -1333,9 +1333,9 @@ class TestE2EValidatorGuardsWithVLMResponse:
         cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
         params = cb.params
         assert params["shadows_C"] == 0.15
-        assert params["midtones_C"] == 0.05, (
-            f"midtones_C must be clamped to 0.05 on portrait target; got " f"{params['midtones_C']}"
-        )
+        assert (
+            params["midtones_C"] == 0.05
+        ), f"midtones_C must be clamped to 0.05 on portrait target; got {params['midtones_C']}"
         assert params["highlights_C"] == 0.10
         # Skin warning must appear
         assert any("likely-portrait" in w or "skin" in w for w in warnings)

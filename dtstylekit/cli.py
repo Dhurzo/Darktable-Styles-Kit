@@ -423,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=("es", "en"),
         default="es",
-        help="Language of the natural-language explanation document " "(default: es).",
+        help="Language of the natural-language explanation document (default: es).",
     )
 
     # analyze subcommand (alias for generate)
@@ -459,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=("es", "en"),
         default="es",
-        help="Language of the natural-language explanation document " "(default: es).",
+        help="Language of the natural-language explanation document (default: es).",
     )
 
     # preset subcommand

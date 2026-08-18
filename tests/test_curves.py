@@ -94,7 +94,7 @@ class TestTemplateCurves:
         tmpl = get_template("s_strong")
         nodes = tmpl.nodes_per_channel["all"]
         mid_idx = len(nodes) // 2
-        x_mid, y_mid = nodes[mid_idx]
+        _x_mid, y_mid = nodes[mid_idx]
         assert 0.3 <= y_mid <= 0.7
 
     def test_inverted_s_structure(self) -> None:

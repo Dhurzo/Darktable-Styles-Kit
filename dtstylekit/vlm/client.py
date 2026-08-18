@@ -130,7 +130,7 @@ class VLMClient:
                         thinking = msg.get("thinking") or ""
                         if thinking.strip():
                             logger.info(
-                                "VLM content empty; falling back to " "thinking field (%d chars)",
+                                "VLM content empty; falling back to thinking field (%d chars)",
                                 len(thinking),
                             )
                             return thinking

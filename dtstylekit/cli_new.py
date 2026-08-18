@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dtstylekit.di.container import get_container
 from dtstylekit.di.services import configure_services
+from dtstylekit.use_cases import GenerateStyleUseCase, IndexPresetsUseCase, SearchPresetsUseCase
 
 # Configure DI container
 configure_services()
@@ -22,9 +23,7 @@ logger = logging.getLogger(__name__)
 
 def cmd_generate(args: argparse.Namespace) -> int:
     """End-to-end generation using GenerateStyleUseCase."""
-    from dtstylekit.use_cases.generate_style import GenerateStyleUseCase
-
-    use_case: GenerateStyleUseCase = container.resolve("dtstylekit.use_cases.GenerateStyleUseCase")
+    use_case: GenerateStyleUseCase = container.resolve(GenerateStyleUseCase)
 
     from dtstylekit.use_cases.generate_style import GenerateStyleRequest
 
@@ -60,9 +59,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_preset_index(args: argparse.Namespace) -> int:
     """Build preset index using IndexPresetsUseCase."""
-    from dtstylekit.use_cases.index_presets import IndexPresetsUseCase
-
-    use_case: IndexPresetsUseCase = container.resolve("dtstylekit.use_cases.IndexPresetsUseCase")
+    use_case: IndexPresetsUseCase = container.resolve(IndexPresetsUseCase)
 
     from dtstylekit.paths import get_presets_dir
     from dtstylekit.use_cases.index_presets import IndexPresetsRequest
@@ -87,9 +84,7 @@ def cmd_preset_index(args: argparse.Namespace) -> int:
 
 def cmd_preset_search(args: argparse.Namespace) -> int:
     """Search presets using SearchPresetsUseCase."""
-    from dtstylekit.use_cases.search_presets import SearchPresetsUseCase
-
-    use_case: SearchPresetsUseCase = container.resolve("dtstylekit.use_cases.SearchPresetsUseCase")
+    use_case: SearchPresetsUseCase = container.resolve(SearchPresetsUseCase)
 
     from dtstylekit.use_cases.search_presets import SearchPresetsRequest
 
@@ -122,9 +117,7 @@ def cmd_preset_search(args: argparse.Namespace) -> int:
 
 def cmd_preset_list(args: argparse.Namespace) -> int:
     """List all presets."""
-    from dtstylekit.use_cases.search_presets import SearchPresetsUseCase
-
-    use_case: SearchPresetsUseCase = container.resolve("dtstylekit.use_cases.SearchPresetsUseCase")
+    use_case: SearchPresetsUseCase = container.resolve(SearchPresetsUseCase)
 
     from dtstylekit.use_cases.search_presets import SearchPresetsRequest
 
@@ -217,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=("es", "en"),
         default="es",
-        help="Language of the natural-language explanation document " "(default: es).",
+        help="Language of the natural-language explanation document (default: es).",
     )
 
     # preset subcommand

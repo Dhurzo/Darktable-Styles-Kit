@@ -73,6 +73,7 @@ class GenerateStyleUseCase:
         from dtstylekit.composer.explanation import generate_explanation
         from dtstylekit.composer.generator import generate_dtstyle
         from dtstylekit.composer.report import generate_report
+        from dtstylekit.paths import get_generated_dir
 
         # 1. Generate style spec via VLM
         style_spec, vlm_report, vlm_warnings, analysis = self._style_generator.generate(
@@ -86,18 +87,18 @@ class GenerateStyleUseCase:
         # 2. Load selected presets
         all_warnings = list(vlm_warnings)
         selected_presets = self._preset_repository.load_selected_presets(
-            getattr(style_spec, "selected_preset_names", None) or [], all_warnings
+            style_spec.selected_preset_names or [], all_warnings
         )
 
         # 3. Validate we have something to output
-        if not selected_presets and not getattr(style_spec, "plugins", None):
+        if not selected_presets and not style_spec.plugins:
             raise ValueError(
                 "Cannot generate style: no presets and no adjustments. "
                 "Try a different --model or provide --references."
             )
 
         # 4. Determine output directory
-        output_dir = request.output_dir or Path("./generated_styles")
+        output_dir = request.output_dir or get_generated_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 5. Generate .dtstyle file

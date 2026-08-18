@@ -122,7 +122,7 @@ def validate_plugin_blobs(dtstyle_path: Path) -> list[str]:
             if reg and reg.size_bytes is not None:
                 if not verify_size(operation, blob):
                     errors.append(
-                        f"{operation}: blob size {len(blob)} != " f"expected {reg.size_bytes}"
+                        f"{operation}: blob size {len(blob)} != expected {reg.size_bytes}"
                     )
         else:
             # Some presets may have empty op_params (should be rare)

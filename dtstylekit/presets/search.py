@@ -267,6 +267,16 @@ class PresetSearcher:
                         break
         return filtered[:limit]
 
+    def get_preset_by_id(self, preset_id: int) -> PresetIndexEntry | None:
+        """Get a preset entry by its database ID."""
+        self.indexer.connect()
+        return self.indexer.get_preset_by_id(preset_id)
+
+    def list_presets(self, category: str | None = None) -> list[PresetIndexEntry]:
+        """List presets, optionally filtered by category."""
+        self.indexer.connect()
+        return self.indexer.list_presets(category)
+
     def close(self) -> None:
         """Close database connections."""
         self.indexer.close()

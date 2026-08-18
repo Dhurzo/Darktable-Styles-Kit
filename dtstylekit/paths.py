@@ -38,3 +38,16 @@ def get_outputs_dir() -> Path:
     if env:
         return Path(env)
     return PROJECT_ROOT / "outputs"
+
+
+def get_generated_dir() -> Path:
+    """Return the default directory for generated ``.dtstyle`` files.
+
+    Override with ``DTSTYLEKIT_GENERATED_DIR``.  Defaults to
+    ``generated_styles/`` inside the project root, so generation works
+    regardless of the current working directory.
+    """
+    env = os.environ.get("DTSTYLEKIT_GENERATED_DIR")
+    if env:
+        return Path(env)
+    return PROJECT_ROOT / "generated_styles"

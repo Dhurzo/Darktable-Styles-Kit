@@ -74,7 +74,7 @@ def _coerce(tag: Any) -> Any:
     if values is None:
         return str(tag)
 
-    if isinstance(values, (list, tuple)):
+    if isinstance(values, list | tuple):
         if len(values) == 1:
             return _scalar(values[0])
         return [_scalar(v) for v in values]
@@ -86,7 +86,7 @@ def _scalar(v: Any) -> Any:
     """Coerce a single EXIF scalar to a JSON-friendly primitive."""
     if v is None:
         return None
-    if isinstance(v, (str, int, float, bool)):
+    if isinstance(v, str | int | float | bool):
         return v
     if isinstance(v, bytes):
         try:

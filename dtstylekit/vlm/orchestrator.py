@@ -331,7 +331,7 @@ def generate_style_spec(
 
         # Run iterative refinement
         try:
-            refined_spec = iterative_refine(
+            refine_result = iterative_refine(
                 raw_path=Path(refine_raw_path),
                 reference_paths=[Path(r) for r in (references or [])],
                 direction=direction,
@@ -339,8 +339,18 @@ def generate_style_spec(
                 generate_func=_generate_for_refiner,
                 max_iterations=refine_iterations,
             )
-            validated_spec = refined_spec
-            logger.info("Iterative refinement completed successfully")
+            validated_spec = refine_result.spec
+            if refine_result.passed:
+                logger.info(
+                    "Iterative refinement passed on iteration %d",
+                    refine_result.iterations_completed,
+                )
+            else:
+                logger.info(
+                    "Iterative refinement completed %d iteration(s) without passing; "
+                    "returning best attempt",
+                    refine_result.iterations_completed,
+                )
         except Exception as e:
             logger.warning("Iterative refinement failed: %s, using original spec", e)
 

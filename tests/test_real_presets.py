@@ -206,8 +206,7 @@ class TestVerifiedIopSizeMatchesDarktable:
             assert len(unpacked) > 0
         except Exception as e:
             pytest.fail(
-                f"unpack_params('{op_name}', real blob from "
-                f"{matching[0]['file_name']}) failed: {e}"
+                f"unpack_params('{op_name}', real blob from {matching[0]['file_name']}) failed: {e}"
             )
 
 

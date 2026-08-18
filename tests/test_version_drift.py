@@ -47,9 +47,9 @@ def _read_versions() -> dict[str, int]:
 def test_every_registered_iop_has_a_source_file() -> None:
     """Each registered operation must map to a ``src/iop/<op>.c`` file."""
     missing = [op for op in IOP_REGISTRY if not (_DARKTABLE_SRC / f"{op}.c").exists()]
-    assert not missing, (
-        "registry operations without a C source file " f"(renamed/removed in darktable?): {missing}"
-    )
+    assert (
+        not missing
+    ), f"registry operations without a C source file (renamed/removed in darktable?): {missing}"
 
 
 def test_iop_versions_match_master() -> None:

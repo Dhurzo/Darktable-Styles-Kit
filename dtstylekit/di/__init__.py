@@ -1,5 +1,5 @@
 """Dependency Injection module for dtstylekit."""
 
-from .container import DIContainer, configure_container, get_container
+from .container import DIContainer, get_container
 
-__all__ = ["DIContainer", "configure_container", "get_container"]
+__all__ = ["DIContainer", "get_container"]

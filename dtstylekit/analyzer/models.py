@@ -166,9 +166,9 @@ def _stringify(value: Any) -> Any:
     """Make a value JSON-friendly (exifread returns ``IfdTag`` objects)."""
     if value is None:
         return None
-    if isinstance(value, (str, int, float, bool)):
+    if isinstance(value, str | int | float | bool):
         return value
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_stringify(v) for v in value]
     # exifread.classes.IfdTag and friends implement __str__
     return str(value)

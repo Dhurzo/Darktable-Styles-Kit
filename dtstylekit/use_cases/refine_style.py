@@ -50,7 +50,7 @@ class RefineStyleUseCase:
             request: Refinement parameters.
 
         Returns:
-            Refined style spec.
+            Refined style spec with real iteration metadata.
         """
         from dtstylekit.vlm.iterative_refiner import iterative_refine
 
@@ -67,7 +67,7 @@ class RefineStyleUseCase:
             return spec
 
         # Run iterative refinement
-        refined_spec = iterative_refine(
+        result = iterative_refine(
             raw_path=request.raw_path,
             reference_paths=request.reference_paths,
             direction=request.direction,
@@ -78,8 +78,8 @@ class RefineStyleUseCase:
         )
 
         return RefineStyleResponse(
-            refined_spec=refined_spec,
-            iterations_completed=request.max_iterations,
-            passed=True,  # iterative_refine returns best attempt
+            refined_spec=result.spec,
+            iterations_completed=result.iterations_completed,
+            passed=result.passed,
             warnings=[],
         )

@@ -54,7 +54,8 @@ class SearchPresetsUseCase:
             search_results = self._searcher.search(request.query, limit=request.limit)
             entries = [r.preset for r in search_results]
 
+        total_found = len(entries)
         return SearchPresetsResponse(
             results=entries[: request.limit],
-            total_found=len(entries),
+            total_found=total_found,
         )

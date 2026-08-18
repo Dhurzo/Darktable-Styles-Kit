@@ -350,7 +350,7 @@ def build_prompt(
     # crushing the output to near black.  State the rule explicitly so
     # the model has an actionable constraint instead of raw numbers.
     mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
-    if not isinstance(mean_lum, (int, float)) or isinstance(mean_lum, bool):
+    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
         mean_lum = None
     guard: str = ""
     if mean_lum is not None and mean_lum < 0.3:
@@ -601,7 +601,7 @@ def build_prompt(
             # decisions (filmicrgb.saturation / vibrance) must use it, not
             # the depressed per-zone deltas.
             gsat = reference_analysis.get("global_saturation")
-            if isinstance(gsat, (int, float)) and not isinstance(gsat, bool):
+            if isinstance(gsat, int | float) and not isinstance(gsat, bool):
                 ref_hues_lines.append(
                     f"  global_saturation (HSV) = {gsat:.3f}  <- TRUE colorfulness of the references"
                 )

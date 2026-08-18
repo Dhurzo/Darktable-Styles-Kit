@@ -1,28 +1,31 @@
 """Service registration for dtstylekit DI container.
 
 This module registers all concrete implementations with the DI container.
-Import this module to configure the container with all services.
+Importing it has no side effects: call :func:`configure_services` explicitly
+at application startup (e.g. from the CLI entry point).
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dtstylekit.interfaces import (
+    ImageAnalyzer,
+    ImageEncoder,
+    PresetRepository,
+    ReferenceAnalyzer,
+    StyleGenerator,
+    StyleValidator,
+)
+from dtstylekit.interfaces import PresetSearcher as IPresetSearcher
+from dtstylekit.interfaces import VLMClient as IVLMClient
+
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
-    from dtstylekit.interfaces import (
-        ImageAnalyzer,
-        ImageEncoder,
-        PresetRepository,
-        ReferenceAnalyzer,
-        StyleGenerator,
-        StyleValidator,
-    )
-    from dtstylekit.interfaces import (
-        PresetSearcher as IPresetSearcher,
-    )
+    from dtstylekit.di.container import DIContainer
     from dtstylekit.interfaces.preset_searcher import SearchResult
     from dtstylekit.presets.indexer import PresetIndexer
     from dtstylekit.presets.models import Preset, PresetIndexEntry
@@ -31,29 +34,21 @@ if TYPE_CHECKING:
 
 from dtstylekit.di.container import get_container
 
+logger = logging.getLogger(__name__)
 
-def configure_services() -> None:
+
+def configure_services(container: DIContainer | None = None) -> None:
     """Register all services with the DI container.
 
     This function should be called once at application startup.
+
+    Args:
+        container: Container to configure (defaults to the global one).
     """
-    container = get_container()
+    container = container or get_container()
 
     # Import implementations here to avoid circular imports
     from dtstylekit.analyzer.pipeline import analyze_image as _analyze_image
-    from dtstylekit.codec.iop_registry import IOP_REGISTRY
-    from dtstylekit.interfaces import (
-        ImageEncoder,
-        PresetRepository,
-        StyleGenerator,
-        StyleValidator,
-    )
-    from dtstylekit.interfaces import (
-        PresetSearcher as IPresetSearcher,
-    )
-    from dtstylekit.interfaces import (
-        VLMClient as IVLMClient,
-    )
     from dtstylekit.paths import get_outputs_dir
     from dtstylekit.presets.indexer import PresetIndexer
     from dtstylekit.presets.search import PresetSearcher
@@ -63,39 +58,39 @@ def configure_services() -> None:
 
     # Image Analyzer - stateless function
     container.register_factory(
-        _ImageAnalyzerAdapter,
+        ImageAnalyzer,
         lambda _c: _ImageAnalyzerAdapter(_analyze_image),
     )
 
     # VLM Client - stateless, can be singleton
     container.register_singleton(IVLMClient, VLMClient)
 
-    # IOP Registry - immutable data
-    container.register_instance(dict, IOP_REGISTRY)
-
     # --- Transients (stateful or config-dependent) ---
 
-    # Preset Searcher - needs DB paths
-    def _create_preset_searcher() -> _PresetSearcherAdapter:
+    # Concrete PresetSearcher - needs DB paths, created per resolve
+    def _create_concrete_searcher() -> PresetSearcher:
         outputs_dir = get_outputs_dir()
-        db_path = outputs_dir / "presets.db"
-        emb_path = outputs_dir / "preset_embeddings.npy"
-        searcher = PresetSearcher(db_path, emb_path)
-        return _PresetSearcherAdapter(searcher)
+        return PresetSearcher(outputs_dir / "presets.db", outputs_dir / "preset_embeddings.npy")
 
-    container.register_factory(_PresetSearcherAdapter, lambda _c: _create_preset_searcher())
+    container.register_factory(PresetSearcher, lambda _c: _create_concrete_searcher())
+
+    # Preset Searcher adapter - wraps the concrete searcher
+    container.register_factory(
+        IPresetSearcher,
+        lambda c: _PresetSearcherAdapter(c.resolve(PresetSearcher)),
+    )
 
     # Style Generator - composed of multiple services
-    def _create_style_generator() -> _StyleGeneratorAdapter:
-        return _StyleGeneratorAdapter()
-
-    container.register_factory(_StyleGeneratorAdapter, lambda _c: _create_style_generator())
+    container.register_factory(
+        StyleGenerator,
+        lambda c: _StyleGeneratorAdapter(c.resolve(PresetSearcher)),
+    )
 
     # Style Validator - stateless
-    container.register_singleton(_StyleValidatorAdapter, _StyleValidatorAdapter)
+    container.register_singleton(StyleValidator, _StyleValidatorAdapter)
 
     # Image Encoder - stateless
-    container.register_singleton(_ImageEncoderAdapter, _ImageEncoderAdapter)
+    container.register_singleton(ImageEncoder, _ImageEncoderAdapter)
 
     # Preset Repository - needs index path
     def _create_preset_repository() -> _PresetRepositoryAdapter:
@@ -104,10 +99,10 @@ def configure_services() -> None:
         indexer = PresetIndexer(index_path) if index_path.exists() else None
         return _PresetRepositoryAdapter(indexer)
 
-    container.register_factory(_PresetRepositoryAdapter, lambda _c: _create_preset_repository())
+    container.register_factory(PresetRepository, lambda _c: _create_preset_repository())
 
     # Reference Analyzer - stateless
-    container.register_singleton(_ReferenceAnalyzerAdapter, _ReferenceAnalyzerAdapter)
+    container.register_singleton(ReferenceAnalyzer, _ReferenceAnalyzerAdapter)
 
     # --- Use Cases ---
     # Use cases are stateless - register as singletons
@@ -121,38 +116,38 @@ def configure_services() -> None:
 
     container.register_factory(
         GenerateStyleUseCase,
-        lambda _c: GenerateStyleUseCase(
-            style_generator=_c.resolve(StyleGenerator),
-            image_encoder=_c.resolve(ImageEncoder),
-            preset_repository=_c.resolve(PresetRepository),
+        lambda c: GenerateStyleUseCase(
+            style_generator=c.resolve(StyleGenerator),
+            image_encoder=c.resolve(ImageEncoder),
+            preset_repository=c.resolve(PresetRepository),
         ),
     )
 
     container.register_factory(
         SearchPresetsUseCase,
-        lambda _c: SearchPresetsUseCase(
-            preset_searcher=_c.resolve(IPresetSearcher),
+        lambda c: SearchPresetsUseCase(
+            preset_searcher=c.resolve(IPresetSearcher),
         ),
     )
 
     container.register_factory(
         IndexPresetsUseCase,
-        lambda _c: IndexPresetsUseCase(
-            preset_repository=_c.resolve(PresetRepository),
+        lambda c: IndexPresetsUseCase(
+            preset_repository=c.resolve(PresetRepository),
         ),
     )
 
     container.register_factory(
         ValidateStyleUseCase,
-        lambda _c: ValidateStyleUseCase(
-            style_validator=_c.resolve(StyleValidator),
+        lambda c: ValidateStyleUseCase(
+            style_validator=c.resolve(StyleValidator),
         ),
     )
 
     container.register_factory(
         RefineStyleUseCase,
-        lambda _c: RefineStyleUseCase(
-            style_generator=_c.resolve(StyleGenerator),
+        lambda c: RefineStyleUseCase(
+            style_generator=c.resolve(StyleGenerator),
         ),
     )
 
@@ -178,6 +173,9 @@ class _ImageAnalyzerAdapter(ImageAnalyzer):
 class _StyleGeneratorAdapter(StyleGenerator):
     """Adapter for the generate_style_spec function."""
 
+    def __init__(self, searcher: PresetSearcher) -> None:
+        self._searcher = searcher
+
     def generate(
         self,
         image_path: str | Path,
@@ -188,19 +186,12 @@ class _StyleGeneratorAdapter(StyleGenerator):
     ) -> tuple[StyleSpec, str, list[str], ImageAnalysis]:
         from dtstylekit.analyzer.pipeline import analyze_image
         from dtstylekit.codec.iop_registry import IOP_REGISTRY
-        from dtstylekit.paths import get_outputs_dir
-        from dtstylekit.presets.search import PresetSearcher
         from dtstylekit.vlm.orchestrator import generate_style_spec
-
-        outputs_dir = get_outputs_dir()
-        db_path = outputs_dir / "presets.db"
-        emb_path = outputs_dir / "preset_embeddings.npy"
-        searcher = PresetSearcher(db_path, emb_path)
 
         return generate_style_spec(
             image_path=image_path,
             direction=direction,
-            searcher=searcher,
+            searcher=self._searcher,
             analyzer=analyze_image,
             registry=IOP_REGISTRY,
             references=references,
@@ -270,7 +261,8 @@ class _ImageEncoderAdapter(ImageEncoder):
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=quality)
             return base64.b64encode(buf.getvalue()).decode("ascii")
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to encode image %s: %s", image_path, exc)
             return None
 
     def encode_batch(
@@ -302,24 +294,18 @@ class _PresetRepositoryAdapter(PresetRepository):
 
         # Try index first
         if self._indexer:
-            self._indexer.connect()
+            conn = self._indexer.connect()
             target = Path(name).name
-            row = (
-                self._indexer.connect()
-                .execute(
-                    "SELECT file_path FROM presets WHERE file_path = ? OR file_path LIKE ? LIMIT 1",
-                    (name, f"%{target}"),
-                )
-                .fetchone()
-            )
+            row = conn.execute(
+                "SELECT file_path FROM presets WHERE file_path = ? OR file_path LIKE ? LIMIT 1",
+                (name, f"%{target}"),
+            ).fetchone()
             if row and row["file_path"]:
                 return self.load_preset(Path(row["file_path"]))
 
-            row = (
-                self._indexer.connect()
-                .execute("SELECT file_path FROM presets WHERE display_name = ? LIMIT 1", (name,))
-                .fetchone()
-            )
+            row = conn.execute(
+                "SELECT file_path FROM presets WHERE display_name = ? LIMIT 1", (name,)
+            ).fetchone()
             if row and row["file_path"]:
                 return self.load_preset(Path(row["file_path"]))
 
@@ -378,7 +364,8 @@ class _ReferenceAnalyzerAdapter(ReferenceAnalyzer):
                 s = getattr(getattr(a, "luminance", None), "saturation_mean", None)
                 if s is not None:
                     sats.append(float(s))
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to analyze reference image %s: %s", ref, exc)
                 continue
         return sum(sats) / len(sats) if sats else 0.0
 
@@ -402,11 +389,7 @@ class _PresetSearcherAdapter(IPresetSearcher):
         return self._searcher.hybrid_search(query, limit)
 
     def get_preset_by_id(self, preset_id: int) -> PresetIndexEntry | None:
-        return self._searcher.indexer.get_preset_by_id(preset_id)
+        return self._searcher.get_preset_by_id(preset_id)
 
     def list_presets(self, category: str | None = None) -> list[PresetIndexEntry]:
-        return self._searcher.indexer.list_presets(category)
-
-
-# Auto-configure when module is imported
-configure_services()
+        return self._searcher.list_presets(category)

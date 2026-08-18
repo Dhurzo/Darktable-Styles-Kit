@@ -146,7 +146,7 @@ def render_block(info: dict, blendop: int | None = None) -> str:
         f'        operation="{name}",',
         f"        version={info['version']},",
         f"        # {len(info['fields'])} fields, {info['size_bytes']} bytes",
-        f"        pack_format=\"{info['pack_format']}\",",
+        f'        pack_format="{info["pack_format"]}",',
         "        fields=(",
     ]
     for f in info["fields"]:

@@ -221,9 +221,9 @@ def _normalize_adjustments(adjustments: dict) -> dict[str, dict]:
         if k in IOP_REGISTRY:
             if isinstance(val, dict):
                 for pk, pv in val.items():
-                    if isinstance(pv, (int, float)):
+                    if isinstance(pv, int | float):
                         result.setdefault(k, {})[pk] = float(pv)
-            elif isinstance(val, (int, float)):
+            elif isinstance(val, int | float):
                 param = _PRIMARY_PARAM.get(k)
                 if param:
                     result.setdefault(k, {})[param] = float(val)
@@ -232,7 +232,7 @@ def _normalize_adjustments(adjustments: dict) -> dict[str, dict]:
             op, param = _GENERIC_PARAM_MAP[k]
             if isinstance(val, dict):
                 for sub_k, sub_v in val.items():
-                    if not isinstance(sub_v, (int, float)):
+                    if not isinstance(sub_v, int | float):
                         continue
                     sk = str(sub_k).strip().lower()
                     if sk in _GENERIC_PARAM_MAP:
@@ -240,7 +240,7 @@ def _normalize_adjustments(adjustments: dict) -> dict[str, dict]:
                         result.setdefault(sub_op, {})[sub_param] = float(sub_v)
                     elif sk in IOP_REGISTRY[op].ranges:
                         result.setdefault(op, {})[sk] = float(sub_v)
-            elif isinstance(val, (int, float)):
+            elif isinstance(val, int | float):
                 result.setdefault(op, {})[param] = float(val)
             continue
         # Unknown key — skip silently (validator would drop it anyway).
@@ -281,7 +281,7 @@ def _build_style_spec(data: dict) -> StyleSpec:
                 enabled=bool(p.get("enabled", True)),
                 multi_name=str(p.get("multi_name", "")),
                 multi_priority=int(p.get("multi_priority", 0)),
-                params={k: float(v) for k, v in params.items() if isinstance(v, (int, float))},
+                params={k: float(v) for k, v in params.items() if isinstance(v, int | float)},
             )
         )
 

@@ -109,10 +109,12 @@ def _contrast_s(n: int = 7, strength: float = 0.4) -> list[tuple[float, float]]:
     s = max(0.0, min(1.0, strength))
     return _resample(
         n,
-        lambda x: 0.5
-        + math.sin(math.pi * (x - 0.5)) * s / 2.0
-        + (x - 0.5) * (1 - s) * 0
-        + (x - 0.5) * (1 - s),
+        lambda x: (
+            0.5
+            + math.sin(math.pi * (x - 0.5)) * s / 2.0
+            + (x - 0.5) * (1 - s) * 0
+            + (x - 0.5) * (1 - s)
+        ),
     )
 
 
@@ -149,9 +151,13 @@ def _crush_blacks(crush: float = 0.05, n: int = 5) -> list[tuple[float, float]]:
     return _resample(
         n,
         # Above x=0.15 follow a steeper-than-identity line
-        lambda x: 0.0
-        if x == 0.0
-        else ((x ** (1.0 + crush * 4.0)) * (1.0 / (1.0 ** (1.0 + crush * 4.0))) if x > 0 else 0.0),
+        lambda x: (
+            0.0
+            if x == 0.0
+            else (
+                (x ** (1.0 + crush * 4.0)) * (1.0 / (1.0 ** (1.0 + crush * 4.0))) if x > 0 else 0.0
+            )
+        ),
     )
 
 

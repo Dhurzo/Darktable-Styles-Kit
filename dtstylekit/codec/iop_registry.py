@@ -1353,7 +1353,7 @@ def pack_params(op: str, params: dict) -> bytes:
         val = merged.get(field)
         if val is None:
             continue
-        if isinstance(min_val, (int, float)) and not isinstance(min_val, bool):
+        if isinstance(min_val, int | float) and not isinstance(min_val, bool):
             tol = 1e-6 * max(1.0, abs(float(min_val)), abs(float(max_val)))
             lo, hi = float(min_val) - tol, float(max_val) + tol
         else:
@@ -1400,9 +1400,9 @@ def _pack_curve_iop(reg: "IOPRegistry", params: dict) -> bytes:
     }
     blob = apply_curve_template(reg.operation, template, **kwargs)
     expected = reg.curve_pack_size_override or curve_iop_size(reg.operation)
-    assert len(blob) == expected, (
-        f"{reg.operation} curve_preset pack produced {len(blob)} bytes, " f"expected {expected}"
-    )
+    assert (
+        len(blob) == expected
+    ), f"{reg.operation} curve_preset pack produced {len(blob)} bytes, expected {expected}"
     return blob
 
 
