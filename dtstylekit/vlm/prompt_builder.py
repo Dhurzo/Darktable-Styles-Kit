@@ -380,8 +380,12 @@ def build_prompt(
 
     if lum is not None:
         # Tonal diagnosis
-        contrast_level = "low" if (lum.std or 0) < 0.15 else ("high" if (lum.std or 0) > 0.25 else "medium")
-        brightness = "dark" if (lum.mean or 0) < 0.3 else ("bright" if (lum.mean or 0) > 0.7 else "balanced")
+        contrast_level = (
+            "low" if (lum.std or 0) < 0.15 else ("high" if (lum.std or 0) > 0.25 else "medium")
+        )
+        brightness = (
+            "dark" if (lum.mean or 0) < 0.3 else ("bright" if (lum.mean or 0) > 0.7 else "balanced")
+        )
         diagnosis_parts.append(
             f"TONAL: {brightness} (mean={lum.mean:.2f}), {contrast_level} contrast (std={lum.std:.2f}), "
             f"shadows={lum.shadows_pct:.0%}, midtones={lum.midtones_pct:.0%}, highlights={lum.highlights_pct:.0%}"
@@ -390,7 +394,11 @@ def build_prompt(
         # Color diagnosis
         wb = lum.white_balance_ratio_rb or 1.0
         wb_desc = "neutral" if 0.95 < wb < 1.05 else ("warm" if wb > 1.05 else "cool")
-        sat_level = "low" if (lum.saturation_mean or 0) < 0.15 else ("high" if (lum.saturation_mean or 0) > 0.35 else "medium")
+        sat_level = (
+            "low"
+            if (lum.saturation_mean or 0) < 0.15
+            else ("high" if (lum.saturation_mean or 0) > 0.35 else "medium")
+        )
         diagnosis_parts.append(
             f"COLOR: {wb_desc} cast (R/B={wb:.2f}), {sat_level} saturation (mean={lum.saturation_mean:.2f})"
         )
@@ -416,9 +424,13 @@ def build_prompt(
         elif g_mean > r_mean * 1.1 and g_mean > b_mean * 1.1:
             cast = "green cast"
         if cast:
-            diagnosis_parts.append(f"CHANNEL CAST: {cast} (R={r_mean:.2f} G={g_mean:.2f} B={b_mean:.2f})")
+            diagnosis_parts.append(
+                f"CHANNEL CAST: {cast} (R={r_mean:.2f} G={g_mean:.2f} B={b_mean:.2f})"
+            )
 
-    tech_diagnosis = "\n".join(diagnosis_parts) if diagnosis_parts else "(insufficient analysis data)"
+    tech_diagnosis = (
+        "\n".join(diagnosis_parts) if diagnosis_parts else "(insufficient analysis data)"
+    )
 
     preset_summaries = []
     for p in presets[:5]:
@@ -431,18 +443,31 @@ def build_prompt(
         # Use the cleaned display name ("sepia", "faded") when available.
         display_name = derive_display_name(getattr(p, "name", "") or "") or filename
         description = clean_description(getattr(p, "description", "") or "") or "(no description)"
-        preset_summaries.append({
-            "filename": filename,
-            "name": display_name,
-            "description": description[:200],
-            "operations": list(dict.fromkeys(ops))[:10],
-        })
+        preset_summaries.append(
+            {
+                "filename": filename,
+                "name": display_name,
+                "description": description[:200],
+                "operations": list(dict.fromkeys(ops))[:10],
+            }
+        )
 
     # Detect if candidates are relevant: check if any has operations matching
     # the desired style (film, color, tone). If not, add explicit guidance.
     has_relevant = any(
-        any(op in ("filmicrgb", "colorbalancergb", "sigmoid", "exposure", "tonecurve", "rgbcurve", "colorzones")
-            for op in p.get("operations", []))
+        any(
+            op
+            in (
+                "filmicrgb",
+                "colorbalancergb",
+                "sigmoid",
+                "exposure",
+                "tonecurve",
+                "rgbcurve",
+                "colorzones",
+            )
+            for op in p.get("operations", [])
+        )
         for p in preset_summaries
     )
     relevance_note = ""
@@ -498,8 +523,12 @@ def build_prompt(
             # Palander). Photographers with CLEAR grading (Nolan Batman blues,
             # Blade Runner) will exceed 0.7 and apply the actual hue.
             if sh is not None and sh_conf >= 0.7:
-                ref_hues_lines.append(f"  shadows_hue = {sh:.1f}° (confidence={sh_conf:.2f}, mode={sh_mode})")
-                ref_instructions.append(f"  -> SET shadows_H = {sh:.1f}° (from Python analysis, confidence={sh_conf:.2f})")
+                ref_hues_lines.append(
+                    f"  shadows_hue = {sh:.1f}° (confidence={sh_conf:.2f}, mode={sh_mode})"
+                )
+                ref_instructions.append(
+                    f"  -> SET shadows_H = {sh:.1f}° (from Python analysis, confidence={sh_conf:.2f})"
+                )
                 if sh_mode == "bi" and sh_sec is not None:
                     ref_instructions.append(
                         f"     NOTE: reference has bi-modal color in SHADOWS: primary {sh:.1f}°, secondary {sh_sec:.1f}° "
@@ -507,7 +536,9 @@ def build_prompt(
                         f"modest (<=0.10) so the secondary tone is not muted."
                     )
             else:
-                ref_instructions.append("  -> SET shadows_H = 0° (NEUTRAL - reference has no clear shadow grading; respect target colors)")
+                ref_instructions.append(
+                    "  -> SET shadows_H = 0° (NEUTRAL - reference has no clear shadow grading; respect target colors)"
+                )
 
             # Midtones
             mh = reference_analysis.get("midtones_hue")
@@ -515,15 +546,21 @@ def build_prompt(
             mh_mode = reference_analysis.get("midtones_hue_mode", "neutral")
             mh_sec = reference_analysis.get("midtones_hue_secondary")
             if mh is not None and mh_conf >= 0.7:
-                ref_hues_lines.append(f"  midtones_hue = {mh:.1f}° (confidence={mh_conf:.2f}, mode={mh_mode})")
-                ref_instructions.append(f"  -> SET midtones_H = {mh:.1f}° (from Python analysis, confidence={mh_conf:.2f})")
+                ref_hues_lines.append(
+                    f"  midtones_hue = {mh:.1f}° (confidence={mh_conf:.2f}, mode={mh_mode})"
+                )
+                ref_instructions.append(
+                    f"  -> SET midtones_H = {mh:.1f}° (from Python analysis, confidence={mh_conf:.2f})"
+                )
                 if mh_mode == "bi" and mh_sec is not None:
                     ref_instructions.append(
                         f"     NOTE: reference has bi-modal color in MIDTONES: primary {mh:.1f}°, secondary {mh_sec:.1f}°. "
                         f"Apply primary {mh:.1f}° as midtones_H and keep midtones_C modest (<=0.08) - midtones carry skin tones."
                     )
             else:
-                ref_instructions.append("  -> SET midtones_H = 0° (NEUTRAL - reference has no clear midtone grading; respect target colors)")
+                ref_instructions.append(
+                    "  -> SET midtones_H = 0° (NEUTRAL - reference has no clear midtone grading; respect target colors)"
+                )
 
             # Highlights
             hh = reference_analysis.get("highlights_hue")
@@ -531,15 +568,21 @@ def build_prompt(
             hh_mode = reference_analysis.get("highlights_hue_mode", "neutral")
             hh_sec = reference_analysis.get("highlights_hue_secondary")
             if hh is not None and hh_conf >= 0.7:
-                ref_hues_lines.append(f"  highlights_hue = {hh:.1f}° (confidence={hh_conf:.2f}, mode={hh_mode})")
-                ref_instructions.append(f"  -> SET highlights_H = {hh:.1f}° (from Python analysis, confidence={hh_conf:.2f})")
+                ref_hues_lines.append(
+                    f"  highlights_hue = {hh:.1f}° (confidence={hh_conf:.2f}, mode={hh_mode})"
+                )
+                ref_instructions.append(
+                    f"  -> SET highlights_H = {hh:.1f}° (from Python analysis, confidence={hh_conf:.2f})"
+                )
                 if hh_mode == "bi" and hh_sec is not None:
                     ref_instructions.append(
                         f"     NOTE: reference has bi-modal color in HIGHLIGHTS: primary {hh:.1f}°, secondary {hh_sec:.1f}°. "
                         f"Apply primary {hh:.1f}° as highlights_H and keep highlights_C modest (<=0.05) - highlights clip easily."
                     )
             else:
-                ref_instructions.append("  -> SET highlights_H = 0° (NEUTRAL - reference has no clear highlight grading; respect target colors)")
+                ref_instructions.append(
+                    "  -> SET highlights_H = 0° (NEUTRAL - reference has no clear highlight grading; respect target colors)"
+                )
 
             # Saturation (always include)
             ss = reference_analysis.get("shadows_sat", 0)
@@ -589,13 +632,15 @@ def build_prompt(
             modes = (sh_mode, mh_mode, hh_mode)
             hues_trio = (sh, mh, hh)
             if all(m == "mono" for m in modes) and all(h is not None for h in hues_trio):
-                def _circ_diff(a, b):
+
+                def _circ_diff(a: float, b: float) -> float:
                     d = abs(a - b) % 360
                     return min(d, 360 - d)
+
                 pair_close = (
-                    _circ_diff(hues_trio[0], hues_trio[1]) < 15 and
-                    _circ_diff(hues_trio[1], hues_trio[2]) < 15 and
-                    _circ_diff(hues_trio[0], hues_trio[2]) < 15
+                    _circ_diff(hues_trio[0], hues_trio[1]) < 15  # type: ignore[arg-type]
+                    and _circ_diff(hues_trio[1], hues_trio[2]) < 15  # type: ignore[arg-type]
+                    and _circ_diff(hues_trio[0], hues_trio[2]) < 15  # type: ignore[arg-type]
                 )
                 if pair_close:
                     ref_instructions.append(
@@ -612,21 +657,24 @@ def build_prompt(
             # per-zone hue variation (e.g. warm 15°/38°/45°): the VLM should
             # apply the three zone hues with modest chroma, never the
             # additive global offset.
-            if (all(m == "global" for m in modes)
-                    and all(h is not None for h in hues_trio)
-                    and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))):
+            if (
+                all(m == "global" for m in modes)
+                and all(h is not None for h in hues_trio)
+                and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))
+            ):
 
-                def _circ_diff(a, b):
+                def _circ_diff(a: float, b: float) -> float:
                     d = abs(a - b) % 360
                     return min(d, 360 - d)
 
-                def _circ_mean(hs):
+                def _circ_mean(hs: list[float]) -> float:
                     import math
+
                     s = sum(math.sin(math.radians(h)) for h in hs)
                     c = sum(math.cos(math.radians(h)) for h in hs)
                     return math.degrees(math.atan2(s, c)) % 360
 
-                g_mean = _circ_mean(list(hues_trio))
+                g_mean = _circ_mean(list(hues_trio))  # type: ignore[arg-type]
                 # Warm: red/orange/yellow/pink band (0°–90° and 315°–360°).
                 # Cool: green/cyan/blue band (90°–315°).
                 warm = g_mean <= 90.0 or g_mean >= 315.0
@@ -646,51 +694,33 @@ def build_prompt(
                 )
 
         if ref_hues_lines:
-
             ref_hues = (
-
                 "\n[PRE-COMPUTED REFERENCE HUES (from Python analysis)]\n"
-
-                + "\n".join(ref_hues_lines) + "\n"
-
+                + "\n".join(ref_hues_lines)
+                + "\n"
                 "Hues with confidence>=0.7 are GROUND TRUTH - use them exactly.\n"
-
                 "Missing/low-confidence hues: use NEUTRAL (0°) - respect target photo colors.\n"
-
             )
 
         else:
-
             ref_hues = "\n[No reliable pre-computed hues - use NEUTRAL: shadows=0°, midtones=0°, highlights=0° (respect target colors)]\n"
 
         reference_note = (
-
             f"{ref_hues}"
-
             f"\n================================================================\n"
-
             f"CRITICAL: USE PRE-COMPUTED HUES WHERE CONFIDENT >=0.7 - NEUTRAL (0°) WHERE NOT\n"
-
             f"===============================================================\n\n"
-
             f"The FIRST {len(reference_b64s)} attached images are REFERENCE PHOTOS.\n"
-
-            + "\n".join(ref_instructions) + "\n"
-
-            + _chroma_caps_block(reference_analysis) + "\n"
-
+            + "\n".join(ref_instructions)
+            + "\n"
+            + _chroma_caps_block(reference_analysis)
+            + "\n"
             "[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
-
             "[WARNING]  NEUTRALITY RULE: If reference hues are NOT confident (>=0.7), keep shadows_H/midtones_H/highlights_H = 0°.\n"
-
             "   Apply color grading ONLY when references show CLEAR grading (e.g. Nolan Batman blues ~200°, Blade Runner).\n"
-
             "   Photographers like Alen Palander have neutral references - RESPECT the target photo's original colors.\n"
-
             "The LAST attached image is the TARGET PHOTO. Design style so target matches reference look.\n"
-
             "===============================================================\n"
-
         )
 
     else:
@@ -698,47 +728,26 @@ def build_prompt(
         reference_note = ""
 
     user_content_parts = [
-
         "[STYLE DIRECTION]",
-
         direction,
-
         reference_note,
-
         "[TECHNICAL DIAGNOSIS]",
-
         tech_diagnosis,
-
         "",
-
         "[IMAGE ANALYSIS]",
-
         "",
-
         "",
-
-"[CANDIDATE PRESETS]",
-
+        "[CANDIDATE PRESETS]",
         "",
-
         "",
-
-"[IOPs]",
-
+        "[IOPs]",
         iop_schema,
-
         guard,
-
         relevance_note,
-
         preset_note,
-
         pipeline_note,
-
         "",
-
         "[WARNING] OUTPUT ONLY VALID JSON - NO TEXT, NO MARKDOWN, NO EXPLANATION. Your entire response must be a single JSON object matching the format in the system prompt.",
-
     ]
 
     user_content = "\n".join(user_content_parts)
@@ -746,19 +755,14 @@ def build_prompt(
     user_msg: dict = {"role": "user", "content": user_content}
 
     if image_b64:
-
         user_msg["images"] = [image_b64]
 
         if reference_b64s:
-
             user_msg["images"] = list(reference_b64s) + [image_b64]
 
     return [
-
         {"role": "system", "content": SYSTEM_PROMPT},
-
         user_msg,
-
     ]
 
 
@@ -793,10 +797,7 @@ def _is_global_grade(reference_analysis: dict | None) -> bool:
     three zones (one coherent tint across the whole tonal range)."""
     if not reference_analysis:
         return False
-    return all(
-        (reference_analysis.get(f"{z}_hue_mode") or "") == "global"
-        for z in _SOFT_CAPS
-    )
+    return all((reference_analysis.get(f"{z}_hue_mode") or "") == "global" for z in _SOFT_CAPS)
 
 
 def _chroma_caps_block(reference_analysis: dict | None) -> str:

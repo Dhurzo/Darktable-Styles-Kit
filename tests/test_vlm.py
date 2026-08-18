@@ -58,26 +58,35 @@ class TestParseResponse:
 
 class TestValidateStyle:
     def test_validates_known_iop(self) -> None:
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="vibrance", params={"amount": 50.0}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="vibrance", params={"amount": 50.0}),
+            ],
+        )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         assert len(validated.plugins) == 1
         assert validated.plugins[0].params["amount"] == 50.0
 
     def test_clamps_out_of_range(self) -> None:
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="vibrance", params={"amount": 999.0}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="vibrance", params={"amount": 999.0}),
+            ],
+        )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         # vibrance range is 0..100, so 999 should be clamped to 100
         assert validated.plugins[0].params["amount"] == 100.0
         assert any("out of range" in w for w in warnings)
 
     def test_merges_defaults(self) -> None:
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="filmicrgb", params={"contrast": 1.5}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="filmicrgb", params={"contrast": 1.5}),
+            ],
+        )
         validated, _ = validate_style(spec, IOP_REGISTRY)
         # Defaults for filmicrgb should be merged
         assert validated.plugins[0].params["contrast"] == 1.5
@@ -88,19 +97,27 @@ class TestValidateStyle:
         colorful — a negative filmicrgb.saturation contradicts the look
         and must be clamped to 0.0 (the VLM ignored the prompt hint and
         chose -25 for the colorful Palander references)."""
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="filmicrgb", params={"contrast": 1.4, "saturation": -25.0}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="filmicrgb", params={"contrast": 1.4, "saturation": -25.0}),
+            ],
+        )
         ref = {
             # per-zone deltas look desaturated (low-key refs)...
-            "shadows_sat": 0.040, "midtones_sat": 0.083, "highlights_sat": 0.058,
-            "shadows_hue_confidence": 0.0, "midtones_hue_confidence": 0.0,
+            "shadows_sat": 0.040,
+            "midtones_sat": 0.083,
+            "highlights_sat": 0.058,
+            "shadows_hue_confidence": 0.0,
+            "midtones_hue_confidence": 0.0,
             "highlights_hue_confidence": 0.0,
             # ...but the global HSV mean says they are colorful
             "global_saturation": 0.304,
         }
         validated, warnings = validate_style(
-            spec, IOP_REGISTRY, reference_analysis=ref,
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=ref,
         )
         assert validated.plugins[0].params["saturation"] == 0.0
         assert any("contradicts colorful references" in w for w in warnings)
@@ -108,29 +125,38 @@ class TestValidateStyle:
     def test_desaturated_references_allow_negative_filmic_saturation(self) -> None:
         """Global HSV < 0.15 → references genuinely desaturated: a negative
         filmicrgb.saturation stays as-is."""
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="filmicrgb", params={"saturation": -25.0}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="filmicrgb", params={"saturation": -25.0}),
+            ],
+        )
         ref = {"global_saturation": 0.10}
         validated, _ = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
         assert validated.plugins[0].params["saturation"] == -25.0
 
     def test_skips_unknown_iop(self) -> None:
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(operation="nonexistent_iop", params={"x": 1.0}),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(operation="nonexistent_iop", params={"x": 1.0}),
+            ],
+        )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         assert len(validated.plugins) == 0
         assert any("Unknown IOP" in w for w in warnings)
 
     def test_validates_curve_preset(self) -> None:
         """Curve-based IOPs accept ``curve_preset`` as a string."""
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(
-                operation="colorzones",
-                params={"curve_preset": "s_strong", "strength": 50.0},
-            ),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(
+                    operation="colorzones",
+                    params={"curve_preset": "s_strong", "strength": 50.0},
+                ),
+            ],
+        )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         assert len(validated.plugins) == 1
         cp = validated.plugins[0].params.get("curve_preset")
@@ -141,18 +167,23 @@ class TestValidateStyle:
         assert validated.plugins[0].params.get("strength") == 50.0
 
     def test_rejects_unknown_curve_template(self) -> None:
-        spec = StyleSpec(style_name="test", plugins=[
-            Plugin(
-                operation="rgbcurve",
-                params={"curve_preset": "doesnt_exist"},
-            ),
-        ])
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(
+                    operation="rgbcurve",
+                    params={"curve_preset": "doesnt_exist"},
+                ),
+            ],
+        )
         # If curve_preset is unknown the validator should emit a
         # *warning* but still keep the plugin (the LLM can recover).
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         assert any("not a known curve template" in w for w in warnings)
-        assert validated.plugins[0].params.get("curve_preset") is None or \
-            validated.plugins[0].params.get("curve_preset") == "doesnt_exist"
+        assert (
+            validated.plugins[0].params.get("curve_preset") is None
+            or validated.plugins[0].params.get("curve_preset") == "doesnt_exist"
+        )
 
 
 class TestValidateAntiTintGuards:
@@ -164,11 +195,19 @@ class TestValidateAntiTintGuards:
     # ---- 2.1: dynamic chroma ceiling -----------------------------------
     def test_default_chroma_ceiling_without_reference(self) -> None:
         """No reference_analysis → shadows_C caps at 0.10 (default)."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(shadows_C=0.4, shadows_H=200.0,
-                                       midtones_C=0.4, midtones_H=200.0,
-                                       highlights_C=0.4, highlights_H=200.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.4,
+                    shadows_H=200.0,
+                    midtones_C=0.4,
+                    midtones_H=200.0,
+                    highlights_C=0.4,
+                    highlights_H=200.0,
+                ),
+            ],
+        )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
         params = validated.plugins[0].params
         assert params["shadows_C"] == 0.10
@@ -183,11 +222,19 @@ class TestValidateAntiTintGuards:
         three zones, the reference is marking this as an intentional
         monochrome grade — the dominance guard (2.3) won't fire, only 2.1.
         """
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(shadows_C=0.15, shadows_H=200.0,
-                                       midtones_C=0.15, midtones_H=200.0,
-                                       highlights_C=0.10, highlights_H=200.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.15,
+                    shadows_H=200.0,
+                    midtones_C=0.15,
+                    midtones_H=200.0,
+                    highlights_C=0.10,
+                    highlights_H=200.0,
+                ),
+            ],
+        )
         ref = {
             "shadows_hue_confidence": 0.90,
             "midtones_hue_confidence": 0.90,
@@ -209,9 +256,12 @@ class TestValidateAntiTintGuards:
 
     def test_medium_confidence_keeps_default_ceiling(self) -> None:
         """Confidence 0.72 (>=0.7 but <0.85) → still the conservative cap."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(shadows_C=0.15, shadows_H=200.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(shadows_C=0.15, shadows_H=200.0),
+            ],
+        )
         ref = {"shadows_hue_confidence": 0.72}
         validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
         # 0.15 > default cap 0.10 → clamped down
@@ -223,9 +273,12 @@ class TestValidateAntiTintGuards:
         """Target histogram R≈G>B (skin signature) → midtones_C capped to 0.05."""
         from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
 
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(midtones_C=0.20, midtones_H=30.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(midtones_C=0.20, midtones_H=30.0),
+            ],
+        )
         # Simulate portrait histogram: R≈G>B
         target = ImageAnalysis(
             histogram=HistogramStats(mean_red=0.55, mean_green=0.50, mean_blue=0.35),
@@ -238,9 +291,12 @@ class TestValidateAntiTintGuards:
         """Neutral target histogram (R=G=B) → protection doesn't trigger."""
         from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
 
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(midtones_C=0.08, midtones_H=30.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(midtones_C=0.08, midtones_H=30.0),
+            ],
+        )
         target = ImageAnalysis(
             histogram=HistogramStats(mean_red=0.5, mean_green=0.5, mean_blue=0.5),
         )
@@ -252,9 +308,12 @@ class TestValidateAntiTintGuards:
         """Target histogram with B>>R,G (cool/landscape) → no skin protection."""
         from dtstylekit.analyzer.models import HistogramStats, ImageAnalysis
 
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(midtones_C=0.08, midtones_H=200.0),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(midtones_C=0.08, midtones_H=200.0),
+            ],
+        )
         target = ImageAnalysis(
             histogram=HistogramStats(mean_red=0.3, mean_green=0.4, mean_blue=0.6),
         )
@@ -272,13 +331,19 @@ class TestValidateAntiTintGuards:
         the reference hue_modes are 'neutral' (NOT an intentional mono grade)
         → halves them.
         """
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(
-                shadows_C=0.15, shadows_H=200.0,
-                midtones_C=0.12, midtones_H=200.0,
-                highlights_C=0.10, highlights_H=200.0,
-            ),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.15,
+                    shadows_H=200.0,
+                    midtones_C=0.12,
+                    midtones_H=200.0,
+                    highlights_C=0.10,
+                    highlights_H=200.0,
+                ),
+            ],
+        )
         ref = {
             "shadows_hue_confidence": 0.90,
             "midtones_hue_confidence": 0.90,
@@ -297,13 +362,19 @@ class TestValidateAntiTintGuards:
 
     def test_monochrome_dominance_allows_intentional_mono_reference(self) -> None:
         """Reference declares hue_mode=mono with same hue in all 3 zones → allowed."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(
-                shadows_C=0.10, shadows_H=200.0,
-                midtones_C=0.08, midtones_H=200.0,
-                highlights_C=0.05, highlights_H=200.0,
-            ),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.10,
+                    shadows_H=200.0,
+                    midtones_C=0.08,
+                    midtones_H=200.0,
+                    highlights_C=0.05,
+                    highlights_H=200.0,
+                ),
+            ],
+        )
         ref = {
             "shadows_hue_mode": "mono",
             "midtones_hue_mode": "mono",
@@ -322,38 +393,56 @@ class TestValidateAntiTintGuards:
 
     def test_monochrome_dominance_ignored_when_hues_differ(self) -> None:
         """Different hues per zone (classic orange-teal) → no dominance tripped."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(
-                shadows_C=0.10, shadows_H=200.0,    # teal shadows
-                midtones_C=0.08, midtones_H=0.0,    # neutral midtones (skin protected)
-                highlights_C=0.05, highlights_H=30.0,  # warm highlights
-            ),
-        ])
-        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.10,
+                    shadows_H=200.0,  # teal shadows
+                    midtones_C=0.08,
+                    midtones_H=0.0,  # neutral midtones (skin protected)
+                    highlights_C=0.05,
+                    highlights_H=30.0,  # warm highlights
+                ),
+            ],
+        )
+        _, warnings = validate_style(spec, IOP_REGISTRY)
         assert not any("monochrome-dominance" in w for w in warnings)
 
     def test_monochrome_dominance_requires_all_three_zones_chroma(self) -> None:
         """Same hue but chroma=0 in one zone → not a global tint yet."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(
-                shadows_C=0.10, shadows_H=200.0,
-                midtones_C=0.00, midtones_H=200.0,   # midtones neutral
-                highlights_C=0.05, highlights_H=200.0,
-            ),
-        ])
-        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.10,
+                    shadows_H=200.0,
+                    midtones_C=0.00,
+                    midtones_H=200.0,  # midtones neutral
+                    highlights_C=0.05,
+                    highlights_H=200.0,
+                ),
+            ],
+        )
+        _, warnings = validate_style(spec, IOP_REGISTRY)
         assert not any("monochrome-dominance" in w for w in warnings)
         # midtones stays neutral, the other two keep their chroma (already capped)
 
     def test_wrapped_hues_treated_as_same_for_dominance(self) -> None:
         """Hues 358°, 1°, 2° must count as the same hue (circular)."""
-        spec = StyleSpec(style_name="t", plugins=[
-            self._colorbalance_plugin(
-                shadows_C=0.15, shadows_H=358.0,
-                midtones_C=0.12, midtones_H=1.0,
-                highlights_C=0.10, highlights_H=2.0,
-            ),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                self._colorbalance_plugin(
+                    shadows_C=0.15,
+                    shadows_H=358.0,
+                    midtones_C=0.12,
+                    midtones_H=1.0,
+                    highlights_C=0.10,
+                    highlights_H=2.0,
+                ),
+            ],
+        )
         # Confident reference (lifts ceiling) but 'neutral' hue_mode (not mono)
         ref = {
             "shadows_hue_confidence": 0.90,
@@ -363,7 +452,7 @@ class TestValidateAntiTintGuards:
             "midtones_hue_mode": "neutral",
             "highlights_hue_mode": "neutral",
         }
-        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        _, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
         assert any("monochrome-dominance" in w for w in warnings)
 
 
@@ -384,13 +473,18 @@ class TestValidateGlobalGrade:
 
     def _warm_global_ref(self) -> dict:
         return {
-            "shadows_hue": 15.0, "shadows_hue_confidence": 0.90,
+            "shadows_hue": 15.0,
+            "shadows_hue_confidence": 0.90,
             "shadows_hue_mode": "global",
-            "midtones_hue": 38.0, "midtones_hue_confidence": 0.90,
+            "midtones_hue": 38.0,
+            "midtones_hue_confidence": 0.90,
             "midtones_hue_mode": "global",
-            "highlights_hue": 45.0, "highlights_hue_confidence": 0.90,
+            "highlights_hue": 45.0,
+            "highlights_hue_confidence": 0.90,
             "highlights_hue_mode": "global",
-            "shadows_sat": 0.30, "midtones_sat": 0.30, "highlights_sat": 0.30,
+            "shadows_sat": 0.30,
+            "midtones_sat": 0.30,
+            "highlights_sat": 0.30,
         }
 
     def test_global_ref_allows_uniform_warm_spec(self) -> None:
@@ -398,15 +492,26 @@ class TestValidateGlobalGrade:
         within ±15° so 2.3 would fire) → the 'global' exception allows it
         and the 6F global caps clamp chroma to a subtle level
         (min(0.02/0.015/0.012, sat*0.25=0.075) → 0.02/0.015/0.012)."""
-        spec = StyleSpec(style_name="t", plugins=[
-            Plugin(operation="colorbalancergb", params={
-                "shadows_C": 0.12, "shadows_H": 15.0,
-                "midtones_C": 0.10, "midtones_H": 20.0,
-                "highlights_C": 0.08, "highlights_H": 25.0,
-            }),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                Plugin(
+                    operation="colorbalancergb",
+                    params={
+                        "shadows_C": 0.12,
+                        "shadows_H": 15.0,
+                        "midtones_C": 0.10,
+                        "midtones_H": 20.0,
+                        "highlights_C": 0.08,
+                        "highlights_H": 25.0,
+                    },
+                ),
+            ],
+        )
         validated, warnings = validate_style(
-            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=self._warm_global_ref(),
         )
         assert not any("monochrome-dominance" in w for w in warnings)
         params = validated.plugins[0].params
@@ -421,15 +526,26 @@ class TestValidateGlobalGrade:
         chroma to the subtle level (a wrong-hue uniform tint must not be
         strong either); no halving happens because highlights_C=0.03 no
         longer trips the strict >0.05 gate."""
-        spec = StyleSpec(style_name="t", plugins=[
-            Plugin(operation="colorbalancergb", params={
-                "shadows_C": 0.12, "shadows_H": 200.0,
-                "midtones_C": 0.10, "midtones_H": 200.0,
-                "highlights_C": 0.08, "highlights_H": 200.0,
-            }),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                Plugin(
+                    operation="colorbalancergb",
+                    params={
+                        "shadows_C": 0.12,
+                        "shadows_H": 200.0,
+                        "midtones_C": 0.10,
+                        "midtones_H": 200.0,
+                        "highlights_C": 0.08,
+                        "highlights_H": 200.0,
+                    },
+                ),
+            ],
+        )
         validated, warnings = validate_style(
-            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=self._warm_global_ref(),
         )
         params = validated.plugins[0].params
         assert params["shadows_C"] == 0.02
@@ -442,15 +558,26 @@ class TestValidateGlobalGrade:
         """The reference's own zone hues may spread up to ±45° (warm grade
         15°/38°/45° = 30° spread) — the OLD ±15° exception would have
         rejected this warm-global reference and halved the spec."""
-        spec = StyleSpec(style_name="t", plugins=[
-            Plugin(operation="colorbalancergb", params={
-                "shadows_C": 0.05, "shadows_H": 30.0,
-                "midtones_C": 0.04, "midtones_H": 30.0,
-                "highlights_C": 0.03, "highlights_H": 30.0,
-            }),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                Plugin(
+                    operation="colorbalancergb",
+                    params={
+                        "shadows_C": 0.05,
+                        "shadows_H": 30.0,
+                        "midtones_C": 0.04,
+                        "midtones_H": 30.0,
+                        "highlights_C": 0.03,
+                        "highlights_H": 30.0,
+                    },
+                ),
+            ],
+        )
         validated, warnings = validate_style(
-            spec, IOP_REGISTRY, reference_analysis=self._warm_global_ref(),
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=self._warm_global_ref(),
         )
         # spec_mean = 30°, ref_mean ≈ 32.7° → within 45° → allowed
         assert not any("monochrome-dominance" in w for w in warnings)
@@ -466,13 +593,22 @@ class TestValidateGlobalGrade:
         cap 0.015 for shadows."""
         ref = dict(self._warm_global_ref())
         ref["shadows_sat"] = 0.06
-        spec = StyleSpec(style_name="t", plugins=[
-            Plugin(operation="colorbalancergb", params={
-                "shadows_C": 0.08, "shadows_H": 20.0,
-            }),
-        ])
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[
+                Plugin(
+                    operation="colorbalancergb",
+                    params={
+                        "shadows_C": 0.08,
+                        "shadows_H": 20.0,
+                    },
+                ),
+            ],
+        )
         validated, warnings = validate_style(
-            spec, IOP_REGISTRY, reference_analysis=ref,
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=ref,
         )
         assert validated.plugins[0].params["shadows_C"] == 0.015
         assert any("GLOBAL-GRADE cap" in w for w in warnings)
@@ -481,6 +617,7 @@ class TestValidateGlobalGrade:
 class TestSchemaRenderer:
     def test_renders_iop_schema(self) -> None:
         from dtstylekit.vlm.schema_renderer import render_iop_schema
+
         schema = render_iop_schema(IOP_REGISTRY, max_iops=5)
         assert "filmicrgb" in schema.lower() or "colorbalancergb" in schema.lower()
 
@@ -516,7 +653,9 @@ class TestPromptBuilder:
 
         analysis = self._make_analysis(mean=0.5)
         presets = []
-        messages = build_prompt(analysis, presets, "warm cinematic", iop_schema="### filmicrgb", image_b64=None)
+        messages = build_prompt(
+            analysis, presets, "warm cinematic", iop_schema="### filmicrgb", image_b64=None
+        )
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
@@ -611,8 +750,13 @@ class TestPromptAntiTintRules:
             "highlights_sat": 0.30,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "bi-modal color in SHADOWS" in content
@@ -628,16 +772,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
-            "shadows_hue_mode": "mono", "shadows_sat": 0.50,
-            "midtones_hue": 200.0, "midtones_hue_confidence": 0.90,
-            "midtones_hue_mode": "mono", "midtones_sat": 0.50,
-            "highlights_hue": 200.0, "highlights_hue_confidence": 0.90,
-            "highlights_hue_mode": "mono", "highlights_sat": 0.50,
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "mono",
+            "shadows_sat": 0.50,
+            "midtones_hue": 200.0,
+            "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "mono",
+            "midtones_sat": 0.50,
+            "highlights_hue": 200.0,
+            "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "mono",
+            "highlights_sat": 0.50,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         # High-confidence cap echoed in the prompt
@@ -659,7 +814,7 @@ class TestPromptAntiTintRules:
         analysis = self._make_analysis(0.5)
         ref = {
             "shadows_hue": 200.0,
-            "shadows_hue_confidence": 0.72,   # medium → soft cap 0.10
+            "shadows_hue_confidence": 0.72,  # medium → soft cap 0.10
             "shadows_hue_mode": "mono",
             "shadows_sat": 0.50,
             "midtones_hue": None,
@@ -672,8 +827,13 @@ class TestPromptAntiTintRules:
             "highlights_sat": 0.0,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         # Shadow: medium conf -> soft cap 0.10 (sat 0.50, so 0.10 wins)
@@ -694,16 +854,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": None, "shadows_hue_confidence": 0.2,
-            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
-            "midtones_hue": None, "midtones_hue_confidence": 0.2,
-            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
-            "highlights_hue": None, "highlights_hue_confidence": 0.2,
-            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.2,
+            "shadows_hue_mode": "neutral",
+            "shadows_sat": 0.0,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.2,
+            "midtones_hue_mode": "neutral",
+            "midtones_sat": 0.0,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.2,
+            "highlights_hue_mode": "neutral",
+            "highlights_sat": 0.0,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "INTENTIONAL MONOCHROME" not in content
@@ -721,16 +892,29 @@ class TestPromptAntiTintRules:
         analysis = self._make_analysis(0.5)
         ref = {
             # Low-key references: per-zone deltas look nearly desaturated...
-            "shadows_sat": 0.040, "midtones_sat": 0.083, "highlights_sat": 0.058,
-            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
-            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
-            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+            "shadows_sat": 0.040,
+            "midtones_sat": 0.083,
+            "highlights_sat": 0.058,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.0,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.0,
+            "midtones_hue_mode": "neutral",
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.0,
+            "highlights_hue_mode": "neutral",
             # ...but the global HSV mean says they are colorful
             "global_saturation": 0.30,
         }
         msgs = build_prompt(
-            analysis, [], "editorial", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "editorial",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "global_saturation (HSV) = 0.300" in content
@@ -746,15 +930,28 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_sat": 0.02, "midtones_sat": 0.04, "highlights_sat": 0.03,
-            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
-            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
-            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+            "shadows_sat": 0.02,
+            "midtones_sat": 0.04,
+            "highlights_sat": 0.03,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.0,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.0,
+            "midtones_hue_mode": "neutral",
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.0,
+            "highlights_hue_mode": "neutral",
             "global_saturation": 0.10,
         }
         msgs = build_prompt(
-            analysis, [], "editorial", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "editorial",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "DESATURATED" in content
@@ -768,14 +965,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_sat": 0.04, "midtones_sat": 0.08, "highlights_sat": 0.06,
-            "shadows_hue": None, "shadows_hue_confidence": 0.0, "shadows_hue_mode": "neutral",
-            "midtones_hue": None, "midtones_hue_confidence": 0.0, "midtones_hue_mode": "neutral",
-            "highlights_hue": None, "highlights_hue_confidence": 0.0, "highlights_hue_mode": "neutral",
+            "shadows_sat": 0.04,
+            "midtones_sat": 0.08,
+            "highlights_sat": 0.06,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.0,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.0,
+            "midtones_hue_mode": "neutral",
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.0,
+            "highlights_hue_mode": "neutral",
         }
         msgs = build_prompt(
-            analysis, [], "editorial", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "editorial",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         assert "global_saturation" not in msgs[1]["content"]
 
@@ -787,16 +997,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": 15.0, "shadows_hue_confidence": 0.80,
-            "shadows_hue_mode": "global", "shadows_sat": 0.30,
-            "midtones_hue": 38.0, "midtones_hue_confidence": 0.86,
-            "midtones_hue_mode": "global", "midtones_sat": 0.30,
-            "highlights_hue": 45.0, "highlights_hue_confidence": 1.00,
-            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+            "shadows_hue": 15.0,
+            "shadows_hue_confidence": 0.80,
+            "shadows_hue_mode": "global",
+            "shadows_sat": 0.30,
+            "midtones_hue": 38.0,
+            "midtones_hue_confidence": 0.86,
+            "midtones_hue_mode": "global",
+            "midtones_sat": 0.30,
+            "highlights_hue": 45.0,
+            "highlights_hue_confidence": 1.00,
+            "highlights_hue_mode": "global",
+            "highlights_sat": 0.30,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "[GLOBAL WARM GRADE]" in content
@@ -820,16 +1041,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
-            "shadows_hue_mode": "global", "shadows_sat": 0.30,
-            "midtones_hue": 205.0, "midtones_hue_confidence": 0.90,
-            "midtones_hue_mode": "global", "midtones_sat": 0.30,
-            "highlights_hue": 210.0, "highlights_hue_confidence": 0.90,
-            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "global",
+            "shadows_sat": 0.30,
+            "midtones_hue": 205.0,
+            "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "global",
+            "midtones_sat": 0.30,
+            "highlights_hue": 210.0,
+            "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "global",
+            "highlights_sat": 0.30,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "[GLOBAL COOL GRADE]" in content
@@ -842,16 +1074,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": None, "shadows_hue_confidence": 0.2,
-            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
-            "midtones_hue": None, "midtones_hue_confidence": 0.2,
-            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
-            "highlights_hue": None, "highlights_hue_confidence": 0.2,
-            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.2,
+            "shadows_hue_mode": "neutral",
+            "shadows_sat": 0.0,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.2,
+            "midtones_hue_mode": "neutral",
+            "midtones_sat": 0.0,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.2,
+            "highlights_hue_mode": "neutral",
+            "highlights_sat": 0.0,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         content = msgs[1]["content"]
         assert "[GLOBAL" not in content
@@ -863,16 +1106,27 @@ class TestPromptAntiTintRules:
 
         analysis = self._make_analysis(0.5)
         ref = {
-            "shadows_hue": 15.0, "shadows_hue_confidence": 0.60,
-            "shadows_hue_mode": "global", "shadows_sat": 0.30,
-            "midtones_hue": 38.0, "midtones_hue_confidence": 0.55,
-            "midtones_hue_mode": "global", "midtones_sat": 0.30,
-            "highlights_hue": 45.0, "highlights_hue_confidence": 0.50,
-            "highlights_hue_mode": "global", "highlights_sat": 0.30,
+            "shadows_hue": 15.0,
+            "shadows_hue_confidence": 0.60,
+            "shadows_hue_mode": "global",
+            "shadows_sat": 0.30,
+            "midtones_hue": 38.0,
+            "midtones_hue_confidence": 0.55,
+            "midtones_hue_mode": "global",
+            "midtones_sat": 0.30,
+            "highlights_hue": 45.0,
+            "highlights_hue_confidence": 0.50,
+            "highlights_hue_mode": "global",
+            "highlights_sat": 0.30,
         }
         msgs = build_prompt(
-            analysis, [], "test", "schema",
-            image_b64=None, reference_b64s=["fake"], reference_analysis=ref,
+            analysis,
+            [],
+            "test",
+            "schema",
+            image_b64=None,
+            reference_b64s=["fake"],
+            reference_analysis=ref,
         )
         assert "[GLOBAL" not in msgs[1]["content"]
 
@@ -884,8 +1138,12 @@ class TestPresetExposureFilter:
         from pathlib import Path
 
         return Preset(
-            name="test", description="", iop_list="", plugins=plugins,
-            file_path=Path("/tmp/x.dtstyle"), xml_hash="h",
+            name="test",
+            description="",
+            iop_list="",
+            plugins=plugins,
+            file_path=Path("/tmp/x.dtstyle"),
+            xml_hash="h",
         )
 
     def _exposure_ref(self, ev: float, enabled: int = 1) -> PluginRef:
@@ -894,9 +1152,16 @@ class TestPresetExposureFilter:
 
         blob = pack_params("exposure", {"exposure": ev})
         return PluginRef(
-            operation="exposure", enabled=enabled, multi_name="",
-            multi_priority=0, num=0, module=7, op_params=encode_xmp(blob),
-            blendop_params="", blendop_version=13, multi_name_hand_edited=0,
+            operation="exposure",
+            enabled=enabled,
+            multi_name="",
+            multi_priority=0,
+            num=0,
+            module=7,
+            op_params=encode_xmp(blob),
+            blendop_params="",
+            blendop_version=13,
+            multi_name_hand_edited=0,
         )
 
     def test_net_ev_summed_only_enabled(self) -> None:
@@ -909,9 +1174,9 @@ class TestPresetExposureFilter:
         from dtstylekit.vlm.orchestrator import _preset_ev_fits
 
         p = self._preset([self._exposure_ref(-1.0)])
-        assert _preset_ev_fits(p, 0.15) is False   # dark image + -1 EV → crushed
-        assert _preset_ev_fits(p, 0.5) is True     # mid image → fine
-        assert _preset_ev_fits(p, 0.85) is True    # bright image → fine
+        assert _preset_ev_fits(p, 0.15) is False  # dark image + -1 EV → crushed
+        assert _preset_ev_fits(p, 0.5) is True  # mid image → fine
+        assert _preset_ev_fits(p, 0.85) is True  # bright image → fine
 
     def test_brightening_preset_rejected_for_bright_image(self) -> None:
         from dtstylekit.vlm.orchestrator import _preset_ev_fits
@@ -935,13 +1200,16 @@ class TestPresetExposureFilter:
         from dtstylekit.vlm.orchestrator import _preset_ev_fits
 
         p = Preset(
-            name="dehaze strong luminance only", description="",
-            iop_list="", plugins=[], file_path=Path("/tmp/x.dtstyle"),
+            name="dehaze strong luminance only",
+            description="",
+            iop_list="",
+            plugins=[],
+            file_path=Path("/tmp/x.dtstyle"),
             xml_hash="h",
         )
-        assert _preset_ev_fits(p, 0.15) is False   # dark image → dropped
-        assert _preset_ev_fits(p, 0.5) is True     # mid image → fine
-        assert _preset_ev_fits(p, 0.85) is True    # bright image → fine
+        assert _preset_ev_fits(p, 0.15) is False  # dark image → dropped
+        assert _preset_ev_fits(p, 0.5) is True  # mid image → fine
+        assert _preset_ev_fits(p, 0.85) is True  # bright image → fine
 
 
 class TestE2EValidatorGuardsWithVLMResponse:
@@ -990,13 +1258,21 @@ class TestE2EValidatorGuardsWithVLMResponse:
         same hue, high confidence.  Validator 2.3 must NOT halve here
         (the reference explicitly calls for a global tint look)."""
         return {
-            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
-            "shadows_hue_mode": "mono", "shadows_hue_secondary": None,
-            "midtones_hue": 200.0, "midtones_hue_confidence": 0.90,
-            "midtones_hue_mode": "mono", "midtones_hue_secondary": None,
-            "highlights_hue": 200.0, "highlights_hue_confidence": 0.90,
-            "highlights_hue_mode": "mono", "highlights_hue_secondary": None,
-            "shadows_sat": 0.50, "midtones_sat": 0.50, "highlights_sat": 0.50,
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "mono",
+            "shadows_hue_secondary": None,
+            "midtones_hue": 200.0,
+            "midtones_hue_confidence": 0.90,
+            "midtones_hue_mode": "mono",
+            "midtones_hue_secondary": None,
+            "highlights_hue": 200.0,
+            "highlights_hue_confidence": 0.90,
+            "highlights_hue_mode": "mono",
+            "highlights_hue_secondary": None,
+            "shadows_sat": 0.50,
+            "midtones_sat": 0.50,
+            "highlights_sat": 0.50,
         }
 
     def _neutral_ref(self) -> dict:
@@ -1004,13 +1280,18 @@ class TestE2EValidatorGuardsWithVLMResponse:
         validator's 2.3 dominance guard will then *halve* an aggressive
         uniform-hue VLM attempt."""
         return {
-            "shadows_hue": None, "shadows_hue_confidence": 0.20,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.20,
             "shadows_hue_mode": "neutral",
-            "midtones_hue": None, "midtones_hue_confidence": 0.20,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.20,
             "midtones_hue_mode": "neutral",
-            "highlights_hue": None, "highlights_hue_confidence": 0.20,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.20,
             "highlights_hue_mode": "neutral",
-            "shadows_sat": 0.0, "midtones_sat": 0.0, "highlights_sat": 0.0,
+            "shadows_sat": 0.0,
+            "midtones_sat": 0.0,
+            "highlights_sat": 0.0,
         }
 
     def _portrait_target(self) -> ImageAnalysis:
@@ -1019,12 +1300,17 @@ class TestE2EValidatorGuardsWithVLMResponse:
         )
 
     def _parse_and_validate(
-        self, vlm_json: str, ref: dict, target: ImageAnalysis | None = None,
+        self,
+        vlm_json: str,
+        ref: dict,
+        target: ImageAnalysis | None = None,
     ) -> tuple[StyleSpec, list[str]]:
         spec, _report = parse_response(vlm_json)
         return validate_style(
-            spec, IOP_REGISTRY,
-            reference_analysis=ref, target_analysis=target,
+            spec,
+            IOP_REGISTRY,
+            reference_analysis=ref,
+            target_analysis=target,
         )
 
     def test_mono_ref_skintone_target_keeps_midtones_neutral(self) -> None:
@@ -1040,14 +1326,15 @@ class TestE2EValidatorGuardsWithVLMResponse:
         """
         vlm = self._AGGRESSIVE_SLOT.format(shc=0.15, mc=0.15, hc=0.10)
         spec, warnings = self._parse_and_validate(
-            vlm, self._mono_ref(), self._portrait_target(),
+            vlm,
+            self._mono_ref(),
+            self._portrait_target(),
         )
         cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
         params = cb.params
         assert params["shadows_C"] == 0.15
         assert params["midtones_C"] == 0.05, (
-            f"midtones_C must be clamped to 0.05 on portrait target; got "
-            f"{params['midtones_C']}"
+            f"midtones_C must be clamped to 0.05 on portrait target; got " f"{params['midtones_C']}"
         )
         assert params["highlights_C"] == 0.10
         # Skin warning must appear
@@ -1069,13 +1356,18 @@ class TestE2EValidatorGuardsWithVLMResponse:
         Final: shadows_C=0.075, midtones_C=0.06, highlights_C=0.05.
         """
         ref = {
-            "shadows_hue": 200.0, "shadows_hue_confidence": 0.90,
-            "shadows_hue_mode": "neutral",   # not intentionally mono
-            "midtones_hue": None, "midtones_hue_confidence": 0.90,
+            "shadows_hue": 200.0,
+            "shadows_hue_confidence": 0.90,
+            "shadows_hue_mode": "neutral",  # not intentionally mono
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.90,
             "midtones_hue_mode": "neutral",
-            "highlights_hue": None, "highlights_hue_confidence": 0.90,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.90,
             "highlights_hue_mode": "neutral",
-            "shadows_sat": 0.50, "midtones_sat": 0.50, "highlights_sat": 0.50,
+            "shadows_sat": 0.50,
+            "midtones_sat": 0.50,
+            "highlights_sat": 0.50,
         }
         # 0.15/0.12/0.10 - all within high-conf caps (0.15/0.15/0.10)
         vlm = self._AGGRESSIVE_SLOT.format(shc=0.15, mc=0.12, hc=0.10)
@@ -1098,12 +1390,18 @@ class TestE2EValidatorGuardsWithVLMResponse:
         from dtstylekit.vlm.prompt_builder import _chroma_caps_block
 
         ref = {
-            "shadows_hue": None, "shadows_hue_confidence": 0.20,
-            "shadows_hue_mode": "neutral", "shadows_sat": 0.0,
-            "midtones_hue": None, "midtones_hue_confidence": 0.20,
-            "midtones_hue_mode": "neutral", "midtones_sat": 0.0,
-            "highlights_hue": None, "highlights_hue_confidence": 0.20,
-            "highlights_hue_mode": "neutral", "highlights_sat": 0.0,
+            "shadows_hue": None,
+            "shadows_hue_confidence": 0.20,
+            "shadows_hue_mode": "neutral",
+            "shadows_sat": 0.0,
+            "midtones_hue": None,
+            "midtones_hue_confidence": 0.20,
+            "midtones_hue_mode": "neutral",
+            "midtones_sat": 0.0,
+            "highlights_hue": None,
+            "highlights_hue_confidence": 0.20,
+            "highlights_hue_mode": "neutral",
+            "highlights_sat": 0.0,
         }
         # Prompt block: all neutral → caps 0.000
         block = _chroma_caps_block(ref)

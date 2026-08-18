@@ -47,9 +47,7 @@ def compute_luminance_stats(rgb_arrays: Iterable[float] | np.ndarray) -> Luminan
     if rgb.ndim == 3:
         rgb = rgb.reshape(-1, 3)
     if rgb.ndim != 2 or rgb.shape[1] != 3:
-        raise ValueError(
-            f"rgb_arrays must have shape (N, 3) or (H, W, 3), got {rgb.shape}"
-        )
+        raise ValueError(f"rgb_arrays must have shape (N, 3) or (H, W, 3), got {rgb.shape}")
     if rgb.size == 0:
         # Empty image edge case — return safe zeros.
         return LuminanceStats(white_balance_ratio_rb=1.0)
@@ -64,7 +62,7 @@ def compute_luminance_stats(rgb_arrays: Iterable[float] | np.ndarray) -> Luminan
     luma = LUMA_R * r + LUMA_G * g + LUMA_B * b
 
     saturation_mean = _mean_saturation(rgb)
-    wb_ratio = _white_balance_ratio(r.mean(), b.mean())
+    wb_ratio = _white_balance_ratio(float(r.mean()), float(b.mean()))
 
     shadows, midtones, highlights = _tonal_distribution(luma)
 

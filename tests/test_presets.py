@@ -138,11 +138,14 @@ def test_parser_extracts_plugins_from_sample(sample_preset_file: Path) -> None:
     assert preset.xml_hash == compute_xml_hash(SAMPLE_XML)
 
 
-@pytest.mark.parametrize("bad_path_factory", [
-    lambda d: d / "broken.dtstyle",
-    lambda d: d / "wrong_root.dtstyle",
-    lambda d: d / "missing_info.dtstyle",
-])
+@pytest.mark.parametrize(
+    "bad_path_factory",
+    [
+        lambda d: d / "broken.dtstyle",
+        lambda d: d / "wrong_root.dtstyle",
+        lambda d: d / "missing_info.dtstyle",
+    ],
+)
 def test_parser_handles_malformed_gracefully(tmp_path: Path, bad_path_factory) -> None:
     """Malformed files must return None, not raise."""
     p = bad_path_factory(tmp_path)
@@ -236,9 +239,7 @@ def test_indexer_schema_creates_all_tables(tmp_path: Path) -> None:
         idx.connect()
     conn = sqlite3.connect(db_path)
     try:
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "presets" in tables
         assert "preset_plugins" in tables
         assert "presets_fts" in tables  # FTS5 virtual table
@@ -246,7 +247,9 @@ def test_indexer_schema_creates_all_tables(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_indexer_indexes_real_presets(tmp_path: Path, all_presets: list[Path], preset_dir: Path) -> None:
+def test_indexer_indexes_real_presets(
+    tmp_path: Path, all_presets: list[Path], preset_dir: Path
+) -> None:
     """build_idx from a tmp DB produces a row count equal to the on-disk preset count."""
     db_path = tmp_path / "test.db"
     count = build_index(preset_dir, db_path, force=True)

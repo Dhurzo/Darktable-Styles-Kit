@@ -51,9 +51,7 @@ def estimate_noise(image: Image.Image) -> float:
     if h == 0 or w == 0:
         return 1e-6
 
-    luma = (
-        LUMA_R * arr[:, :, 0] + LUMA_G * arr[:, :, 1] + LUMA_B * arr[:, :, 2]
-    )  # H, W
+    luma = LUMA_R * arr[:, :, 0] + LUMA_G * arr[:, :, 1] + LUMA_B * arr[:, :, 2]  # H, W
 
     tile = _central_tile(luma)
     variance = float(tile.var())

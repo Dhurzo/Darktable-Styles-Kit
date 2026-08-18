@@ -26,9 +26,7 @@ from dtstylekit.codec.iop_registry import IOP_REGISTRY
 _DTSTYLEKIT_ROOT = Path(__file__).resolve().parents[1]
 _DARKTABLE_SRC = _DTSTYLEKIT_ROOT.parent / "src" / "iop"
 
-_INTROSPECTION_RE = re.compile(
-    r"DT_MODULE_INTROSPECTION\s*\(\s*(\d+)\s*,\s*[A-Za-z0-9_]+\s*\)"
-)
+_INTROSPECTION_RE = re.compile(r"DT_MODULE_INTROSPECTION\s*\(\s*(\d+)\s*,\s*[A-Za-z0-9_]+\s*\)")
 
 pytestmark = pytest.mark.skipif(
     not _DARKTABLE_SRC.is_dir(),
@@ -50,8 +48,7 @@ def test_every_registered_iop_has_a_source_file() -> None:
     """Each registered operation must map to a ``src/iop/<op>.c`` file."""
     missing = [op for op in IOP_REGISTRY if not (_DARKTABLE_SRC / f"{op}.c").exists()]
     assert not missing, (
-        "registry operations without a C source file "
-        f"(renamed/removed in darktable?): {missing}"
+        "registry operations without a C source file " f"(renamed/removed in darktable?): {missing}"
     )
 
 

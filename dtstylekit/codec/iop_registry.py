@@ -11,12 +11,13 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class IOPRegistry:
     """Registry entry for a single IOP module."""
+
     operation: str
     version: int
     pack_format: str
     fields: tuple[str, ...]
-    defaults: dict[str, float | int]
-    ranges: dict[str, tuple[float | int, float | int]]
+    defaults: dict[str, float | int | str]
+    ranges: dict[str, tuple[float | int | str, float | int | str]]
     size_bytes: int | None  # None = not verified against real .dtstyle
     blendop_cst: int  # 2 = LAB, 3 = RGB_DISPLAY, 4 = RGB_SCENE (per blend.h of this master)
     legacy_size_bytes: tuple[int, ...] = ()  # older versions still shipped in official styles
@@ -39,9 +40,13 @@ _VERIFIED_IOPS = {
         # 1 int + 4 floats + 2 ints = 7 items, 28 bytes
         pack_format="<iffffii",
         fields=(
-            "mode", "black", "exposure", "deflicker_percentile",
-            "deflicker_target_level", "compensate_exposure_bias",
-            "compensate_hilite_pres"
+            "mode",
+            "black",
+            "exposure",
+            "deflicker_percentile",
+            "deflicker_target_level",
+            "compensate_exposure_bias",
+            "compensate_hilite_pres",
         ),
         defaults={
             "mode": 0,  # MANUAL
@@ -65,8 +70,12 @@ _VERIFIED_IOPS = {
         legacy_size_bytes=(24,),  # v6 blobs shipped in official styles
         legacy_pack_format="<iffffi",  # v6: no compensate_hilite_pres
         legacy_fields=(
-            "mode", "black", "exposure", "deflicker_percentile",
-            "deflicker_target_level", "compensate_exposure_bias"
+            "mode",
+            "black",
+            "exposure",
+            "deflicker_percentile",
+            "deflicker_target_level",
+            "compensate_exposure_bias",
         ),
         blendop_cst=3,  # RGB_DISPLAY (default for exposure per src/iop/exposure.c:324)
     ),
@@ -76,15 +85,34 @@ _VERIFIED_IOPS = {
         # 18 floats + 11 ints = 29 items, 116 bytes
         pack_format="<18fiiIIiiiIIiI",
         fields=(
-            "grey_point_source", "black_point_source", "white_point_source",
-            "reconstruct_threshold", "reconstruct_feather",
-            "reconstruct_bloom_vs_details", "reconstruct_grey_vs_color",
-            "reconstruct_structure_vs_texture", "security_factor",
-            "grey_point_target", "black_point_target", "white_point_target",
-            "output_power", "latitude", "contrast", "saturation", "balance",
-            "noise_level", "preserve_color", "version", "auto_hardness",
-            "custom_grey", "high_quality_reconstruction", "noise_distribution",
-            "shadows", "highlights", "compensate_icc_black", "spline_version",
+            "grey_point_source",
+            "black_point_source",
+            "white_point_source",
+            "reconstruct_threshold",
+            "reconstruct_feather",
+            "reconstruct_bloom_vs_details",
+            "reconstruct_grey_vs_color",
+            "reconstruct_structure_vs_texture",
+            "security_factor",
+            "grey_point_target",
+            "black_point_target",
+            "white_point_target",
+            "output_power",
+            "latitude",
+            "contrast",
+            "saturation",
+            "balance",
+            "noise_level",
+            "preserve_color",
+            "version",
+            "auto_hardness",
+            "custom_grey",
+            "high_quality_reconstruction",
+            "noise_distribution",
+            "shadows",
+            "highlights",
+            "compensate_icc_black",
+            "spline_version",
             "enable_highlight_reconstruction",
         ),
         defaults={
@@ -158,48 +186,108 @@ _VERIFIED_IOPS = {
         # 32 floats + 1 int = 33 items, 132 bytes (verified)
         pack_format="<32fi",
         fields=(
-            "shadows_Y", "shadows_C", "shadows_H",
-            "midtones_Y", "midtones_C", "midtones_H",
-            "highlights_Y", "highlights_C", "highlights_H",
-            "global_Y", "global_C", "global_H",
-            "shadows_weight", "white_fulcrum", "highlights_weight",
-            "chroma_shadows", "chroma_highlights", "chroma_global",
-            "chroma_midtones", "saturation_global", "saturation_highlights",
-            "saturation_midtones", "saturation_shadows", "hue_angle",
-            "brilliance_global", "brilliance_highlights", "brilliance_midtones",
-            "brilliance_shadows", "mask_grey_fulcrum", "vibrance",
-            "grey_fulcrum", "contrast", "saturation_formula",
+            "shadows_Y",
+            "shadows_C",
+            "shadows_H",
+            "midtones_Y",
+            "midtones_C",
+            "midtones_H",
+            "highlights_Y",
+            "highlights_C",
+            "highlights_H",
+            "global_Y",
+            "global_C",
+            "global_H",
+            "shadows_weight",
+            "white_fulcrum",
+            "highlights_weight",
+            "chroma_shadows",
+            "chroma_highlights",
+            "chroma_global",
+            "chroma_midtones",
+            "saturation_global",
+            "saturation_highlights",
+            "saturation_midtones",
+            "saturation_shadows",
+            "hue_angle",
+            "brilliance_global",
+            "brilliance_highlights",
+            "brilliance_midtones",
+            "brilliance_shadows",
+            "mask_grey_fulcrum",
+            "vibrance",
+            "grey_fulcrum",
+            "contrast",
+            "saturation_formula",
         ),
         defaults={
-            "shadows_Y": 0.0, "shadows_C": 0.0, "shadows_H": 0.0,
-            "midtones_Y": 0.0, "midtones_C": 0.0, "midtones_H": 0.0,
-            "highlights_Y": 0.0, "highlights_C": 0.0, "highlights_H": 0.0,
-            "global_Y": 0.0, "global_C": 0.0, "global_H": 0.0,
-            "shadows_weight": 1.0, "white_fulcrum": 0.0, "highlights_weight": 1.0,
-            "chroma_shadows": 0.0, "chroma_highlights": 0.0, "chroma_global": 0.0,
-            "chroma_midtones": 0.0, "saturation_global": 0.0,
-            "saturation_highlights": 0.0, "saturation_midtones": 0.0,
-            "saturation_shadows": 0.0, "hue_angle": 0.0,
-            "brilliance_global": 0.0, "brilliance_highlights": 0.0,
-            "brilliance_midtones": 0.0, "brilliance_shadows": 0.0,
-            "mask_grey_fulcrum": 0.1845, "vibrance": 0.0,
-            "grey_fulcrum": 0.1845, "contrast": 0.0,
+            "shadows_Y": 0.0,
+            "shadows_C": 0.0,
+            "shadows_H": 0.0,
+            "midtones_Y": 0.0,
+            "midtones_C": 0.0,
+            "midtones_H": 0.0,
+            "highlights_Y": 0.0,
+            "highlights_C": 0.0,
+            "highlights_H": 0.0,
+            "global_Y": 0.0,
+            "global_C": 0.0,
+            "global_H": 0.0,
+            "shadows_weight": 1.0,
+            "white_fulcrum": 0.0,
+            "highlights_weight": 1.0,
+            "chroma_shadows": 0.0,
+            "chroma_highlights": 0.0,
+            "chroma_global": 0.0,
+            "chroma_midtones": 0.0,
+            "saturation_global": 0.0,
+            "saturation_highlights": 0.0,
+            "saturation_midtones": 0.0,
+            "saturation_shadows": 0.0,
+            "hue_angle": 0.0,
+            "brilliance_global": 0.0,
+            "brilliance_highlights": 0.0,
+            "brilliance_midtones": 0.0,
+            "brilliance_shadows": 0.0,
+            "mask_grey_fulcrum": 0.1845,
+            "vibrance": 0.0,
+            "grey_fulcrum": 0.1845,
+            "contrast": 0.0,
             "saturation_formula": 1,  # DTUCS
         },
         ranges={
-            "shadows_Y": (-1.0, 1.0), "shadows_C": (0.0, 1.0), "shadows_H": (0.0, 360.0),
-            "midtones_Y": (-1.0, 1.0), "midtones_C": (0.0, 1.0), "midtones_H": (0.0, 360.0),
-            "highlights_Y": (-1.0, 1.0), "highlights_C": (0.0, 1.0), "highlights_H": (0.0, 360.0),
-            "global_Y": (-1.0, 1.0), "global_C": (0.0, 1.0), "global_H": (0.0, 360.0),
-            "shadows_weight": (0.0, 3.0), "white_fulcrum": (-16.0, 16.0), "highlights_weight": (0.0, 3.0),
-            "chroma_shadows": (-1.0, 1.0), "chroma_highlights": (-1.0, 1.0), "chroma_global": (-1.0, 1.0),
-            "chroma_midtones": (-1.0, 1.0), "saturation_global": (-1.0, 1.0),
-            "saturation_highlights": (-1.0, 1.0), "saturation_midtones": (-1.0, 1.0),
-            "saturation_shadows": (-1.0, 1.0), "hue_angle": (-180.0, 180.0),
-            "brilliance_global": (-1.0, 1.0), "brilliance_highlights": (-1.0, 1.0),
-            "brilliance_midtones": (-1.0, 1.0), "brilliance_shadows": (-1.0, 1.0),
-            "mask_grey_fulcrum": (0.0, 1.0), "vibrance": (-1.0, 1.0),
-            "grey_fulcrum": (0.0, 1.0), "contrast": (-1.0, 1.0),
+            "shadows_Y": (-1.0, 1.0),
+            "shadows_C": (0.0, 1.0),
+            "shadows_H": (0.0, 360.0),
+            "midtones_Y": (-1.0, 1.0),
+            "midtones_C": (0.0, 1.0),
+            "midtones_H": (0.0, 360.0),
+            "highlights_Y": (-1.0, 1.0),
+            "highlights_C": (0.0, 1.0),
+            "highlights_H": (0.0, 360.0),
+            "global_Y": (-1.0, 1.0),
+            "global_C": (0.0, 1.0),
+            "global_H": (0.0, 360.0),
+            "shadows_weight": (0.0, 3.0),
+            "white_fulcrum": (-16.0, 16.0),
+            "highlights_weight": (0.0, 3.0),
+            "chroma_shadows": (-1.0, 1.0),
+            "chroma_highlights": (-1.0, 1.0),
+            "chroma_global": (-1.0, 1.0),
+            "chroma_midtones": (-1.0, 1.0),
+            "saturation_global": (-1.0, 1.0),
+            "saturation_highlights": (-1.0, 1.0),
+            "saturation_midtones": (-1.0, 1.0),
+            "saturation_shadows": (-1.0, 1.0),
+            "hue_angle": (-180.0, 180.0),
+            "brilliance_global": (-1.0, 1.0),
+            "brilliance_highlights": (-1.0, 1.0),
+            "brilliance_midtones": (-1.0, 1.0),
+            "brilliance_shadows": (-1.0, 1.0),
+            "mask_grey_fulcrum": (0.0, 1.0),
+            "vibrance": (-1.0, 1.0),
+            "grey_fulcrum": (0.0, 1.0),
+            "contrast": (-1.0, 1.0),
             "saturation_formula": (0, 1),
         },
         size_bytes=132,  # Verified from blob_size_calibration.md
@@ -212,13 +300,20 @@ _VERIFIED_IOPS = {
         # Field types in order: f,f,f,f,i,f,f,f,f,f,f,f,f,i
         pack_format="<ffffiffffffffi",
         fields=(
-            "middle_grey_contrast", "contrast_skewness",
-            "display_white_target", "display_black_target",
-            "color_processing", "hue_preservation",
-            "red_inset", "red_rotation",
-            "green_inset", "green_rotation",
-            "blue_inset", "blue_rotation",
-            "purity", "base_primaries",
+            "middle_grey_contrast",
+            "contrast_skewness",
+            "display_white_target",
+            "display_black_target",
+            "color_processing",
+            "hue_preservation",
+            "red_inset",
+            "red_rotation",
+            "green_inset",
+            "green_rotation",
+            "blue_inset",
+            "blue_rotation",
+            "purity",
+            "base_primaries",
         ),
         defaults={
             "middle_grey_contrast": 1.5,
@@ -227,9 +322,12 @@ _VERIFIED_IOPS = {
             "display_black_target": 0.0152,
             "color_processing": 0,  # PER_CHANNEL
             "hue_preservation": 100.0,
-            "red_inset": 0.0, "red_rotation": 0.0,
-            "green_inset": 0.0, "green_rotation": 0.0,
-            "blue_inset": 0.0, "blue_rotation": 0.0,
+            "red_inset": 0.0,
+            "red_rotation": 0.0,
+            "green_inset": 0.0,
+            "green_rotation": 0.0,
+            "blue_inset": 0.0,
+            "blue_rotation": 0.0,
             "purity": 0.0,
             "base_primaries": 0,  # WORK_PROFILE
         },
@@ -240,9 +338,12 @@ _VERIFIED_IOPS = {
             "display_black_target": (0.0, 15.0),
             "color_processing": (0, 1),
             "hue_preservation": (0.0, 100.0),
-            "red_inset": (0.0, 0.99), "red_rotation": (-0.4, 0.4),
-            "green_inset": (0.0, 0.99), "green_rotation": (-0.4, 0.4),
-            "blue_inset": (0.0, 0.99), "blue_rotation": (-0.4, 0.4),
+            "red_inset": (0.0, 0.99),
+            "red_rotation": (-0.4, 0.4),
+            "green_inset": (0.0, 0.99),
+            "green_rotation": (-0.4, 0.4),
+            "blue_inset": (0.0, 0.99),
+            "blue_rotation": (-0.4, 0.4),
             "purity": (0.0, 1.0),
             "base_primaries": (0, 3),
         },
@@ -292,14 +393,14 @@ _VERIFIED_IOPS = {
         fields=("mode", "sigma_r", "sigma_s", "detail", "midtone"),
         defaults={"mode": 1, "sigma_r": 0.5, "sigma_s": 0.5, "detail": 0.25, "midtone": 0.5},
         ranges={
-            "mode": (0, 1),                    # 0=bilateral, 1=local_laplacian
-            "sigma_r": (0.0, 100.0),            # range radius
-            "sigma_s": (0.0, 100.0),            # spatial radius
-            "detail": (-1.0, 4.0),              # detail boost
-            "midtone": (0.001, 1.0),            # midtone range
+            "mode": (0, 1),  # 0=bilateral, 1=local_laplacian
+            "sigma_r": (0.0, 100.0),  # range radius
+            "sigma_s": (0.0, 100.0),  # spatial radius
+            "detail": (-1.0, 4.0),  # detail boost
+            "midtone": (0.001, 1.0),  # midtone range
         },
-        size_bytes=20,    # Verified from blob_size_calibration.md + checked against real .dtstyle
-        blendop_cst=2,    # LAB (bilat works in Lab)
+        size_bytes=20,  # Verified from blob_size_calibration.md + checked against real .dtstyle
+        blendop_cst=2,  # LAB (bilat works in Lab)
     ),
     "basecurve": IOPRegistry(
         operation="basecurve",
@@ -323,10 +424,10 @@ _VERIFIED_IOPS = {
         fields=(
             # Curve data is opaque; only scalar fields are exposed.
             # The VLM should NOT try to set basecurve params directly.
-            "exposure_fusion",    # int 0=N
-            "exposure_stops",     # float 0.01-4.0
-            "exposure_bias",      # float -1.0-1.0
-            "preserve_colors",    # enum 0-6
+            "exposure_fusion",  # int 0=N
+            "exposure_stops",  # float 0.01-4.0
+            "exposure_bias",  # float -1.0-1.0
+            "preserve_colors",  # enum 0-6
         ),
         defaults={
             "exposure_fusion": 0,
@@ -340,7 +441,7 @@ _VERIFIED_IOPS = {
             "exposure_bias": (-1.0, 1.0),
             "preserve_colors": (0, 6),
         },
-        size_bytes=520,   # Verified from real .dtstyle files
+        size_bytes=520,  # Verified from real .dtstyle files
         blendop_cst=3,  # RGB_DISPLAY (default for exposure per src/iop/exposure.c:324) (basecurve is scene-referred)
     ),
 }
@@ -382,7 +483,12 @@ _SIMPLE_IOPS = {
         pack_format="<ifff",
         fields=("channel", "scale", "strength", "midtones_bias"),
         defaults={"channel": 2, "scale": 1600.0 / 213.2, "strength": 25.0, "midtones_bias": 100.0},
-        ranges={"channel": (0, 3), "scale": (20.0 / 213.2, 6400.0 / 213.2), "strength": (0.0, 100.0), "midtones_bias": (0.0, 100.0)},
+        ranges={
+            "channel": (0, 3),
+            "scale": (20.0 / 213.2, 6400.0 / 213.2),
+            "strength": (0.0, 100.0),
+            "midtones_bias": (0.0, 100.0),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (grain works in Lab)
     ),
@@ -391,8 +497,20 @@ _SIMPLE_IOPS = {
         version=2,
         pack_format="<ffffi",
         fields=("a_steepness", "a_offset", "b_steepness", "b_offset", "unbound"),
-        defaults={"a_steepness": 1.0, "a_offset": 0.0, "b_steepness": 1.0, "b_offset": 0.0, "unbound": 1},
-        ranges={"a_steepness": (0.0, 5.0), "a_offset": (-5.0, 5.0), "b_steepness": (0.0, 5.0), "b_offset": (-5.0, 5.0), "unbound": (0, 1)},
+        defaults={
+            "a_steepness": 1.0,
+            "a_offset": 0.0,
+            "b_steepness": 1.0,
+            "b_offset": 0.0,
+            "unbound": 1,
+        },
+        ranges={
+            "a_steepness": (0.0, 5.0),
+            "a_offset": (-5.0, 5.0),
+            "b_steepness": (0.0, 5.0),
+            "b_offset": (-5.0, 5.0),
+            "unbound": (0, 1),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (colorcontrast works in Lab)
     ),
@@ -400,9 +518,30 @@ _SIMPLE_IOPS = {
         operation="splittoning",
         version=1,
         pack_format="<ffffff",
-        fields=("shadow_hue", "shadow_saturation", "highlight_hue", "highlight_saturation", "balance", "compress"),
-        defaults={"shadow_hue": 0.0, "shadow_saturation": 0.5, "highlight_hue": 0.2, "highlight_saturation": 0.5, "balance": 0.5, "compress": 33.0},
-        ranges={"shadow_hue": (0.0, 1.0), "shadow_saturation": (0.0, 1.0), "highlight_hue": (0.0, 1.0), "highlight_saturation": (0.0, 1.0), "balance": (0.0, 1.0), "compress": (0.0, 100.0)},
+        fields=(
+            "shadow_hue",
+            "shadow_saturation",
+            "highlight_hue",
+            "highlight_saturation",
+            "balance",
+            "compress",
+        ),
+        defaults={
+            "shadow_hue": 0.0,
+            "shadow_saturation": 0.5,
+            "highlight_hue": 0.2,
+            "highlight_saturation": 0.5,
+            "balance": 0.5,
+            "compress": 33.0,
+        },
+        ranges={
+            "shadow_hue": (0.0, 1.0),
+            "shadow_saturation": (0.0, 1.0),
+            "highlight_hue": (0.0, 1.0),
+            "highlight_saturation": (0.0, 1.0),
+            "balance": (0.0, 1.0),
+            "compress": (0.0, 100.0),
+        },
         size_bytes=None,
         blendop_cst=4,
     ),
@@ -422,7 +561,12 @@ _SIMPLE_IOPS = {
         pack_format="<ffff",
         fields=("size", "saturation", "brightness", "amount"),
         defaults={"size": 50.0, "saturation": 100.0, "brightness": 0.33, "amount": 50.0},
-        ranges={"size": (0.0, 100.0), "saturation": (0.0, 100.0), "brightness": (-2.0, 2.0), "amount": (0.0, 100.0)},
+        ranges={
+            "size": (0.0, 100.0),
+            "saturation": (0.0, 100.0),
+            "brightness": (-2.0, 2.0),
+            "amount": (0.0, 100.0),
+        },
         size_bytes=None,
         blendop_cst=4,
     ),
@@ -431,9 +575,45 @@ _SIMPLE_IOPS = {
         version=4,
         # 6 floats + 1 uint32 + 2 floats + 2 ints = 11 items
         pack_format="<ffffffIffii",
-        fields=("scale", "falloff_scale", "brightness", "saturation", "center_x", "center_y", "autoratio", "whratio", "shape", "dithering", "unbound"),
-        defaults={"scale": 80.0, "falloff_scale": 50.0, "brightness": -0.5, "saturation": -0.5, "center_x": 0.0, "center_y": 0.0, "autoratio": 0, "whratio": 1.0, "shape": 1.0, "dithering": 0, "unbound": 1},
-        ranges={"scale": (0.0, 200.0), "falloff_scale": (0.0, 200.0), "brightness": (-1.0, 1.0), "saturation": (-1.0, 1.0), "center_x": (-1.0, 1.0), "center_y": (-1.0, 1.0), "autoratio": (0, 1), "whratio": (0.0, 2.0), "shape": (0.0, 5.0), "dithering": (0, 2), "unbound": (0, 1)},
+        fields=(
+            "scale",
+            "falloff_scale",
+            "brightness",
+            "saturation",
+            "center_x",
+            "center_y",
+            "autoratio",
+            "whratio",
+            "shape",
+            "dithering",
+            "unbound",
+        ),
+        defaults={
+            "scale": 80.0,
+            "falloff_scale": 50.0,
+            "brightness": -0.5,
+            "saturation": -0.5,
+            "center_x": 0.0,
+            "center_y": 0.0,
+            "autoratio": 0,
+            "whratio": 1.0,
+            "shape": 1.0,
+            "dithering": 0,
+            "unbound": 1,
+        },
+        ranges={
+            "scale": (0.0, 200.0),
+            "falloff_scale": (0.0, 200.0),
+            "brightness": (-1.0, 1.0),
+            "saturation": (-1.0, 1.0),
+            "center_x": (-1.0, 1.0),
+            "center_y": (-1.0, 1.0),
+            "autoratio": (0, 1),
+            "whratio": (0.0, 2.0),
+            "shape": (0.0, 5.0),
+            "dithering": (0, 2),
+            "unbound": (0, 1),
+        },
         size_bytes=None,
         blendop_cst=4,
     ),
@@ -442,9 +622,54 @@ _SIMPLE_IOPS = {
         version=3,
         # 1 int + 13 floats = 14 items
         pack_format="<i13f",
-        fields=("mode", "lift_r", "lift_g", "lift_b", "gamma_r", "gamma_g", "gamma_b", "gain_r", "gain_g", "gain_b", "saturation", "contrast", "grey", "saturation_out"),
-        defaults={"mode": 0, "lift_r": 1.0, "lift_g": 1.0, "lift_b": 1.0, "gamma_r": 1.0, "gamma_g": 1.0, "gamma_b": 1.0, "gain_r": 1.0, "gain_g": 1.0, "gain_b": 1.0, "saturation": 1.0, "contrast": 1.0, "grey": 18.0, "saturation_out": 1.0},
-        ranges={"mode": (0, 1), "lift_r": (0.0, 2.0), "lift_g": (0.0, 2.0), "lift_b": (0.0, 2.0), "gamma_r": (0.0, 2.0), "gamma_g": (0.0, 2.0), "gamma_b": (0.0, 2.0), "gain_r": (0.0, 2.0), "gain_g": (0.0, 2.0), "gain_b": (0.0, 2.0), "saturation": (0.0, 2.0), "contrast": (0.01, 1.99), "grey": (0.1, 100.0), "saturation_out": (0.0, 2.0)},
+        fields=(
+            "mode",
+            "lift_r",
+            "lift_g",
+            "lift_b",
+            "gamma_r",
+            "gamma_g",
+            "gamma_b",
+            "gain_r",
+            "gain_g",
+            "gain_b",
+            "saturation",
+            "contrast",
+            "grey",
+            "saturation_out",
+        ),
+        defaults={
+            "mode": 0,
+            "lift_r": 1.0,
+            "lift_g": 1.0,
+            "lift_b": 1.0,
+            "gamma_r": 1.0,
+            "gamma_g": 1.0,
+            "gamma_b": 1.0,
+            "gain_r": 1.0,
+            "gain_g": 1.0,
+            "gain_b": 1.0,
+            "saturation": 1.0,
+            "contrast": 1.0,
+            "grey": 18.0,
+            "saturation_out": 1.0,
+        },
+        ranges={
+            "mode": (0, 1),
+            "lift_r": (0.0, 2.0),
+            "lift_g": (0.0, 2.0),
+            "lift_b": (0.0, 2.0),
+            "gamma_r": (0.0, 2.0),
+            "gamma_g": (0.0, 2.0),
+            "gamma_b": (0.0, 2.0),
+            "gain_r": (0.0, 2.0),
+            "gain_g": (0.0, 2.0),
+            "gain_b": (0.0, 2.0),
+            "saturation": (0.0, 2.0),
+            "contrast": (0.01, 1.99),
+            "grey": (0.1, 100.0),
+            "saturation_out": (0.0, 2.0),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (colorbalance works in Lab)
     ),
@@ -453,9 +678,48 @@ _SIMPLE_IOPS = {
         version=5,
         # 1 int + 8 floats + 1 uint32 + 1 float + 1 int = 12 items
         pack_format="<i8fIfi",
-        fields=("order", "radius", "shadows", "whitepoint", "highlights", "reserved2", "compress", "shadows_ccorrect", "highlights_ccorrect", "flags", "low_approximation", "shadhi_algo"),
-        defaults={"order": 0, "radius": 100.0, "shadows": 50.0, "whitepoint": 0.0, "highlights": -50.0, "reserved2": 0.0, "compress": 50.0, "shadows_ccorrect": 100.0, "highlights_ccorrect": 50.0, "flags": 1, "low_approximation": 0.000001, "shadhi_algo": 1},
-        ranges={"order": (0, 1), "radius": (0.1, 500.0), "shadows": (-100.0, 100.0), "whitepoint": (-10.0, 10.0), "highlights": (-100.0, 100.0), "reserved2": (-100.0, 100.0), "compress": (0.0, 100.0), "shadows_ccorrect": (0.0, 100.0), "highlights_ccorrect": (0.0, 100.0), "flags": (0, 0xFFFFFFFF), "low_approximation": (0.0, 1.0), "shadhi_algo": (0, 1)},
+        fields=(
+            "order",
+            "radius",
+            "shadows",
+            "whitepoint",
+            "highlights",
+            "reserved2",
+            "compress",
+            "shadows_ccorrect",
+            "highlights_ccorrect",
+            "flags",
+            "low_approximation",
+            "shadhi_algo",
+        ),
+        defaults={
+            "order": 0,
+            "radius": 100.0,
+            "shadows": 50.0,
+            "whitepoint": 0.0,
+            "highlights": -50.0,
+            "reserved2": 0.0,
+            "compress": 50.0,
+            "shadows_ccorrect": 100.0,
+            "highlights_ccorrect": 50.0,
+            "flags": 1,
+            "low_approximation": 0.000001,
+            "shadhi_algo": 1,
+        },
+        ranges={
+            "order": (0, 1),
+            "radius": (0.1, 500.0),
+            "shadows": (-100.0, 100.0),
+            "whitepoint": (-10.0, 10.0),
+            "highlights": (-100.0, 100.0),
+            "reserved2": (-100.0, 100.0),
+            "compress": (0.0, 100.0),
+            "shadows_ccorrect": (0.0, 100.0),
+            "highlights_ccorrect": (0.0, 100.0),
+            "flags": (0, 0xFFFFFFFF),
+            "low_approximation": (0.0, 1.0),
+            "shadhi_algo": (0, 1),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (shadhi works in Lab)
     ),
@@ -464,8 +728,20 @@ _SIMPLE_IOPS = {
         version=2,
         pack_format="<ffffi",
         fields=("hue", "saturation", "source_lightness_mix", "lightness", "version"),
-        defaults={"hue": 0.0, "saturation": 0.5, "source_lightness_mix": 50.0, "lightness": 50.0, "version": 0},
-        ranges={"hue": (0.0, 1.0), "saturation": (0.0, 1.0), "source_lightness_mix": (0.0, 100.0), "lightness": (0.0, 100.0), "version": (0, 2)},
+        defaults={
+            "hue": 0.0,
+            "saturation": 0.5,
+            "source_lightness_mix": 50.0,
+            "lightness": 50.0,
+            "version": 0,
+        },
+        ranges={
+            "hue": (0.0, 1.0),
+            "saturation": (0.0, 1.0),
+            "source_lightness_mix": (0.0, 100.0),
+            "lightness": (0.0, 100.0),
+            "version": (0, 2),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (colorize works in Lab)
     ),
@@ -494,9 +770,33 @@ _SIMPLE_IOPS = {
         version=4,
         # 1 int + 4 floats + 2 ints = 7 items
         pack_format="<iffffii",
-        fields=("order", "radius", "contrast", "brightness", "saturation", "lowpass_algo", "unbound"),
-        defaults={"order": 0, "radius": 10.0, "contrast": 1.0, "brightness": 0.0, "saturation": 1.0, "lowpass_algo": 0, "unbound": 1},
-        ranges={"order": (0, 1), "radius": (0.1, 500.0), "contrast": (-3.0, 3.0), "brightness": (-3.0, 3.0), "saturation": (-3.0, 3.0), "lowpass_algo": (0, 1), "unbound": (0, 1)},
+        fields=(
+            "order",
+            "radius",
+            "contrast",
+            "brightness",
+            "saturation",
+            "lowpass_algo",
+            "unbound",
+        ),
+        defaults={
+            "order": 0,
+            "radius": 10.0,
+            "contrast": 1.0,
+            "brightness": 0.0,
+            "saturation": 1.0,
+            "lowpass_algo": 0,
+            "unbound": 1,
+        },
+        ranges={
+            "order": (0, 1),
+            "radius": (0.1, 500.0),
+            "contrast": (-3.0, 3.0),
+            "brightness": (-3.0, 3.0),
+            "saturation": (-3.0, 3.0),
+            "lowpass_algo": (0, 1),
+            "unbound": (0, 1),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (lowpass works in Lab)
     ),
@@ -526,8 +826,24 @@ _SIMPLE_IOPS = {
         # 1 int + 6 floats = 7 items
         pack_format="<i6f",
         fields=("mode", "black", "gray", "white", "levels_r", "levels_g", "levels_b"),
-        defaults={"mode": 0, "black": 0.0, "gray": 50.0, "white": 100.0, "levels_r": 0.0, "levels_g": 0.0, "levels_b": 0.0},
-        ranges={"mode": (0, 1), "black": (0.0, 100.0), "gray": (0.0, 100.0), "white": (0.0, 100.0), "levels_r": (-100.0, 100.0), "levels_g": (-100.0, 100.0), "levels_b": (-100.0, 100.0)},
+        defaults={
+            "mode": 0,
+            "black": 0.0,
+            "gray": 50.0,
+            "white": 100.0,
+            "levels_r": 0.0,
+            "levels_g": 0.0,
+            "levels_b": 0.0,
+        },
+        ranges={
+            "mode": (0, 1),
+            "black": (0.0, 100.0),
+            "gray": (0.0, 100.0),
+            "white": (0.0, 100.0),
+            "levels_r": (-100.0, 100.0),
+            "levels_g": (-100.0, 100.0),
+            "levels_b": (-100.0, 100.0),
+        },
         size_bytes=None,
         blendop_cst=2,  # LAB (levels works in Lab)
     ),
@@ -579,9 +895,17 @@ _REFINEMENT_IOPS = {
         # preserve_colors sits mid-struct → <5fi5f
         pack_format="<5fi5f",
         fields=(
-            "black_point", "exposure", "hlcompr", "hlcomprthresh", "contrast",
-            "preserve_colors", "middle_grey", "brightness", "saturation",
-            "vibrance", "clip"
+            "black_point",
+            "exposure",
+            "hlcompr",
+            "hlcomprthresh",
+            "contrast",
+            "preserve_colors",
+            "middle_grey",
+            "brightness",
+            "saturation",
+            "vibrance",
+            "clip",
         ),
         defaults={
             "black_point": 0.0,
@@ -618,10 +942,24 @@ _REFINEMENT_IOPS = {
         # 15 floats + 2 enums(int) + 1 int = 72 bytes (toneequal.c:129-147)
         pack_format="<15f3i",
         fields=(
-            "noise", "ultra_deep_blacks", "deep_blacks", "blacks", "shadows",
-            "midtones", "highlights", "whites", "speculars", "blending",
-            "smoothing", "feathering", "quantization", "contrast_boost",
-            "exposure_boost", "details", "method", "iterations"
+            "noise",
+            "ultra_deep_blacks",
+            "deep_blacks",
+            "blacks",
+            "shadows",
+            "midtones",
+            "highlights",
+            "whites",
+            "speculars",
+            "blending",
+            "smoothing",
+            "feathering",
+            "quantization",
+            "contrast_boost",
+            "exposure_boost",
+            "details",
+            "method",
+            "iterations",
         ),
         defaults={
             "noise": 0.0,
@@ -640,7 +978,7 @@ _REFINEMENT_IOPS = {
             "contrast_boost": 0.0,
             "exposure_boost": 0.0,
             "details": 4,  # DT_TONEEQ_EIGF
-            "method": 4,   # DT_TONEEQ_NORM_2
+            "method": 4,  # DT_TONEEQ_NORM_2
             "iterations": 1,
         },
         ranges={
@@ -660,7 +998,7 @@ _REFINEMENT_IOPS = {
             "contrast_boost": (-16.0, 16.0),
             "exposure_boost": (-16.0, 16.0),
             "details": (0, 4),  # DT_TONEEQ_NONE..EIGF
-            "method": (0, 6),   # DT_TONEEQ_MEAN..GEOMEAN
+            "method": (0, 6),  # DT_TONEEQ_MEAN..GEOMEAN
             "iterations": (1, 20),
         },
         size_bytes=72,
@@ -673,15 +1011,38 @@ _REFINEMENT_IOPS = {
         # (colorequal.c:101-145).  GUI arrays are per-field in the blob.
         pack_format="<6fi24ff",
         fields=(
-            "threshold", "smoothing_hue", "contrast", "white_level",
-            "chroma_size", "param_size", "use_filter",
-            "sat_red", "sat_orange", "sat_yellow", "sat_green", "sat_cyan",
-            "sat_blue", "sat_lavender", "sat_magenta",
-            "hue_red", "hue_orange", "hue_yellow", "hue_green", "hue_cyan",
-            "hue_blue", "hue_lavender", "hue_magenta",
-            "bright_red", "bright_orange", "bright_yellow", "bright_green",
-            "bright_cyan", "bright_blue", "bright_lavender", "bright_magenta",
-            "hue_shift"
+            "threshold",
+            "smoothing_hue",
+            "contrast",
+            "white_level",
+            "chroma_size",
+            "param_size",
+            "use_filter",
+            "sat_red",
+            "sat_orange",
+            "sat_yellow",
+            "sat_green",
+            "sat_cyan",
+            "sat_blue",
+            "sat_lavender",
+            "sat_magenta",
+            "hue_red",
+            "hue_orange",
+            "hue_yellow",
+            "hue_green",
+            "hue_cyan",
+            "hue_blue",
+            "hue_lavender",
+            "hue_magenta",
+            "bright_red",
+            "bright_orange",
+            "bright_yellow",
+            "bright_green",
+            "bright_cyan",
+            "bright_blue",
+            "bright_lavender",
+            "bright_magenta",
+            "hue_shift",
         ),
         defaults={
             "threshold": 0.1,
@@ -691,15 +1052,30 @@ _REFINEMENT_IOPS = {
             "chroma_size": 1.5,
             "param_size": 1.0,
             "use_filter": 1,  # gboolean TRUE
-            "sat_red": 1.0, "sat_orange": 1.0, "sat_yellow": 1.0,
-            "sat_green": 1.0, "sat_cyan": 1.0, "sat_blue": 1.0,
-            "sat_lavender": 1.0, "sat_magenta": 1.0,
-            "hue_red": 0.0, "hue_orange": 0.0, "hue_yellow": 0.0,
-            "hue_green": 0.0, "hue_cyan": 0.0, "hue_blue": 0.0,
-            "hue_lavender": 0.0, "hue_magenta": 0.0,
-            "bright_red": 1.0, "bright_orange": 1.0, "bright_yellow": 1.0,
-            "bright_green": 1.0, "bright_cyan": 1.0, "bright_blue": 1.0,
-            "bright_lavender": 1.0, "bright_magenta": 1.0,
+            "sat_red": 1.0,
+            "sat_orange": 1.0,
+            "sat_yellow": 1.0,
+            "sat_green": 1.0,
+            "sat_cyan": 1.0,
+            "sat_blue": 1.0,
+            "sat_lavender": 1.0,
+            "sat_magenta": 1.0,
+            "hue_red": 0.0,
+            "hue_orange": 0.0,
+            "hue_yellow": 0.0,
+            "hue_green": 0.0,
+            "hue_cyan": 0.0,
+            "hue_blue": 0.0,
+            "hue_lavender": 0.0,
+            "hue_magenta": 0.0,
+            "bright_red": 1.0,
+            "bright_orange": 1.0,
+            "bright_yellow": 1.0,
+            "bright_green": 1.0,
+            "bright_cyan": 1.0,
+            "bright_blue": 1.0,
+            "bright_lavender": 1.0,
+            "bright_magenta": 1.0,
             "hue_shift": 0.0,
         },
         ranges={
@@ -710,18 +1086,30 @@ _REFINEMENT_IOPS = {
             "chroma_size": (1.0, 10.0),
             "param_size": (1.0, 128.0),
             "use_filter": (0, 1),
-            "sat_red": (0.0, 2.0), "sat_orange": (0.0, 2.0),
-            "sat_yellow": (0.0, 2.0), "sat_green": (0.0, 2.0),
-            "sat_cyan": (0.0, 2.0), "sat_blue": (0.0, 2.0),
-            "sat_lavender": (0.0, 2.0), "sat_magenta": (0.0, 2.0),
-            "hue_red": (-180.0, 180.0), "hue_orange": (-180.0, 180.0),
-            "hue_yellow": (-180.0, 180.0), "hue_green": (-180.0, 180.0),
-            "hue_cyan": (-180.0, 180.0), "hue_blue": (-180.0, 180.0),
-            "hue_lavender": (-180.0, 180.0), "hue_magenta": (-180.0, 180.0),
-            "bright_red": (0.0, 2.0), "bright_orange": (0.0, 2.0),
-            "bright_yellow": (0.0, 2.0), "bright_green": (0.0, 2.0),
-            "bright_cyan": (0.0, 2.0), "bright_blue": (0.0, 2.0),
-            "bright_lavender": (0.0, 2.0), "bright_magenta": (0.0, 2.0),
+            "sat_red": (0.0, 2.0),
+            "sat_orange": (0.0, 2.0),
+            "sat_yellow": (0.0, 2.0),
+            "sat_green": (0.0, 2.0),
+            "sat_cyan": (0.0, 2.0),
+            "sat_blue": (0.0, 2.0),
+            "sat_lavender": (0.0, 2.0),
+            "sat_magenta": (0.0, 2.0),
+            "hue_red": (-180.0, 180.0),
+            "hue_orange": (-180.0, 180.0),
+            "hue_yellow": (-180.0, 180.0),
+            "hue_green": (-180.0, 180.0),
+            "hue_cyan": (-180.0, 180.0),
+            "hue_blue": (-180.0, 180.0),
+            "hue_lavender": (-180.0, 180.0),
+            "hue_magenta": (-180.0, 180.0),
+            "bright_red": (0.0, 2.0),
+            "bright_orange": (0.0, 2.0),
+            "bright_yellow": (0.0, 2.0),
+            "bright_green": (0.0, 2.0),
+            "bright_cyan": (0.0, 2.0),
+            "bright_blue": (0.0, 2.0),
+            "bright_lavender": (0.0, 2.0),
+            "bright_magenta": (0.0, 2.0),
             "hue_shift": (-23.0, 23.0),
         },
         size_bytes=128,
@@ -739,10 +1127,20 @@ _REFINEMENT_IOPS = {
         # (colorharmonizer.c:70-81, COLORHARMONIZER_MAX_NODES=4)
         pack_format="<i4f4fi4ff",
         fields=(
-            "rule", "anchor_hue", "pull_strength", "neutral_protection",
-            "pull_width", "custom_hue_0", "custom_hue_1", "custom_hue_2",
-            "custom_hue_3", "num_custom_nodes", "node_saturation_0",
-            "node_saturation_1", "node_saturation_2", "node_saturation_3",
+            "rule",
+            "anchor_hue",
+            "pull_strength",
+            "neutral_protection",
+            "pull_width",
+            "custom_hue_0",
+            "custom_hue_1",
+            "custom_hue_2",
+            "custom_hue_3",
+            "num_custom_nodes",
+            "node_saturation_0",
+            "node_saturation_1",
+            "node_saturation_2",
+            "node_saturation_3",
             "smoothing",
         ),
         defaults={
@@ -751,11 +1149,15 @@ _REFINEMENT_IOPS = {
             "pull_strength": 0.0,
             "neutral_protection": 0.5,
             "pull_width": 1.0,
-            "custom_hue_0": 0.0, "custom_hue_1": 0.0,
-            "custom_hue_2": 0.0, "custom_hue_3": 0.0,
+            "custom_hue_0": 0.0,
+            "custom_hue_1": 0.0,
+            "custom_hue_2": 0.0,
+            "custom_hue_3": 0.0,
             "num_custom_nodes": 4,
-            "node_saturation_0": 1.0, "node_saturation_1": 1.0,
-            "node_saturation_2": 1.0, "node_saturation_3": 1.0,
+            "node_saturation_0": 1.0,
+            "node_saturation_1": 1.0,
+            "node_saturation_2": 1.0,
+            "node_saturation_3": 1.0,
             "smoothing": 0.0,
         },
         ranges={
@@ -764,11 +1166,15 @@ _REFINEMENT_IOPS = {
             "pull_strength": (0.0, 1.0),
             "neutral_protection": (0.0, 1.0),
             "pull_width": (0.25, 4.0),
-            "custom_hue_0": (0.0, 1.0), "custom_hue_1": (0.0, 1.0),
-            "custom_hue_2": (0.0, 1.0), "custom_hue_3": (0.0, 1.0),
+            "custom_hue_0": (0.0, 1.0),
+            "custom_hue_1": (0.0, 1.0),
+            "custom_hue_2": (0.0, 1.0),
+            "custom_hue_3": (0.0, 1.0),
             "num_custom_nodes": (2, 4),
-            "node_saturation_0": (0.0, 2.0), "node_saturation_1": (0.0, 2.0),
-            "node_saturation_2": (0.0, 2.0), "node_saturation_3": (0.0, 2.0),
+            "node_saturation_0": (0.0, 2.0),
+            "node_saturation_1": (0.0, 2.0),
+            "node_saturation_2": (0.0, 2.0),
+            "node_saturation_3": (0.0, 2.0),
             "smoothing": (0.0, 2.0),
         },
         size_bytes=60,
@@ -951,7 +1357,7 @@ def pack_params(op: str, params: dict) -> bytes:
             tol = 1e-6 * max(1.0, abs(float(min_val)), abs(float(max_val)))
             lo, hi = float(min_val) - tol, float(max_val) + tol
         else:
-            lo, hi = min_val, max_val
+            lo, hi = float(min_val), float(max_val)  # type: ignore[assignment]
         if not (lo <= val <= hi):
             raise ValueError(f"{op}.{field}={val} out of range [{min_val}, {max_val}]")
 
@@ -989,12 +1395,13 @@ def _pack_curve_iop(reg: "IOPRegistry", params: dict) -> bytes:
         raise ValueError(f"curve_preset must be a string, got {type(template).__name__}")
 
     # Forward remaining scalars (e.g. colorzones.strength) as overrides
-    kwargs = {k: v for k, v in params.items() if k in _CURVE_FORWARD_PARAMS.get(reg.operation, set())}
+    kwargs = {
+        k: v for k, v in params.items() if k in _CURVE_FORWARD_PARAMS.get(reg.operation, set())
+    }
     blob = apply_curve_template(reg.operation, template, **kwargs)
     expected = reg.curve_pack_size_override or curve_iop_size(reg.operation)
     assert len(blob) == expected, (
-        f"{reg.operation} curve_preset pack produced {len(blob)} bytes, "
-        f"expected {expected}"
+        f"{reg.operation} curve_preset pack produced {len(blob)} bytes, " f"expected {expected}"
     )
     return blob
 
@@ -1004,7 +1411,12 @@ def _pack_curve_iop(reg: "IOPRegistry", params: dict) -> bytes:
 _CURVE_FORWARD_PARAMS: dict[str, set[str]] = {
     "colorzones": {"strength", "mode", "channel"},
     "rgbcurve": {"curve_autoscale", "compensate_middle_grey", "preserve_colors"},
-    "tonecurve": {"tonecurve_autoscale_ab", "tonecurve_preset", "tonecurve_unbound_ab", "preserve_colors"},
+    "tonecurve": {
+        "tonecurve_autoscale_ab",
+        "tonecurve_preset",
+        "tonecurve_unbound_ab",
+        "preserve_colors",
+    },
 }
 
 
@@ -1035,8 +1447,9 @@ def unpack_params(op: str, blob: bytes) -> dict:
             raise ValueError(f"basecurve blob must be 520 bytes, got {len(blob)}")
         # Layout at offset 480: 3i (nodes) + 3i (type) + i (fusion) + f (stops) + f (bias) + i (preserve)
         # Veryfied: <3i3iiffi = 40 bytes, yields (6,0,0, 2,0,0, 0, 1.0, 1.0, 1)
-        nodes0, nodes1, nodes2, type0, type1, type2, fusion, stops, bias, preserve = \
-            struct.unpack("<3i3iiffi", blob[480:480 + struct.calcsize("<3i3iiffi")])
+        nodes0, nodes1, nodes2, type0, type1, type2, fusion, stops, bias, preserve = struct.unpack(
+            "<3i3iiffi", blob[480 : 480 + struct.calcsize("<3i3iiffi")]
+        )
         return {
             "basecurve_nodes_0": nodes0,
             "basecurve_nodes_1": nodes1,
@@ -1077,30 +1490,32 @@ def _unpack_curve_iop(reg: "IOPRegistry", blob: bytes) -> dict:
         unpack_rgbcurve,
         unpack_tonecurve,
     )
+    from dtstylekit.curves.packing import ColorzonesParams, RGBCurveParams, TonecurveParams
+
     if reg.operation == "colorzones":
-        params = unpack_colorzones(blob)
+        cz_params: ColorzonesParams = unpack_colorzones(blob)
         return {
-            "channel": params.channel,
-            "strength": params.strength,
-            "mode": params.mode,
-            "splines_version": params.splines_version,
+            "channel": cz_params.channel,
+            "strength": cz_params.strength,
+            "mode": cz_params.mode,
+            "splines_version": cz_params.splines_version,
             "curve_preset": "(binary: 520 bytes)",
         }
     if reg.operation == "rgbcurve":
-        params = unpack_rgbcurve(blob)
+        rgb_params: RGBCurveParams = unpack_rgbcurve(blob)
         return {
-            "curve_autoscale": params.curve_autoscale,
-            "compensate_middle_grey": params.compensate_middle_grey,
-            "preserve_colors": params.preserve_colors,
+            "curve_autoscale": rgb_params.curve_autoscale,
+            "compensate_middle_grey": rgb_params.compensate_middle_grey,
+            "preserve_colors": rgb_params.preserve_colors,
             "curve_preset": "(binary: 516 bytes)",
         }
     if reg.operation == "tonecurve":
-        params = unpack_tonecurve(blob)
+        tc_params: TonecurveParams = unpack_tonecurve(blob)
         return {
-            "tonecurve_autoscale_ab": params.tonecurve_autoscale_ab,
-            "tonecurve_preset": params.tonecurve_preset,
-            "tonecurve_unbound_ab": params.tonecurve_unbound_ab,
-            "preserve_colors": params.preserve_colors,
+            "tonecurve_autoscale_ab": tc_params.tonecurve_autoscale_ab,
+            "tonecurve_preset": tc_params.tonecurve_preset,
+            "tonecurve_unbound_ab": tc_params.tonecurve_unbound_ab,
+            "preserve_colors": tc_params.preserve_colors,
             "curve_preset": "(binary: 520 bytes)",
         }
     raise ValueError(f"_unpack_curve_iop: unknown operation {reg.operation}")

@@ -16,7 +16,9 @@ def add_preset_subcommands(subparsers: argparse._SubParsersAction) -> None:
     preset_subparsers = preset_parser.add_subparsers(dest="preset_command", required=True)
 
     # Index command
-    index_parser = preset_subparsers.add_parser("index", help="Build/rebuild preset index and embeddings")
+    index_parser = preset_subparsers.add_parser(
+        "index", help="Build/rebuild preset index and embeddings"
+    )
     index_parser.add_argument(
         "--preset-dir",
         type=Path,

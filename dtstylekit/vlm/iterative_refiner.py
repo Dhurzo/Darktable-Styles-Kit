@@ -5,6 +5,7 @@ visual metrics, and feeding corrections back to the VLM.
 """
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 # Ensure dtstylekit is importable
@@ -86,7 +87,7 @@ def compute_render_metrics(image_path: Path) -> RenderMetrics:
         r_mean=float(arr[..., 0].mean()),
         g_mean=float(arr[..., 1].mean()),
         b_mean=float(arr[..., 2].mean()),
-        r_over_g=float(arr[..., 0].mean() / max(arr[..., 1].mean(), 1e-6)),
+        r_over_g=float(arr[..., 0].mean() / max(float(arr[..., 1].mean()), 1e-6)),  # type: ignore[operator]
         shadows_pct=shadows_pct,
         highlights_pct=highlights_pct,
     )
@@ -109,17 +110,18 @@ def _import_style_into_library(style_path: Path, name: str, work: Path) -> None:
         cur = conn.cursor()
 
         def _exists(tbl: str) -> bool:
-            return cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (tbl,),
-            ).fetchone() is not None
+            return (
+                cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (tbl,),
+                ).fetchone()
+                is not None
+            )
 
         styles_tbl = "data.styles" if _exists("data.styles") else "styles"
         items_tbl = "data.style_items" if _exists("data.style_items") else "style_items"
 
-        style_id = cur.execute(
-            f"SELECT COALESCE(MAX(id), 0) + 1 FROM {styles_tbl}"
-        ).fetchone()[0]
+        style_id = cur.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {styles_tbl}").fetchone()[0]
         cur.execute(
             f"INSERT INTO {styles_tbl} (id, name, description, iop_list) "
             "VALUES (?, ?, '', NULL)",
@@ -303,12 +305,14 @@ def build_refinement_prompt(
     for f in feedback:
         lines.append(f"  ❌ {f}")
 
-    lines.extend([
-        "",
-        "[CORRECTIVE GUIDANCE]",
-        f"• Target luminance: {target_lum:.2f} (current render: {metrics.mean_luminance:.2f})",
-        f"• Target shadows: {target_shadows:.1%} (current render shadows: {metrics.shadows_pct:.1%})",
-    ])
+    lines.extend(
+        [
+            "",
+            "[CORRECTIVE GUIDANCE]",
+            f"• Target luminance: {target_lum:.2f} (current render: {metrics.mean_luminance:.2f})",
+            f"• Target shadows: {target_shadows:.1%} (current render shadows: {metrics.shadows_pct:.1%})",
+        ]
+    )
 
     # Specific corrections based on failure modes
     if metrics.mean_luminance / max(target_lum, 0.01) < 0.8:
@@ -328,7 +332,9 @@ def build_refinement_prompt(
 
     if metrics.mean_saturation / max(target_analysis.luminance.saturation_mean, 0.01) < 0.8:
         lines.append("• INCREASE colorbalancergb.shadows_C / highlights_C / midtones_C")
-        lines.append("• Use chroma_global = -0.15 to -0.25 for film-like desat (not filmicrgb.saturation)")
+        lines.append(
+            "• Use chroma_global = -0.15 to -0.25 for film-like desat (not filmicrgb.saturation)"
+        )
 
     lines.append("")
     lines.append("Generate corrected JSON with ONLY the necessary parameter changes.")
@@ -340,7 +346,7 @@ def iterative_refine(
     reference_paths: list[Path],
     direction: str,
     target_analysis: ImageAnalysis,
-    generate_func,
+    generate_func: Callable[[str, list[str]], StyleSpec],
     max_iterations: int = 3,
     work_dir: Path | None = None,
 ) -> StyleSpec:
@@ -396,9 +402,14 @@ def iterative_refine(
         metrics = compute_render_metrics(rendered)
         passed, feedback = evaluate_metrics(metrics, target_analysis)
 
-        logger.info("Iteration %d: passed=%s, lum=%.3f, sat=%.3f, R/G=%.2f",
-                    iteration + 1, passed, metrics.mean_luminance,
-                    metrics.mean_saturation, metrics.r_over_g)
+        logger.info(
+            "Iteration %d: passed=%s, lum=%.3f, sat=%.3f, R/G=%.2f",
+            iteration + 1,
+            passed,
+            metrics.mean_luminance,
+            metrics.mean_saturation,
+            metrics.r_over_g,
+        )
         for f in feedback:
             logger.info("  Feedback: %s", f)
 
@@ -413,11 +424,14 @@ def iterative_refine(
 
         # Build refined direction for next iteration
         if iteration < max_iterations - 1:
-            current_direction = build_refinement_prompt(direction, feedback, metrics, target_analysis)
+            current_direction = build_refinement_prompt(
+                direction, feedback, metrics, target_analysis
+            )
 
     # Return best attempt even if not perfect
     logger.warning("Refinement completed without passing; returning best attempt")
-    return best_spec or spec
+    assert best_spec is not None or spec is not None
+    return best_spec or spec  # type: ignore[return-value]
 
 
 def _score_metrics(m: RenderMetrics) -> float:

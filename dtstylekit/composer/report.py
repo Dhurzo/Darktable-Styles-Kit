@@ -5,11 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from dtstylekit.analyzer.models import ImageAnalysis
+from dtstylekit.vlm.models import StyleSpec
+
 
 def generate_report(
-    spec,  # StyleSpec
+    spec: StyleSpec,
     presets: list,
-    analysis,  # ImageAnalysis | None
+    analysis: ImageAnalysis | None,
     vlm_report: str,
     output_path: Path,
 ) -> Path:
@@ -41,13 +44,17 @@ def generate_report(
         lines.append("")
         prompt_dict = analysis.to_prompt_dict()
         dims = prompt_dict.get("dimensions", {})
-        lines.append(f"- **Dimensions**: {dims.get('w', '?')} × {dims.get('h', '?')} ({dims.get('format', '?')})")
+        lines.append(
+            f"- **Dimensions**: {dims.get('w', '?')} × {dims.get('h', '?')} ({dims.get('format', '?')})"
+        )
         lum = prompt_dict.get("luminance", {})
         lines.append(f"- **Mean luminance**: {lum.get('mean', 0):.2f}")
         lines.append(f"- **Std luminance**: {lum.get('std', 0):.2f}")
         lines.append(f"- **Saturation**: {lum.get('saturation', 0):.2f}")
         tonal = lum.get("tonal", [0, 0, 0])
-        lines.append(f"- **Tonal distribution**: shadows={tonal[0]:.2%}, midtones={tonal[1]:.2%}, highlights={tonal[2]:.2%}")
+        lines.append(
+            f"- **Tonal distribution**: shadows={tonal[0]:.2%}, midtones={tonal[1]:.2%}, highlights={tonal[2]:.2%}"
+        )
         tags = prompt_dict.get("scene_tags") or []
         if tags:
             lines.append(f"- **Scene tags**: {', '.join(tags)}")

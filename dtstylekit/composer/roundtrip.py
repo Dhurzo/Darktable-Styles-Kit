@@ -63,8 +63,10 @@ def validate_xml_structure(dtstyle_path: Path) -> list[str]:
     info = root.find("info")
     if info is None:
         errors.append("Missing <info> section")
-    elif info.find("name") is None or not info.find("name").text:
-        errors.append("<info> missing <name>")
+    else:
+        name_elem = info.find("name")
+        if name_elem is None or not name_elem.text:
+            errors.append("<info> missing <name>")
 
     style = root.find("style")
     if style is None:
@@ -120,8 +122,7 @@ def validate_plugin_blobs(dtstyle_path: Path) -> list[str]:
             if reg and reg.size_bytes is not None:
                 if not verify_size(operation, blob):
                     errors.append(
-                        f"{operation}: blob size {len(blob)} != "
-                        f"expected {reg.size_bytes}"
+                        f"{operation}: blob size {len(blob)} != " f"expected {reg.size_bytes}"
                     )
         else:
             # Some presets may have empty op_params (should be rare)
@@ -135,9 +136,7 @@ def validate_plugin_blobs(dtstyle_path: Path) -> list[str]:
                 errors.append(f"{operation}: cannot decode blendop_params: {exc}")
                 continue
             if len(blendop_blob) != 420:
-                errors.append(
-                    f"{operation}: blendop blob size {len(blendop_blob)} != 420"
-                )
+                errors.append(f"{operation}: blendop blob size {len(blendop_blob)} != 420")
 
     return errors
 
@@ -175,9 +174,7 @@ def validate_iop_list_consistency(dtstyle_path: Path) -> list[str]:
 
     missing = style_ops - iop_ops
     if missing:
-        errors.append(
-            f"Operations in <style> but not in <iop_list>: {missing}"
-        )
+        errors.append(f"Operations in <style> but not in <iop_list>: {missing}")
 
     return errors
 
@@ -249,12 +246,12 @@ def test_roundtrip(dtstyle_path: Path, darktable_cli: str | None = None) -> bool
         return False
 
 
-def batch_roundtrip(style_dir: Path, **kwargs) -> dict[str, bool]:
+def batch_roundtrip(style_dir: Path, darktable_cli: str | None = None) -> dict[str, bool]:
     """Validate all .dtstyle files in a directory.
 
     Returns a dict mapping filename -> success.
     """
     results: dict[str, bool] = {}
     for path in style_dir.glob("*.dtstyle"):
-        results[path.name] = test_roundtrip(path, **kwargs)
+        results[path.name] = test_roundtrip(path, darktable_cli)
     return results

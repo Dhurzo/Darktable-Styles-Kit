@@ -94,16 +94,18 @@ def parsed_presets() -> list[dict]:
             except Exception:
                 blend_op_blob = b""
 
-            out.append({
-                "file_path": str(fpath),
-                "file_name": fpath.name,
-                "operation": op.text,
-                "op_params_blob": op_blob,
-                "blend_op_blob": blend_op_blob,
-                "blendop_version": int(blendop_version.text)
-                if blendop_version is not None and blendop_version.text
-                else 0,
-            })
+            out.append(
+                {
+                    "file_path": str(fpath),
+                    "file_name": fpath.name,
+                    "operation": op.text,
+                    "op_params_blob": op_blob,
+                    "blend_op_blob": blend_op_blob,
+                    "blendop_version": int(blendop_version.text)
+                    if blendop_version is not None and blendop_version.text
+                    else 0,
+                }
+            )
     return out
 
 
@@ -131,9 +133,7 @@ class TestRealPresetInventory:
         assert parsed_presets, "no presets parsed"
         # All entries already passed decode_xmp() during parsing
         for entry in parsed_presets:
-            assert entry["op_params_blob"], (
-                f"empty op_params blob in {entry['file_name']}"
-            )
+            assert entry["op_params_blob"], f"empty op_params blob in {entry['file_name']}"
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,8 @@ class TestVerifiedIopSizeMatchesDarktable:
         [
             # Verified size-checked IOPs: each will be tested against real preset blobs.
             # Only IOPs with size_bytes set (verified) are tested.
-            op for op, reg in IOP_REGISTRY.items()
+            op
+            for op, reg in IOP_REGISTRY.items()
             if reg.size_bytes is not None and not reg.is_curve_iop
         ],
     )
@@ -183,7 +184,8 @@ class TestVerifiedIopSizeMatchesDarktable:
         # Dynamically use all IOPs whose size is verified (non-curve, non-special).
         # Exclude curve IOPs (they have dedicated unpackers) and basecurve (opaque).
         sorted(
-            op for op, reg in IOP_REGISTRY.items()
+            op
+            for op, reg in IOP_REGISTRY.items()
             if reg.size_bytes is not None
             and not reg.is_curve_iop
             and not reg.pack_format.startswith("<curve>")
@@ -222,9 +224,7 @@ class TestStructFormatMatchesReality:
 
     def test_filmicrgb_field_count(self, parsed_presets: list[dict]) -> None:
         """filmicrgb v6: 18 floats + 11 ints = 29 fields."""
-        matching = [
-            e for e in parsed_presets if e["operation"] == "filmicrgb"
-        ]
+        matching = [e for e in parsed_presets if e["operation"] == "filmicrgb"]
         if not matching:
             pytest.skip("no filmicrgb presets")
         reg = get_registry("filmicrgb")
@@ -234,40 +234,28 @@ class TestStructFormatMatchesReality:
 
     def test_colorbalancergb_field_count(self, parsed_presets: list[dict]) -> None:
         """colorbalancergb v5: 32 floats + 1 int = 33 fields."""
-        matching = [
-            e for e in parsed_presets if e["operation"] == "colorbalancergb"
-        ]
+        matching = [e for e in parsed_presets if e["operation"] == "colorbalancergb"]
         if not matching:
             pytest.skip("no colorbalancergb presets")
         reg = get_registry("colorbalancergb")
-        unpacked = unpack_params(
-            "colorbalancergb", matching[0]["op_params_blob"]
-        )
+        unpacked = unpack_params("colorbalancergb", matching[0]["op_params_blob"])
         assert len(unpacked) == len(reg.fields)
 
     def test_sigmoid_field_count(self, parsed_presets: list[dict]) -> None:
         """sigmoid v3 size: 12 floats + 2 ints = 14 fields."""
-        matching = [
-            e for e in parsed_presets if e["operation"] == "sigmoid"
-        ]
+        matching = [e for e in parsed_presets if e["operation"] == "sigmoid"]
         if not matching:
             pytest.skip("no sigmoid presets")
         reg = get_registry("sigmoid")
-        unpacked = unpack_params(
-            "sigmoid", matching[0]["op_params_blob"]
-        )
+        unpacked = unpack_params("sigmoid", matching[0]["op_params_blob"])
         assert len(unpacked) == len(reg.fields)
 
     def test_exposure_field_count(self, parsed_presets: list[dict]) -> None:
-        matching = [
-            e for e in parsed_presets if e["operation"] == "exposure"
-        ]
+        matching = [e for e in parsed_presets if e["operation"] == "exposure"]
         if not matching:
             pytest.skip("no exposure presets")
         reg = get_registry("exposure")
-        unpacked = unpack_params(
-            "exposure", matching[0]["op_params_blob"]
-        )
+        unpacked = unpack_params("exposure", matching[0]["op_params_blob"])
         # v7 blobs have 7 fields; v6 legacy blobs (shipped in official
         # styles) have 6.
         assert len(unpacked) in (len(reg.fields), len(reg.legacy_fields))
@@ -282,6 +270,7 @@ class TestStructFormatMatchesReality:
 def test_coverage_report(parsed_presets: list[dict], capsys) -> None:  # noqa: ARG001
     """Print a quick coverage report of which real-world IOPs we support."""
     from collections import Counter
+
     counts = Counter(e["operation"] for e in parsed_presets)
     verified_size = {op for op, reg in IOP_REGISTRY.items() if reg.size_bytes is not None}
 

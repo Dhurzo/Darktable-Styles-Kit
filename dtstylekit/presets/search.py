@@ -53,7 +53,9 @@ class PresetSearcher:
         self._embeddings: np.ndarray | None = None
         self._embedder: PresetEmbedder | None = None
         self._embedder_model = embedder_model
-        self.exclude_categories: tuple[str, ...] = tuple(exclude_categories) if exclude_categories else ()
+        self.exclude_categories: tuple[str, ...] = (
+            tuple(exclude_categories) if exclude_categories else ()
+        )
 
     def _load_embeddings(self) -> np.ndarray:
         """Load embeddings from file (cached)."""
@@ -202,9 +204,7 @@ class PresetSearcher:
 
         return results
 
-    def hybrid_search(
-        self, query: str, limit: int = 10, alpha: float = 0.5
-    ) -> list[SearchResult]:
+    def hybrid_search(self, query: str, limit: int = 10, alpha: float = 0.5) -> list[SearchResult]:
         """
         Hybrid search combining keyword and semantic search.
 
@@ -232,6 +232,8 @@ class PresetSearcher:
 
         combined = []
         for pid in all_ids:
+            if pid is None:
+                continue
             entry = self.indexer.get_preset_by_id(pid)
             if entry is None or not self._should_keep(entry):
                 continue
@@ -244,9 +246,7 @@ class PresetSearcher:
             # For simplicity, we use the position-based score
             combined_score = alpha * sem_score + (1 - alpha) * kw_score
 
-            combined.append(
-                SearchResult(preset=entry, score=combined_score, search_type="hybrid")
-            )
+            combined.append(SearchResult(preset=entry, score=combined_score, search_type="hybrid"))
 
         # Sort by combined score (unfiltered) so we know the global ranking.
         combined.sort(key=lambda r: r.score, reverse=True)

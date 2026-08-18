@@ -77,7 +77,11 @@ def _extract_json(text: str) -> dict | None:
 
 
 _STYLE_SPEC_KEYS = (
-    "style_name", "adjustments", "selected_presets", "rationale", "style_description"
+    "style_name",
+    "adjustments",
+    "selected_presets",
+    "rationale",
+    "style_description",
 )
 
 
@@ -101,7 +105,7 @@ def _first_valid_object_span(text: str) -> dict | None:
         end = _find_matching_brace(text, start)
         if end is None:
             continue
-        candidate = text[start:end + 1]
+        candidate = text[start : end + 1]
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
@@ -267,13 +271,13 @@ def _build_style_spec(data: dict) -> StyleSpec:
     for p in data.get("plugins") or []:
         if not isinstance(p, dict):
             continue
-        op = p.get("operation")
-        if not op:
+        op_name: str = str(p.get("operation", ""))
+        if not op_name:
             continue
         params = p.get("params") or {}
         plugins.append(
             Plugin(
-                operation=op,
+                operation=op_name,
                 enabled=bool(p.get("enabled", True)),
                 multi_name=str(p.get("multi_name", "")),
                 multi_priority=int(p.get("multi_priority", 0)),
@@ -287,7 +291,5 @@ def _build_style_spec(data: dict) -> StyleSpec:
         rationale=str(data.get("rationale", "")),
         iop_list=data.get("iop_list"),
         plugins=plugins,
-        selected_preset_names=[
-            str(name) for name in (data.get("selected_presets") or []) if name
-        ],
+        selected_preset_names=[str(name) for name in (data.get("selected_presets") or []) if name],
     )

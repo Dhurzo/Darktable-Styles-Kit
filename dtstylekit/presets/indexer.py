@@ -127,7 +127,9 @@ class PresetIndexer:
     def __enter__(self) -> "PresetIndexer":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self, exc_type: type | None, exc_val: BaseException | None, exc_tb: object | None
+    ) -> None:
         self.close()
 
     def clear(self) -> None:
@@ -157,11 +159,13 @@ class PresetIndexer:
             cleaned_desc = clean_description(preset.description)
             enabled_ops = [p.operation for p in preset.plugins if p.enabled == 1]
             search_text = " ".join(
-                part for part in [
+                part
+                for part in [
                     display_name,
                     cleaned_desc,
                     " ".join(enabled_ops),
-                ] if part
+                ]
+                if part
             )
 
             cursor = conn.execute(
@@ -258,7 +262,9 @@ class PresetIndexer:
             results.append(self._row_to_entry(row))
         return results
 
-    def search_presets_fts_ranked(self, query: str, limit: int) -> list[tuple[PresetIndexEntry, float]]:
+    def search_presets_fts_ranked(
+        self, query: str, limit: int
+    ) -> list[tuple[PresetIndexEntry, float]]:
         """
         Search presets using FTS5 and return entries with their BM25 ranks.
 
@@ -373,7 +379,7 @@ class PresetIndexer:
         )
 
     @staticmethod
-    def _row_to_entry(row) -> PresetIndexEntry:
+    def _row_to_entry(row: dict) -> PresetIndexEntry:
         """Convert a sqlite3.Row to a PresetIndexEntry (handles legacy rows)."""
         return PresetIndexEntry(
             id=row["id"],
@@ -392,7 +398,7 @@ class PresetIndexer:
         """Get total number of presets in the index."""
         conn = self.connect()
         cursor = conn.execute("SELECT COUNT(*) as count FROM presets")
-        return cursor.fetchone()["count"]
+        return int(cursor.fetchone()["count"])
 
     def get_preset_ids_in_insertion_order(self) -> list[int]:
         """

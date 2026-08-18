@@ -106,10 +106,17 @@ def _make_multipreset(
     """Create a preset with multiple real-blob plugins."""
     plugins = []
     ops = [
-        ("exposure", {"exposure": 0.5, "black": 0.0, "mode": 0,
-                      "deflicker_percentile": 50.0,
-                      "deflicker_target_level": -4.0,
-                      "compensate_exposure_bias": 0}),
+        (
+            "exposure",
+            {
+                "exposure": 0.5,
+                "black": 0.0,
+                "mode": 0,
+                "deflicker_percentile": 50.0,
+                "deflicker_target_level": -4.0,
+                "compensate_exposure_bias": 0,
+            },
+        ),
         ("vibrance", {"amount": 30.0}),
     ]
     for i, (op, params) in enumerate(ops):
@@ -151,29 +158,37 @@ class TestMergePresets:
         assert result == []
 
     def test_merge_single_preset(self) -> None:
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance"),
-        ])
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance"),
+            ]
+        )
         result = merge_presets([preset])
         assert len(result) == 1
         assert result[0].operation == "vibrance"
 
     def test_dedup_by_operation(self) -> None:
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance", multi_name="a"),
-            make_plugin_ref(operation="vibrance", multi_name="b"),
-        ])
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance", multi_name="a"),
+                make_plugin_ref(operation="vibrance", multi_name="b"),
+            ]
+        )
         result = merge_presets([preset])
         assert len(result) == 2
 
     def test_unnamed_duplicates_are_dropped(self) -> None:
-        preset_a = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance"),
-        ])
-        preset_b = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance"),
-            make_plugin_ref(operation="grain"),
-        ])
+        preset_a = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance"),
+            ]
+        )
+        preset_b = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance"),
+                make_plugin_ref(operation="grain"),
+            ]
+        )
         result = merge_presets([preset_a, preset_b])
         ops = [plg.operation for plg in result]
         assert ops.count("vibrance") == 1
@@ -181,19 +196,25 @@ class TestMergePresets:
 
     def test_named_instances_across_presets_first_wins(self) -> None:
         blob = pack_params("colorbalancergb", {"saturation_global": 0.1})
-        preset_a = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="colorbalancergb", multi_name="sepia",
-                op_params_blob=blob,
-            ),
-        ])
-        preset_b = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="colorbalancergb", multi_name="faded",
-                op_params_blob=blob,
-            ),
-            make_plugin_ref(operation="exposure", op_params_blob=pack_params("exposure", {})),
-        ])
+        preset_a = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="colorbalancergb",
+                    multi_name="sepia",
+                    op_params_blob=blob,
+                ),
+            ]
+        )
+        preset_b = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="colorbalancergb",
+                    multi_name="faded",
+                    op_params_blob=blob,
+                ),
+                make_plugin_ref(operation="exposure", op_params_blob=pack_params("exposure", {})),
+            ]
+        )
         result = merge_presets([preset_a, preset_b])
         cbrg = [p for p in result if p.operation == "colorbalancergb"]
         assert len(cbrg) == 1
@@ -202,31 +223,41 @@ class TestMergePresets:
 
     def test_multi_instance_within_one_preset_kept(self) -> None:
         blob = pack_params("colorbalancergb", {})
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="colorbalancergb", multi_name="highlights",
-                op_params_blob=blob,
-            ),
-            make_plugin_ref(
-                operation="colorbalancergb", multi_name="shadows",
-                op_params_blob=blob,
-            ),
-        ])
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="colorbalancergb",
+                    multi_name="highlights",
+                    op_params_blob=blob,
+                ),
+                make_plugin_ref(
+                    operation="colorbalancergb",
+                    multi_name="shadows",
+                    op_params_blob=blob,
+                ),
+            ]
+        )
         result = merge_presets([preset])
         names = [p.multi_name for p in result if p.operation == "colorbalancergb"]
         assert names == ["highlights", "shadows"]
 
     def test_adjustment_merges_onto_named_enabled_instance(self) -> None:
         blob = pack_params("colorbalancergb", {"saturation_global": 0.1})
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="colorbalancergb", multi_name="sepia",
-                op_params_blob=blob,
-            ),
-        ])
-        result = merge_presets([preset], adjustments={
-            "colorbalancergb": {"saturation_global": 0.2},
-        })
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="colorbalancergb",
+                    multi_name="sepia",
+                    op_params_blob=blob,
+                ),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "colorbalancergb": {"saturation_global": 0.2},
+            },
+        )
         cbrg = [p for p in result if p.operation == "colorbalancergb"]
         assert len(cbrg) == 1
         assert cbrg[0].multi_name == "sepia"
@@ -234,16 +265,22 @@ class TestMergePresets:
 
     def test_adjustment_merges_onto_disabled_placeholder_instance(self) -> None:
         blob = pack_params("filmicrgb", {"contrast": 1.0, "black_point_source": -7.65})
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="filmicrgb", enabled=0,
-                multi_name="scene-referred default",
-                op_params_blob=blob,
-            ),
-        ])
-        result = merge_presets([preset], adjustments={
-            "filmicrgb": {"contrast": 1.4},
-        })
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="filmicrgb",
+                    enabled=0,
+                    multi_name="scene-referred default",
+                    op_params_blob=blob,
+                ),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "filmicrgb": {"contrast": 1.4},
+            },
+        )
         films = [p for p in result if p.operation == "filmicrgb"]
         assert len(films) == 1
         f = films[0]
@@ -254,35 +291,50 @@ class TestMergePresets:
 
     def test_adjustments_override(self) -> None:
         blob = pack_params("exposure", {"exposure": 0.5, "compensate_hilite_pres": 0})
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(operation="exposure", op_params_blob=blob),
-        ])
-        result = merge_presets([preset], adjustments={
-            "exposure": {"exposure": 0.75},
-        })
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="exposure", op_params_blob=blob),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "exposure": {"exposure": 0.75},
+            },
+        )
         assert len(result) == 1
         plg = result[0]
         assert plg.params["exposure"] == 0.75
         assert plg.params["compensate_hilite_pres"] == 0
 
     def test_adjustment_on_unverified_iop_keeps_preset_blob(self) -> None:
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance"),
-        ])
-        result = merge_presets([preset], adjustments={
-            "vibrance": {"amount": 75.0},
-        })
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance"),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "vibrance": {"amount": 75.0},
+            },
+        )
         assert len(result) == 1
         assert result[0].params == {}
         assert result[0].op_params != ""
 
     def test_adjustment_new_plugin(self) -> None:
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(operation="vibrance"),
-        ])
-        result = merge_presets([preset], adjustments={
-            "filmicrgb": {"contrast": 1.4},
-        })
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(operation="vibrance"),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "filmicrgb": {"contrast": 1.4},
+            },
+        )
         ops = [plg.operation for plg in result]
         assert "filmicrgb" in ops
         filmic = next(plg for plg in result if plg.operation == "filmicrgb")
@@ -290,23 +342,34 @@ class TestMergePresets:
         assert filmic.module == 6
 
     def test_fresh_filmic_skipped_on_dark_image(self) -> None:
-        result = merge_presets([], adjustments={
-            "filmicrgb": {"contrast": 1.4},
-        }, dark_image=True)
+        result = merge_presets(
+            [],
+            adjustments={
+                "filmicrgb": {"contrast": 1.4},
+            },
+            dark_image=True,
+        )
         assert [p for p in result if p.operation == "filmicrgb"] == []
 
     def test_fresh_filmic_allowed_on_dark_image_if_preset_has_it(self) -> None:
         blob = pack_params("filmicrgb", {"contrast": 1.0, "black_point_source": -7.65})
-        preset = make_mock_preset(plugins=[
-            make_plugin_ref(
-                operation="filmicrgb", enabled=0,
-                multi_name="scene-referred default",
-                op_params_blob=blob,
-            ),
-        ])
-        result = merge_presets([preset], adjustments={
-            "filmicrgb": {"contrast": 1.4},
-        }, dark_image=True)
+        preset = make_mock_preset(
+            plugins=[
+                make_plugin_ref(
+                    operation="filmicrgb",
+                    enabled=0,
+                    multi_name="scene-referred default",
+                    op_params_blob=blob,
+                ),
+            ]
+        )
+        result = merge_presets(
+            [preset],
+            adjustments={
+                "filmicrgb": {"contrast": 1.4},
+            },
+            dark_image=True,
+        )
         films = [p for p in result if p.operation == "filmicrgb"]
         assert len(films) == 1
         assert films[0].enabled is True
@@ -314,9 +377,13 @@ class TestMergePresets:
         assert films[0].params["black_point_source"] == pytest.approx(-7.65)
 
     def test_dark_image_non_filmic_adjustments_still_work(self) -> None:
-        result = merge_presets([], adjustments={
-            "exposure": {"exposure": 0.5},
-        }, dark_image=True)
+        result = merge_presets(
+            [],
+            adjustments={
+                "exposure": {"exposure": 0.5},
+            },
+            dark_image=True,
+        )
         exps = [p for p in result if p.operation == "exposure"]
         assert len(exps) == 1
         assert exps[0].params["exposure"] == 0.5
@@ -325,7 +392,9 @@ class TestMergePresets:
         preset = _make_preset_with_real_blob(
             operation="exposure",
             params={
-                "exposure": 0.5, "black": 0.0, "mode": 0,
+                "exposure": 0.5,
+                "black": 0.0,
+                "mode": 0,
                 "deflicker_percentile": 50.0,
                 "deflicker_target_level": -4.0,
                 "compensate_exposure_bias": 0,
@@ -392,7 +461,13 @@ class TestGenerateReport:
         analysis = MagicMock()
         analysis.to_prompt_dict.return_value = {
             "dimensions": {"w": 1024, "h": 768, "format": "JPEG"},
-            "luminance": {"mean": 0.45, "std": 0.18, "saturation": 0.42, "wb_rb_ratio": 1.0, "tonal": [0.2, 0.5, 0.3]},
+            "luminance": {
+                "mean": 0.45,
+                "std": 0.18,
+                "saturation": 0.42,
+                "wb_rb_ratio": 1.0,
+                "tonal": [0.2, 0.5, 0.3],
+            },
             "histogram": {},
             "noise": 0.05,
             "scene_tags": ["portrait", "warm"],
@@ -541,21 +616,26 @@ class TestE2EGenerateAndValidate:
         generate_dtstyle(spec, [], output)
 
         errors = validate_iop_list_consistency(output)
-        assert any("exposure" in e for e in errors), (
-            f"Expected iop_list mismatch error, got: {errors}"
-        )
+        assert any(
+            "exposure" in e for e in errors
+        ), f"Expected iop_list mismatch error, got: {errors}"
 
     def test_generated_xml_roundtrip(self, tmp_path: Path) -> None:
         spec = StyleSpec(
             style_name="roundtrip_test",
             style_description="XML round-trip",
             plugins=[
-                Plugin(operation="exposure", params={
-                    "exposure": 0.0, "black": 0.0, "mode": 0,
-                    "deflicker_percentile": 50.0,
-                    "deflicker_target_level": -4.0,
-                    "compensate_exposure_bias": 0,
-                }),
+                Plugin(
+                    operation="exposure",
+                    params={
+                        "exposure": 0.0,
+                        "black": 0.0,
+                        "mode": 0,
+                        "deflicker_percentile": 50.0,
+                        "deflicker_target_level": -4.0,
+                        "compensate_exposure_bias": 0,
+                    },
+                ),
             ],
         )
         output = tmp_path / "roundtrip.dtstyle"
@@ -573,6 +653,7 @@ class TestE2EGenerateAndValidate:
             if op_params_enc and op in ("exposure", "vibrance"):
                 from dtstylekit.codec.iop_registry import unpack_params
                 from dtstylekit.codec.xmp_codec import decode_xmp
+
                 blob = decode_xmp(op_params_enc)
                 params = unpack_params(op, blob)
                 assert isinstance(params, dict)
@@ -584,7 +665,10 @@ class TestE2EFullPipelineMocked:
 
     def test_pipeline_produces_valid_style(self, tmp_path: Path) -> None:
         analysis = ImageAnalysis(
-            width=800, height=600, mode="RGB", format="JPEG",
+            width=800,
+            height=600,
+            mode="RGB",
+            format="JPEG",
             luminance=LuminanceStats(mean=0.45, std=0.18, saturation_mean=0.3),
             histogram=HistogramStats(bins=64),
             scene_tags=["outdoor", "daylight"],
@@ -595,15 +679,26 @@ class TestE2EFullPipelineMocked:
             style_description="Golden hour warmth",
             iop_list="filmicrgb,0,colorbalancergb,1,exposure,2",
             plugins=[
-                Plugin(operation="filmicrgb", params={
-                    "contrast": 1.4, "latitude": 25.0,
-                }),
-                Plugin(operation="colorbalancergb", params={
-                    "shadows_H": 25.0, "highlights_H": 35.0,
-                }),
-                Plugin(operation="exposure", params={
-                    "exposure": 0.3,
-                }),
+                Plugin(
+                    operation="filmicrgb",
+                    params={
+                        "contrast": 1.4,
+                        "latitude": 25.0,
+                    },
+                ),
+                Plugin(
+                    operation="colorbalancergb",
+                    params={
+                        "shadows_H": 25.0,
+                        "highlights_H": 35.0,
+                    },
+                ),
+                Plugin(
+                    operation="exposure",
+                    params={
+                        "exposure": 0.3,
+                    },
+                ),
             ],
         )
 
@@ -613,7 +708,9 @@ class TestE2EFullPipelineMocked:
 
         report_path = tmp_path / "golden_hour.md"
         generate_report(
-            spec, [], analysis,
+            spec,
+            [],
+            analysis,
             "Golden hour look with warm shadows and highlighted hues",
             report_path,
         )
@@ -624,8 +721,5 @@ class TestE2EFullPipelineMocked:
         assert xml_errors == [], f"XML errors: {xml_errors}"
 
         blob_errors = validate_plugin_blobs(dtstyle_path)
-        verified_errors = [
-            e for e in blob_errors
-            if "not in IOP_REGISTRY" not in e
-        ]
+        verified_errors = [e for e in blob_errors if "not in IOP_REGISTRY" not in e]
         assert verified_errors == [], f"Verified blob errors: {verified_errors}"

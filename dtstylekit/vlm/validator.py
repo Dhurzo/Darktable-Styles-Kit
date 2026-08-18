@@ -112,6 +112,7 @@ def validate_style(
                     if curve_template_names is None and result is None:
                         try:
                             from dtstylekit.curves import REGISTRY as CURVE_REG
+
                             curve_template_names = {t.name for t in CURVE_REG}
                         except ImportError:
                             curve_template_names = set()
@@ -177,8 +178,10 @@ def validate_style(
         # unintended warm/red tint.  Force C to 0 in that case so the
         # target photo's original colors are respected.
         if plg.operation == "colorbalancergb":
-            def _neutral_hue(h):
+
+            def _neutral_hue(h: float | None) -> bool:
                 return abs(float(h or 0.0)) < 1e-3 or float(h or 0.0) > 359.999
+
             # Global additive offset (most dangerous - tints EVERY pixel).
             gc = float(clamped_params.get("global_C") or 0.0)
             gh = float(clamped_params.get("global_H") or 0.0)
@@ -226,12 +229,9 @@ def validate_style(
             # saturation — a tint must stay WELL below the reference's own
             # colorfulness.
             _zone_caps_global = {"shadows": 0.02, "midtones": 0.015, "highlights": 0.012}
-            _is_global_grade = (
-                reference_analysis is not None
-                and all(
-                    (reference_analysis.get(f"{z}_hue_mode") or "") == "global"
-                    for z in _zone_caps_default
-                )
+            _is_global_grade = reference_analysis is not None and all(
+                (reference_analysis.get(f"{z}_hue_mode") or "") == "global"
+                for z in _zone_caps_default
             )
             for zone, default_cap in _zone_caps_default.items():
                 c_key = f"{zone}_C"
@@ -241,9 +241,7 @@ def validate_style(
                 cz = float(clamped_params[c_key] or 0.0)
                 if cz <= 0.0:
                     continue
-                conf = (
-                    float((reference_analysis or {}).get(conf_key) or 0.0)
-                )
+                conf = float((reference_analysis or {}).get(conf_key) or 0.0)
                 if _is_global_grade:
                     # Uniform-grade cap: subtle ceiling, scaled by a QUARTER
                     # of the measured saturation of the zone (0 when absent).
@@ -285,8 +283,7 @@ def validate_style(
                     # Green dominance (R close to G, both clearly above B)
                     # = the warm-skin signature. R/G in [0.85, 1.15] AND
                     # B < min(R,G)*0.85.
-                    if 0.0 < gg and abs(rg - gg) / max(gg, 1e-6) < 0.15 \
-                            and bg < min(rg, gg) * 0.85:
+                    if 0.0 < gg and abs(rg - gg) / max(gg, 1e-6) < 0.15 and bg < min(rg, gg) * 0.85:
                         if "midtones_C" in plg.params:
                             warnings.append(
                                 f"colorbalancergb.midtones_C={mt_c:.3f} on a "
@@ -310,6 +307,7 @@ def validate_style(
             def _circular_diff(a: float, b: float) -> float:
                 d = abs(a - b) % 360.0
                 return min(d, 360.0 - d)
+
             same_hue = (
                 _circular_diff(hues[0], hues[1]) < 15.0
                 and _circular_diff(hues[1], hues[2]) < 15.0
@@ -327,20 +325,19 @@ def validate_style(
                 # warm-global reference is NOT intentional.
                 allow = False
                 if reference_analysis:
-                    modes = [
-                        reference_analysis.get(f"{z}_hue_mode") for z in _zones
-                    ]
-                    ref_hues = [
-                        reference_analysis.get(f"{z}_hue") for z in _zones
-                    ]
+                    modes = [reference_analysis.get(f"{z}_hue_mode") for z in _zones]
+                    ref_hues = [reference_analysis.get(f"{z}_hue") for z in _zones]
                     if all(m in ("mono", "global") for m in modes) and all(
                         h is not None for h in ref_hues
                     ):
+
                         def _wrap(h: float) -> float:
                             return h % 360.0
+
                         ref_same = (
                             _circular_diff(_wrap(ref_hues[0] or 0), _wrap(ref_hues[1] or 0)) < 45.0
-                            and _circular_diff(_wrap(ref_hues[1] or 0), _wrap(ref_hues[2] or 0)) < 45.0
+                            and _circular_diff(_wrap(ref_hues[1] or 0), _wrap(ref_hues[2] or 0))
+                            < 45.0
                         )
                         # The spec's uniform hue must match the reference's
                         # coherent grade (±45° between their circular means).
@@ -351,7 +348,7 @@ def validate_style(
                         )
                         ref_mean = float(
                             _circular_mean(
-                                [_wrap(h) for h in ref_hues],
+                                [_wrap(float(h or 0.0)) for h in ref_hues],
                             )
                         )
                         if ref_same and _circular_diff(spec_mean, ref_mean) <= 45.0:
@@ -384,8 +381,11 @@ def validate_style(
             gsat = (reference_analysis or {}).get("global_saturation")
             sat = float(clamped_params.get("saturation") or 0.0)
             if (
-                isinstance(gsat, (int, float)) and not isinstance(gsat, bool)
-                and gsat >= 0.25 and sat < 0.0 and "saturation" in plg.params
+                isinstance(gsat, (int, float))
+                and not isinstance(gsat, bool)
+                and gsat >= 0.25
+                and sat < 0.0
+                and "saturation" in plg.params
             ):
                 warnings.append(
                     f"filmicrgb.saturation={sat:.1f} contradicts colorful "
@@ -473,6 +473,7 @@ def _validate_curve_preset(
     if template_names is None:
         try:
             from dtstylekit.curves import REGISTRY as CURVE_REG
+
             template_names = {t.name for t in CURVE_REG}
         except ImportError:
             template_names = set()

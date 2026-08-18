@@ -13,27 +13,31 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dtstylekit.paths import get_outputs_dir, get_presets_dir
+
+if TYPE_CHECKING:
+    from dtstylekit.presets.indexer import PresetIndexer
 
 logger = logging.getLogger(__name__)
 
 
-def add_preset_subcommands(subparsers) -> None:
+def add_preset_subcommands(subparsers: argparse._SubParsersAction) -> None:
     """Register 'preset' subcommand."""
     from dtstylekit.presets.cli import add_preset_subcommands as _add
 
     _add(subparsers)
 
 
-def add_vlm_subcommands(subparsers) -> None:
+def add_vlm_subcommands(subparsers: argparse._SubParsersAction) -> None:
     """Register 'vlm' subcommand."""
     from dtstylekit.vlm.cli import add_vlm_parser
 
     add_vlm_parser(subparsers)
 
 
-def add_curves_subcommands(subparsers) -> None:
+def add_curves_subcommands(subparsers: argparse._SubParsersAction) -> None:
     """Register 'curves' subcommand."""
     from dtstylekit.curves.cli import add_curves_parser
 
@@ -41,7 +45,7 @@ def add_curves_subcommands(subparsers) -> None:
 
 
 def _load_selected_presets(
-    spec,
+    spec: object,
     warnings: list[str],
 ) -> list:
     """Load preset files referenced by the StyleSpec.
@@ -65,7 +69,7 @@ def _load_selected_presets(
     # Resolve through the index so we use the persisted absolute file_path
     # rather than fragile relative globs.
     index_path = get_outputs_dir() / "presets.db"
-    indexer = None
+    indexer: PresetIndexer | None = None
     if index_path.exists():
         from dtstylekit.presets.indexer import PresetIndexer
 
@@ -128,7 +132,7 @@ def _load_selected_presets(
             indexer.close()
 
 
-def _resolve_via_index(indexer, name: str) -> Path | None:
+def _resolve_via_index(indexer: PresetIndexer, name: str) -> Path | None:
     """Try to resolve a preset name to a file path via the SQLite index.
 
     Matches the name against (a) the basename of the stored file_path
@@ -184,7 +188,7 @@ def _search_preset_dirs(name: str) -> Path | None:
     return None
 
 
-def cmd_generate(args) -> int:
+def cmd_generate(args: argparse.Namespace) -> int:
     """End-to-end generation."""
     from dtstylekit.analyzer.pipeline import analyze_image
     from dtstylekit.codec.iop_registry import IOP_REGISTRY
@@ -293,8 +297,7 @@ def cmd_generate(args) -> int:
 
         root = _ET.parse(dtstyle_path).getroot()
         enabled_plugins = [
-            p for p in root.findall("style/plugin")
-            if (p.findtext("enabled", "1") or "1") == "1"
+            p for p in root.findall("style/plugin") if (p.findtext("enabled", "1") or "1") == "1"
         ]
         if not enabled_plugins:
             msg = (
@@ -327,9 +330,7 @@ def cmd_generate(args) -> int:
         from dtstylekit.analyzer.pipeline import analyze_reference_hues
         from dtstylekit.composer.explanation import generate_explanation
 
-        explanation_path = (
-            output_dir / f"{spec.style_name.replace(' ', '_')}_EXPLICACION.md"
-        )
+        explanation_path = output_dir / f"{spec.style_name.replace(' ', '_')}_EXPLICACION.md"
         try:
             reference_analysis = analyze_reference_hues(references)
             generate_explanation(
@@ -410,20 +411,19 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help="Enable iterative generate→render→eval refinement (default: 0 = off). "
-             "Requires --refine-raw. Each iteration re-prompts VLM with visual feedback.",
+        "Requires --refine-raw. Each iteration re-prompts VLM with visual feedback.",
     )
     gen.add_argument(
         "--refine-raw",
         default=None,
         help="RAW file path for test renders during iterative refinement. "
-             "Required if --refine-iterations > 0.",
+        "Required if --refine-iterations > 0.",
     )
     gen.add_argument(
         "--lang",
         choices=("es", "en"),
         default="es",
-        help="Language of the natural-language explanation document "
-             "(default: es).",
+        help="Language of the natural-language explanation document " "(default: es).",
     )
 
     # analyze subcommand (alias for generate)
@@ -459,8 +459,7 @@ def main(argv: list[str] | None = None) -> int:
         "--lang",
         choices=("es", "en"),
         default="es",
-        help="Language of the natural-language explanation document "
-             "(default: es).",
+        help="Language of the natural-language explanation document " "(default: es).",
     )
 
     # preset subcommand
@@ -478,12 +477,15 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_generate(args)
     elif args.command == "preset":
         from dtstylekit.presets.cli import main_preset
+
         return main_preset(args)
     elif args.command == "vlm":
         from dtstylekit.vlm.cli import cmd_vlm_generate
+
         return cmd_vlm_generate(args)
     elif args.command == "curves":
         from dtstylekit.curves.cli import cmd_curves
+
         return cmd_curves(args)
 
     parser.print_help()

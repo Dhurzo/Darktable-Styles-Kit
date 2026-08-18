@@ -35,7 +35,7 @@ def add_vlm_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def cmd_vlm_generate(args) -> int:
+def cmd_vlm_generate(args: argparse.Namespace) -> int:
     """Handle 'vlm generate'."""
     from dtstylekit.analyzer.pipeline import analyze_image
     from dtstylekit.codec.iop_registry import IOP_REGISTRY

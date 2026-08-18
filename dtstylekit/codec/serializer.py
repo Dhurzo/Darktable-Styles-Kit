@@ -86,10 +86,7 @@ def encode_plugin(plugin_dict: dict) -> dict:
 
 
 def build_dtstyle_xml(
-    name: str,
-    description: str,
-    plugins: list[dict],
-    iop_list: str | None = None
+    name: str, description: str, plugins: list[dict], iop_list: str | None = None
 ) -> str:
     """Build a complete .dtstyle XML document.
 
@@ -130,7 +127,9 @@ def build_dtstyle_xml(
         ET.SubElement(plugin, "blendop_version").text = str(encoded["blendop_version"])
         ET.SubElement(plugin, "multi_priority").text = str(encoded["multi_priority"])
         ET.SubElement(plugin, "multi_name").text = encoded["multi_name"]
-        ET.SubElement(plugin, "multi_name_hand_edited").text = str(encoded["multi_name_hand_edited"])
+        ET.SubElement(plugin, "multi_name_hand_edited").text = str(
+            encoded["multi_name_hand_edited"]
+        )
 
     # Convert to string with XML declaration
     xml_str = ET.tostring(root, encoding="unicode")
@@ -138,18 +137,14 @@ def build_dtstyle_xml(
 
 
 def write_dtstyle_file(
-    filepath: str,
-    name: str,
-    description: str,
-    plugins: list[dict],
-    iop_list: str | None = None
+    filepath: str, name: str, description: str, plugins: list[dict], iop_list: str | None = None
 ) -> None:
     """Write a .dtstyle file to disk.
 
     Convenience wrapper around build_dtstyle_xml.
     """
     xml = build_dtstyle_xml(name, description, plugins, iop_list)
-    with open(filepath, 'w', encoding='utf-8') as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(xml)
 
 

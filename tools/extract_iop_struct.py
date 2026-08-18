@@ -90,12 +90,14 @@ def _parse_fields(body: str) -> list[dict]:
             inner = arr.strip("[]")
             if inner.isdigit():
                 arr_dim = int(inner)
-        fields.append({
-            "ctype": ctype,
-            "name": name,
-            "array": arr_dim,
-            "anns": anns,
-        })
+        fields.append(
+            {
+                "ctype": ctype,
+                "name": name,
+                "array": arr_dim,
+                "anns": anns,
+            }
+        )
     return fields
 
 
@@ -141,7 +143,7 @@ def render_block(info: dict, blendop: int | None = None) -> str:
     name = info["name"]
     lines = [
         f'    "{name}": IOPRegistry(',
-        f"        operation=\"{name}\",",
+        f'        operation="{name}",',
         f"        version={info['version']},",
         f"        # {len(info['fields'])} fields, {info['size_bytes']} bytes",
         f"        pack_format=\"{info['pack_format']}\",",
@@ -160,12 +162,10 @@ def render_block(info: dict, blendop: int | None = None) -> str:
             continue
         fname = f["name"]
         if f["array"]:
-            lines.append(
-                f"            # {fname}[{f['array']}]: default {d}"
-            )
+            lines.append(f"            # {fname}[{f['array']}]: default {d}")
             continue
         val = repr(int(d)) if f["ctype"] != "float" else repr(d)
-        lines.append(f"            \"{fname}\": {val},")
+        lines.append(f'            "{fname}": {val},')
     lines.append("        },")
     lines.append("        ranges={")
     for f in info["fields"]:
@@ -175,11 +175,9 @@ def render_block(info: dict, blendop: int | None = None) -> str:
             continue
         fname = f["name"]
         if f["array"]:
-            lines.append(
-                f"            # {fname}[{f['array']}]: [{lo}, {hi}]"
-            )
+            lines.append(f"            # {fname}[{f['array']}]: [{lo}, {hi}]")
             continue
-        lines.append(f"            \"{fname}\": ({lo}, {hi}),")
+        lines.append(f'            "{fname}": ({lo}, {hi}),')
     lines.append("        },")
     lines.append(f"        size_bytes={info['size_bytes']},")
     if blendop is not None:
@@ -192,7 +190,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("c_file", type=Path, help="Path to src/iop/<name>.c")
     parser.add_argument(
-        "--blendop", type=int, choices=(2, 3, 4), default=None,
+        "--blendop",
+        type=int,
+        choices=(2, 3, 4),
+        default=None,
         help="blendop_cst (2=LAB, 3=RGB_DISPLAY, 4=RGB_SCENE) — from get_colorspace",
     )
     args = parser.parse_args(argv)

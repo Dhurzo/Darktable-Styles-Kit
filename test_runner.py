@@ -123,9 +123,7 @@ def main() -> int:
         output_dir = output_base / f"test_{i + 1}_{Path(case['image']).stem}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        success, output, dtstyle_path = run_generation(
-            case["image"], case["direction"], output_dir
-        )
+        success, output, dtstyle_path = run_generation(case["image"], case["direction"], output_dir)
 
         if success and dtstyle_path:
             print(f"✓ Generation succeeded: {dtstyle_path.name}")
@@ -140,24 +138,28 @@ def main() -> int:
             if report_path.exists():
                 print(f"✓ Report generated: {report_path.name}")
 
-            results.append({
-                "test": i + 1,
-                "image": case["image"],
-                "direction": case["direction"],
-                "success": True,
-                "modules_ok": modules_ok,
-                "issues": issues,
-                "dtstyle": str(dtstyle_path),
-            })
+            results.append(
+                {
+                    "test": i + 1,
+                    "image": case["image"],
+                    "direction": case["direction"],
+                    "success": True,
+                    "modules_ok": modules_ok,
+                    "issues": issues,
+                    "dtstyle": str(dtstyle_path),
+                }
+            )
         else:
             print(f"✗ Generation failed: {output}")
-            results.append({
-                "test": i + 1,
-                "image": case["image"],
-                "direction": case["direction"],
-                "success": False,
-                "error": output,
-            })
+            results.append(
+                {
+                    "test": i + 1,
+                    "image": case["image"],
+                    "direction": case["direction"],
+                    "success": False,
+                    "error": output,
+                }
+            )
 
     # Summary
     print(f"\n{'=' * 60}")

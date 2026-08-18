@@ -94,14 +94,17 @@ class TestPackParams:
 
     def test_pack_exposure_custom(self):
         """Pack exposure with custom values."""
-        blob = pack_params("exposure", {
-            "mode": 1,
-            "black": 0.1,
-            "exposure": 2.5,
-            "deflicker_percentile": 75.0,
-            "deflicker_target_level": -2.0,
-            "compensate_exposure_bias": 1,
-        })
+        blob = pack_params(
+            "exposure",
+            {
+                "mode": 1,
+                "black": 0.1,
+                "exposure": 2.5,
+                "deflicker_percentile": 75.0,
+                "deflicker_target_level": -2.0,
+                "compensate_exposure_bias": 1,
+            },
+        )
         assert len(blob) == 28
         assert verify_size("exposure", blob)
 
@@ -113,11 +116,14 @@ class TestPackParams:
 
     def test_pack_filmicrgb_custom(self):
         """Pack filmicrgb with custom values."""
-        blob = pack_params("filmicrgb", {
-            "contrast": 1.5,
-            "latitude": 25.0,
-            "saturation": 10.0,
-        })
+        blob = pack_params(
+            "filmicrgb",
+            {
+                "contrast": 1.5,
+                "latitude": 25.0,
+                "saturation": 10.0,
+            },
+        )
         assert len(blob) == 116
         assert verify_size("filmicrgb", blob)
 
@@ -129,11 +135,14 @@ class TestPackParams:
 
     def test_pack_colorbalancergb_custom(self):
         """Pack colorbalancergb with custom values."""
-        blob = pack_params("colorbalancergb", {
-            "global_Y": 0.1,
-            "global_C": 0.2,
-            "saturation_global": 0.3,
-        })
+        blob = pack_params(
+            "colorbalancergb",
+            {
+                "global_Y": 0.1,
+                "global_C": 0.2,
+                "saturation_global": 0.3,
+            },
+        )
         assert len(blob) == 132
         assert verify_size("colorbalancergb", blob)
 
@@ -145,10 +154,13 @@ class TestPackParams:
 
     def test_pack_sigmoid_custom(self):
         """Pack sigmoid with custom values."""
-        blob = pack_params("sigmoid", {
-            "middle_grey_contrast": 2.0,
-            "contrast_skewness": 0.1,
-        })
+        blob = pack_params(
+            "sigmoid",
+            {
+                "middle_grey_contrast": 2.0,
+                "contrast_skewness": 0.1,
+            },
+        )
         assert len(blob) == 56
         assert verify_size("sigmoid", blob)
 
@@ -160,10 +172,13 @@ class TestPackParams:
 
     def test_pack_atrous_custom(self):
         """Pack atrous with custom values."""
-        blob = pack_params("atrous", {
-            "octaves": 4,
-            "mix": 0.5,
-        })
+        blob = pack_params(
+            "atrous",
+            {
+                "octaves": 4,
+                "mix": 0.5,
+            },
+        )
         assert len(blob) == 248
         assert verify_size("atrous", blob)
 
@@ -325,9 +340,12 @@ class TestRoundTrip:
 
     @pytest.mark.parametrize(
         "op",
-        [op for op in list_verified()
-         if get_registry(op).pack_format != "<basecurve>"
-         and get_registry(op).pack_format != "<pass_through>"],
+        [
+            op
+            for op in list_verified()
+            if get_registry(op).pack_format != "<basecurve>"
+            and get_registry(op).pack_format != "<pass_through>"
+        ],
     )
     def test_roundtrip_verified_iops(self, op):
         """Round-trip for all verified IOPs with defaults."""
@@ -344,11 +362,13 @@ class TestRoundTrip:
             original_val = reg.defaults[field]
             unpacked_val = unpacked[field]
             if isinstance(original_val, float):
-                assert abs(unpacked_val - original_val) < 1e-6, \
-                    f"{op}.{field}: {unpacked_val} != {original_val}"
+                assert (
+                    abs(unpacked_val - original_val) < 1e-6
+                ), f"{op}.{field}: {unpacked_val} != {original_val}"
             else:
-                assert unpacked_val == original_val, \
-                    f"{op}.{field}: {unpacked_val} != {original_val}"
+                assert (
+                    unpacked_val == original_val
+                ), f"{op}.{field}: {unpacked_val} != {original_val}"
 
     @pytest.mark.parametrize("op", list_unverified())
     def test_roundtrip_unverified_iops(self, op):
@@ -361,11 +381,13 @@ class TestRoundTrip:
             original_val = reg.defaults[field]
             unpacked_val = unpacked[field]
             if isinstance(original_val, float):
-                assert abs(unpacked_val - original_val) < 1e-6, \
-                    f"{op}.{field}: {unpacked_val} != {original_val}"
+                assert (
+                    abs(unpacked_val - original_val) < 1e-6
+                ), f"{op}.{field}: {unpacked_val} != {original_val}"
             else:
-                assert unpacked_val == original_val, \
-                    f"{op}.{field}: {unpacked_val} != {original_val}"
+                assert (
+                    unpacked_val == original_val
+                ), f"{op}.{field}: {unpacked_val} != {original_val}"
 
     def test_roundtrip_filmicrgb_specific(self):
         """Specific test for filmicrgb with values from completion criteria."""
@@ -569,10 +591,17 @@ class TestRefinementIops:
         assert abs(p["middle_grey"] - 18.42) < 1e-2
 
     def test_toneequal_bands_and_enums(self):
-        blob = pack_params("toneequal", {
-            "midtones": 0.8, "blacks": -0.5, "feathering": 100.0,
-            "iterations": 3, "details": 2, "method": 1,
-        })
+        blob = pack_params(
+            "toneequal",
+            {
+                "midtones": 0.8,
+                "blacks": -0.5,
+                "feathering": 100.0,
+                "iterations": 3,
+                "details": 2,
+                "method": 1,
+            },
+        )
         p = unpack_params("toneequal", blob)
         assert abs(p["midtones"] - 0.8) < 1e-5
         assert abs(p["blacks"] + 0.5) < 1e-5
@@ -582,10 +611,16 @@ class TestRefinementIops:
         assert p["method"] == 1
 
     def test_colorequal_custom_values(self):
-        blob = pack_params("colorequal", {
-            "hue_blue": 45.0, "sat_red": 1.5, "threshold": 0.2,
-            "hue_shift": 12.0, "use_filter": 0,
-        })
+        blob = pack_params(
+            "colorequal",
+            {
+                "hue_blue": 45.0,
+                "sat_red": 1.5,
+                "threshold": 0.2,
+                "hue_shift": 12.0,
+                "use_filter": 0,
+            },
+        )
         p = unpack_params("colorequal", blob)
         assert abs(p["hue_blue"] - 45.0) < 1e-5
         assert abs(p["sat_red"] - 1.5) < 1e-5
@@ -615,11 +650,18 @@ class TestRefinementIops:
         assert len(p) == 15
 
     def test_colorharmonizer_custom_values_and_clamp(self):
-        blob = pack_params("colorharmonizer", {
-            "rule": 9, "anchor_hue": 0.6, "pull_strength": 0.8,
-            "custom_hue_0": 0.25, "custom_hue_3": 0.9,
-            "node_saturation_1": 1.5, "smoothing": 1.5,
-        })
+        blob = pack_params(
+            "colorharmonizer",
+            {
+                "rule": 9,
+                "anchor_hue": 0.6,
+                "pull_strength": 0.8,
+                "custom_hue_0": 0.25,
+                "custom_hue_3": 0.9,
+                "node_saturation_1": 1.5,
+                "smoothing": 1.5,
+            },
+        )
         p = unpack_params("colorharmonizer", blob)
         assert p["rule"] == 9
         assert abs(p["anchor_hue"] - 0.6) < 1e-5

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from .exif import extract_exif
@@ -124,7 +125,7 @@ def _ensure_rgb(image: Image.Image) -> Image.Image:
     return image.convert("RGB")
 
 
-def _to_float_array(image: Image.Image) -> object:  # numpy.ndarray — kept untyped
+def _to_float_array(image: Image.Image) -> np.ndarray:
     """Return the RGB image as a ``(H, W, 3)`` float32 array in [0, 1]."""
     import numpy as np
 
@@ -132,7 +133,7 @@ def _to_float_array(image: Image.Image) -> object:  # numpy.ndarray — kept unt
     if arr.ndim == 2:
         # Grayscale input — broadcast to 3 identical channels.
         arr = np.stack([arr, arr, arr], axis=-1)
-    return arr
+    return arr  # type: ignore[no-any-return]
 
 
 def _failed_analysis(source: Path, errors: list[str]) -> ImageAnalysis:
@@ -153,6 +154,7 @@ def _circular_mean(hues_deg: list[float], weights: list[float] | None = None) ->
     Empty input → 0.0.
     """
     import numpy as np
+
     if not hues_deg:
         return 0.0
     rad = np.deg2rad(np.asarray(hues_deg, dtype=np.float32))
@@ -160,7 +162,7 @@ def _circular_mean(hues_deg: list[float], weights: list[float] | None = None) ->
         s = float(np.sin(rad).sum())
         c = float(np.cos(rad).sum())
     else:
-        w = np.asarray(weights, dtype=np.float32)
+        w: np.ndarray = np.asarray(weights, dtype=np.float32)
         s = float((np.sin(rad) * w).sum())
         c = float((np.cos(rad) * w).sum())
     if abs(s) < 1e-9 and abs(c) < 1e-9:
@@ -205,8 +207,7 @@ def _consensus_vote(
     best_flat = 0.0
     best_w = 0.0
     for _i, hi in enumerate(ref_hues):
-        inl = [j for j in range(len(ref_hues))
-               if _circular_diff(ref_hues[j], hi) <= tolerance]
+        inl = [j for j in range(len(ref_hues)) if _circular_diff(ref_hues[j], hi) <= tolerance]
         flat = len(inl) / len(ref_hues)
         wsum = sum(weights[j] for j in inl) / total_w
         if wsum > best_w or (wsum == best_w and flat > best_flat):
@@ -237,6 +238,7 @@ def _circular_dispersion(hues_deg: list[float], weights: list[float] | None = No
     circular variance; we return R̄ directly so higher = more concentrated.
     """
     import numpy as np
+
     if not hues_deg:
         return 0.0
     rad = np.deg2rad(np.asarray(hues_deg, dtype=np.float32))
@@ -244,14 +246,16 @@ def _circular_dispersion(hues_deg: list[float], weights: list[float] | None = No
         s = float(np.sin(rad).mean())
         c = float(np.cos(rad).mean())
     else:
-        w = np.asarray(weights, dtype=np.float32)
+        w: np.ndarray = np.asarray(weights, dtype=np.float32)
         w = w / max(w.sum(), 1e-9)
         s = float((np.sin(rad) * w).sum())
         c = float((np.cos(rad) * w).sum())
     return float(np.sqrt(s * s + c * c))
 
 
-def _detect_bimodal(hues_deg: list[float], weights: list[float]) -> tuple[float, float, float] | None:
+def _detect_bimodal(
+    hues_deg: list[float], weights: list[float]
+) -> tuple[float, float, float] | None:
     """Detect a bimodal hue distribution. Returns (primary_hue, secondary_hue, primary_weight_share) or None.
 
     Builds a 12-bin circular histogram (30° per bin). If the top 2 bins
@@ -259,15 +263,16 @@ def _detect_bimodal(hues_deg: list[float], weights: list[float]) -> tuple[float,
     distinct modes), returns the weighted circular mean of each peak.
     """
     import numpy as np
+
     if not hues_deg:
         return None
     h = np.asarray(hues_deg, dtype=np.float32) % 360.0
-    w = np.asarray(weights, dtype=np.float32)
+    w: np.ndarray = np.asarray(weights, dtype=np.float32)
     total_w = float(w.sum())
     if total_w <= 0:
         return None
     # 12 bins of 30°, circular layout
-    bins = np.zeros(12, dtype=np.float32)
+    bins: np.ndarray = np.zeros(12, dtype=np.float32)
     for hi, wi in zip(h, w, strict=False):
         bin_idx = int(hi // 30) % 12
         bins[bin_idx] += wi
@@ -290,7 +295,9 @@ def _detect_bimodal(hues_deg: list[float], weights: list[float]) -> tuple[float,
     d2 = np.minimum(np.abs(h - center2), 360 - np.abs(h - center2))
     mask1 = d1 <= d2
     primary = _circular_mean(h[mask1].tolist(), w[mask1].tolist()) if mask1.any() else center1
-    secondary = _circular_mean(h[~mask1].tolist(), w[~mask1].tolist()) if (~mask1).any() else center2
+    secondary = (
+        _circular_mean(h[~mask1].tolist(), w[~mask1].tolist()) if (~mask1).any() else center2
+    )
     primary_share = float(w[mask1].sum() / total_w)
     return (primary, secondary, primary_share)
 
@@ -342,14 +349,14 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
     # Configuration — Hito 6B: lower saturation bar + volume rule so
     # mildly-saturated but voluminous zones (e.g. r4s warm shadows at sat
     # 0.10–0.14 over 550k px) are analyzed instead of discarded.
-    MIN_VALID_PIXELS = 200             # Min pixels with valid color in tonal range
-    SATURATION_WEIGHT_POWER = 2.0      # Power for saturation weighting
+    MIN_VALID_PIXELS = 200  # Min pixels with valid color in tonal range
+    SATURATION_WEIGHT_POWER = 2.0  # Power for saturation weighting
 
     ref_data = []
 
     for ref_path in reference_paths:
         try:
-            img = Image.open(ref_path).convert('RGB')
+            img = Image.open(ref_path).convert("RGB")
             arr = np.asarray(img, dtype=np.float32) / 255.0
 
             # Luminance (BT.709 weighting matches the dependency on tonal masks)
@@ -359,7 +366,9 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             midtones_mask = (lum >= 0.25) & (lum < 0.75)
             highlights_mask = lum >= 0.75
 
-            def analyze_tonal_range(mask, arr=arr):
+            def analyze_tonal_range(
+                mask: np.ndarray, arr: np.ndarray = arr
+            ) -> tuple[list[float], list[float], float, int, float, str]:
                 """Returns (hue_list, sat_weights, mean_sat, valid_count, confidence, hue_mode)."""
                 if not np.any(mask):
                     return [], [], 0.0, 0, 0.0, "neutral"
@@ -411,7 +420,7 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             mt = analyze_tonal_range(midtones_mask)
             hi = analyze_tonal_range(highlights_mask)
 
-            def _pack(z):
+            def _pack(z: tuple[list[float], list[float], float, int, float, str]) -> dict:
                 # Detect bimodality *within this single reference* — distinguishes
                 # an intentional two-color grade (e.g. teal shadows + warm
                 # highlights in one Blade Runner frame) from "two references that
@@ -426,8 +435,11 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 if bi is None and z[0]:
                     hue_mean = _circular_mean(z[0], z[1])
                 return {
-                    "hues": z[0], "weights": z[1], "sat": z[2],
-                    "count": z[3], "conf": z[4],
+                    "hues": z[0],
+                    "weights": z[1],
+                    "sat": z[2],
+                    "count": z[3],
+                    "conf": z[4],
                     "hue_mean": hue_mean,
                     "is_bi": bi is not None,
                     "bi_primary": bi[0] if bi else None,
@@ -435,24 +447,29 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
                 }
 
             ref_entry = {
-                "shadows": _pack(sh), "midtones": _pack(mt), "highlights": _pack(hi),
+                "shadows": _pack(sh),
+                "midtones": _pack(mt),
+                "highlights": _pack(hi),
             }
 
             # Hito 6C — per-reference "global grade" detection: the three zone
             # hues of THIS reference all sit within ±45° of their joint circular
             # mean → one coherent tint across the whole tonal range (e.g. a warm
             # grade 15°/38°/33°), as opposed to a split-tone.
-            zone_hues = []
+            zone_hues: list[float] = []
+            is_global = True
             for key in ("shadows", "midtones", "highlights"):
                 hm = ref_entry[key].get("hue_mean")
                 if hm is None:
-                    zone_hues = None
+                    is_global = False
                     break
                 zone_hues.append(hm)
-            ref_entry["is_global"] = bool(zone_hues is not None) and all(
-                _circular_diff(h, _circular_mean(zone_hues)) <= 45.0
-                for h in zone_hues
-            )
+            if is_global:
+                ref_entry["is_global"] = all(  # type: ignore[assignment]
+                    _circular_diff(h, _circular_mean(zone_hues)) <= 45.0 for h in zone_hues
+                )
+            else:
+                ref_entry["is_global"] = False  # type: ignore[assignment]
 
             ref_data.append(ref_entry)
 
@@ -462,11 +479,21 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
 
     if not ref_data:
         return {
-            "shadows_hue": None, "midtones_hue": None, "highlights_hue": None,
-            "shadows_hue_secondary": None, "midtones_hue_secondary": None, "highlights_hue_secondary": None,
-            "shadows_sat": 0.0, "midtones_sat": 0.0, "highlights_sat": 0.0,
-            "shadows_hue_confidence": 0.0, "midtones_hue_confidence": 0.0, "highlights_hue_confidence": 0.0,
-            "shadows_hue_mode": "neutral", "midtones_hue_mode": "neutral", "highlights_hue_mode": "neutral",
+            "shadows_hue": None,
+            "midtones_hue": None,
+            "highlights_hue": None,
+            "shadows_hue_secondary": None,
+            "midtones_hue_secondary": None,
+            "highlights_hue_secondary": None,
+            "shadows_sat": 0.0,
+            "midtones_sat": 0.0,
+            "highlights_sat": 0.0,
+            "shadows_hue_confidence": 0.0,
+            "midtones_hue_confidence": 0.0,
+            "highlights_hue_confidence": 0.0,
+            "shadows_hue_mode": "neutral",
+            "midtones_hue_mode": "neutral",
+            "highlights_hue_mode": "neutral",
         }
 
     # Hito 6C — aggregate "global grade" share: fraction of references that
@@ -512,8 +539,11 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
 
         if not all_hues:
             return {
-                "hue": None, "hue_secondary": None, "sat": mean_sat,
-                "conf": 0.0, "mode": "neutral",
+                "hue": None,
+                "hue_secondary": None,
+                "sat": mean_sat,
+                "conf": 0.0,
+                "mode": "neutral",
             }
 
         # Case 1: at least one reference was internally bimodal → emit `bi`.
@@ -524,9 +554,11 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             if bi_primary is None:
                 bi_primary = _circular_mean(all_hues, all_weights)
             return {
-                "hue": bi_primary, "hue_secondary": bi_secondary,
+                "hue": bi_primary,
+                "hue_secondary": bi_secondary,
                 "sat": mean_sat,
-                "conf": max(mean_conf, 0.55), "mode": "bi",
+                "conf": max(mean_conf, 0.55),
+                "mode": "bi",
             }
 
         # Case 2: all refs monomodal → majority-consensus vote (Hito 6A).
@@ -534,20 +566,19 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
         # finds the majority band (±30°) iteratively and the share of refs
         # inside it becomes the confidence.
         ref_zone_hues = [
-            d[zone_key]["hue_mean"] for d in ref_data
-            if d[zone_key].get("hue_mean") is not None
+            d[zone_key]["hue_mean"] for d in ref_data if d[zone_key].get("hue_mean") is not None
         ]
         ref_zone_weights = [
-            d[zone_key]["conf"] for d in ref_data
-            if d[zone_key].get("hue_mean") is not None
+            d[zone_key]["conf"] for d in ref_data if d[zone_key].get("hue_mean") is not None
         ]
-        consensus, agree_flat, agree_weighted = _consensus_vote(
-            ref_zone_hues, ref_zone_weights
-        )
+        consensus, agree_flat, agree_weighted = _consensus_vote(ref_zone_hues, ref_zone_weights)
         if agree_weighted <= 0.6:  # no weighted majority → neutral
             return {
-                "hue": None, "hue_secondary": None, "sat": mean_sat,
-                "conf": 0.0, "mode": "neutral",
+                "hue": None,
+                "hue_secondary": None,
+                "sat": mean_sat,
+                "conf": 0.0,
+                "mode": "neutral",
             }
         # Confidence: majority share of references (agree_flat, per the
         # plan "voto 4/5 → 0.8"), unless a single reference carries the
@@ -558,8 +589,11 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
         # consensus hue; the mode marks it an intentional uniform grade).
         mode = "global" if global_share >= 0.6 else "mono"
         return {
-            "hue": consensus, "hue_secondary": None, "sat": mean_sat,
-            "conf": conf, "mode": mode,
+            "hue": consensus,
+            "hue_secondary": None,
+            "sat": mean_sat,
+            "conf": conf,
+            "mode": mode,
         }
 
     shc = _zone_combine("shadows")

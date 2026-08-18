@@ -152,9 +152,7 @@ def _assert_close_lists(a: list[float], b: list[float], tol: float = 1e-5) -> No
 class TestColorzonesPacking:
     def test_size_matches(self) -> None:
         assert curve_iop_size("colorzones") == COLORZONES_SIZE
-        assert COLORZONES_SIZE == struct.calcsize(
-            "<i" + "20f" * 6 + "3i3ifiI"
-        )
+        assert COLORZONES_SIZE == struct.calcsize("<i" + "20f" * 6 + "3i3ifiI")
 
     def test_pack_unpack_identity(self) -> None:
         p = apply_curve_template_colorzones("identity")
@@ -177,10 +175,17 @@ class TestColorzonesPacking:
         assert p2.mode == 1
 
     def test_pack_unpack_endpoints_preserved(self) -> None:
-        template_names = ["identity", "s_soft", "s_strong",
-                          "inverted_s_soft", "inverted_s_strong",
-                          "lift_medium", "crush_subtle",
-                          "shadow_cool", "shadow_warm"]
+        template_names = [
+            "identity",
+            "s_soft",
+            "s_strong",
+            "inverted_s_soft",
+            "inverted_s_strong",
+            "lift_medium",
+            "crush_subtle",
+            "shadow_cool",
+            "shadow_warm",
+        ]
         for name in template_names:
             p = apply_curve_template_colorzones(name)
             blob = pack_colorzones(p)
@@ -355,9 +360,7 @@ class TestExtendedTemplates:
             if x == 0.0:
                 continue
             if 0.25 <= x <= 0.5:
-                assert y > x - 0.05, (
-                    f"matte_film shadow should be lifted at x={x}, got y={y}"
-                )
+                assert y > x - 0.05, f"matte_film shadow should be lifted at x={x}, got y={y}"
 
 
 class TestXMPCodecIntegration:
@@ -427,17 +430,19 @@ class TestEndToEndPipeline:
 
         plugins_xml: list[dict] = []
         for i, plg in enumerate(validated.plugins):
-            plugins_xml.append({
-                "num": i,
-                "module": 0,
-                "operation": plg.operation,
-                "params": dict(plg.params),
-                "enabled": 1 if plg.enabled else 0,
-                "blendop_version": 13,
-                "multi_priority": plg.multi_priority,
-                "multi_name": plg.multi_name,
-                "multi_name_hand_edited": 0,
-            })
+            plugins_xml.append(
+                {
+                    "num": i,
+                    "module": 0,
+                    "operation": plg.operation,
+                    "params": dict(plg.params),
+                    "enabled": 1 if plg.enabled else 0,
+                    "blendop_version": 13,
+                    "multi_priority": plg.multi_priority,
+                    "multi_name": plg.multi_name,
+                    "multi_name_hand_edited": 0,
+                }
+            )
 
         xml_str = build_dtstyle_xml(
             name=validated.style_name,
@@ -473,6 +478,7 @@ class TestEndToEndWithComposer:
     def test_generate_dtstyle_uses_curve_template(self, tmp_path: Path) -> None:
         spec = _fake_vlm_response()
         from dtstylekit.vlm.validator import validate_style
+
         validated, _ = validate_style(spec, IOP_REGISTRY)
         out = tmp_path / "test.dtstyle"
         rc = generate_dtstyle(validated, presets=[], output_path=out)
@@ -503,6 +509,7 @@ def test_curve_template_combinations_round_trip(curve_op, template_name):
 
 def _make_namespace(**kwargs):
     import argparse
+
     return argparse.Namespace(**kwargs)
 
 
@@ -534,12 +541,13 @@ class TestCurvesList:
         assert "inverted_s_strong" in out
         assert "inverted_s_soft" in out
         lines_with_s_strong_alone = [
-            line for line in out.split("\n")
+            line
+            for line in out.split("\n")
             if "s_strong" in line and "inverted_s_strong" not in line
         ]
-        assert not lines_with_s_strong_alone, (
-            f"Found unexpected s_strong lines: {lines_with_s_strong_alone}"
-        )
+        assert (
+            not lines_with_s_strong_alone
+        ), f"Found unexpected s_strong lines: {lines_with_s_strong_alone}"
         assert "bleach_bypass" not in out
 
     def test_list_quiet_filter_category(self, capsys) -> None:
@@ -589,15 +597,18 @@ class TestCliIntegration:
 
     def test_cli_runs_curves_list(self) -> None:
         from dtstylekit.cli import main
+
         rc = main(["curves", "list", "--quiet"])
         assert rc == 0
 
     def test_cli_runs_curves_info(self) -> None:
         from dtstylekit.cli import main
+
         rc = main(["curves", "info", "s_strong"])
         assert rc == 0
 
     def test_cli_curves_info_unknown_returns_nonzero(self) -> None:
         from dtstylekit.cli import main
+
         rc = main(["curves", "info", "nothing"])
         assert rc != 0

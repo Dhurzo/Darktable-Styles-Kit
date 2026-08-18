@@ -139,13 +139,14 @@ class TonecurveParams:
 # int mode; int splines_version;
 # → 4 + 120×4 + 120×4 + 3×4 + 3×4 + 4 + 4 + 4 = 1024 bytes (no padding)
 COLORZONES_FMT = (
-    "<"                # little-endian
-    "i"                # channel
-    + "20f" * 3        # curve_x[3][20]
-    + "20f" * 3        # curve_y[3][20]
-    + "3i" + "3i"      # curve_num_nodes, curve_type
-    + "f"              # strength
-    + "2i"             # mode, splines_version
+    "<"  # little-endian
+    "i"  # channel
+    + "20f" * 3  # curve_x[3][20]
+    + "20f" * 3  # curve_y[3][20]
+    + "3i"
+    + "3i"  # curve_num_nodes, curve_type
+    + "f"  # strength
+    + "2i"  # mode, splines_version
 )
 COLORZONES_SIZE = struct.calcsize(COLORZONES_FMT)  # should be 1024
 
@@ -160,9 +161,9 @@ RGBCURVE_FMT = (
     + "20f" * 3
     + "3i"
     + "3i"
-    + "i"     # curve_autoscale
-    + "i"     # compensate_middle_grey
-    + "i"     # preserve_colors
+    + "i"  # curve_autoscale
+    + "i"  # compensate_middle_grey
+    + "i"  # preserve_colors
 )
 RGBCURVE_SIZE = struct.calcsize(RGBCURVE_FMT)
 
@@ -170,17 +171,7 @@ RGBCURVE_SIZE = struct.calcsize(RGBCURVE_FMT)
 # float tonecurve_x[3][20]; float tonecurve_y[3][20];
 # int tonecurve_nodes[3]; int tonecurve_type[3]; int tonecurve_autoscale_ab;
 # int tonecurve_preset; int tonecurve_unbound_ab; int preserve_colors
-TONECURVE_FMT = (
-    "<"
-    + "20f" * 3
-    + "20f" * 3
-    + "3i"
-    + "3i"
-    + "i"
-    + "i"
-    + "i"
-    + "i"
-)
+TONECURVE_FMT = "<" + "20f" * 3 + "20f" * 3 + "3i" + "3i" + "i" + "i" + "i" + "i"
 TONECURVE_SIZE = struct.calcsize(TONECURVE_FMT)
 
 
@@ -189,7 +180,9 @@ TONECURVE_SIZE = struct.calcsize(TONECURVE_FMT)
 # ---------------------------------------------------------------------------
 
 
-def _pad_nodes(nodes: Sequence[tuple[float, float]], max_n: int = MAX_CURVE_NODES) -> tuple[list[float], list[float]]:
+def _pad_nodes(
+    nodes: Sequence[tuple[float, float]], max_n: int = MAX_CURVE_NODES
+) -> tuple[list[float], list[float]]:
     """Pad an ``(x, y)`` list to exactly ``max_n`` entries by repeating
     the last point.  Padded entries must extend the curve monotonically
     so Darktable's spline solver does not stall."""
@@ -221,11 +214,11 @@ def _apply_template_to_channels(
 
     if "all" in template.channels:
         src_x, src_y = _pad_nodes(template.nodes_per_channel["all"])
-        curve_x = [src_x[:] for _ in range(3)]
-        curve_y = [src_y[:] for _ in range(3)]
+        curve_x: list[list[float]] = [src_x[:] for _ in range(3)]
+        curve_y: list[list[float]] = [src_y[:] for _ in range(3)]
     else:
-        curve_x: list[list[float]] = []
-        curve_y: list[list[float]] = []
+        curve_x = []
+        curve_y = []
         for ch in ["r", "g", "b"]:
             if ch in template.nodes_per_channel:
                 xs, ys = _pad_nodes(template.nodes_per_channel[ch])
@@ -243,21 +236,21 @@ def _apply_template_to_channels(
 # ---------------------------------------------------------------------------
 
 
-def apply_curve_template_colorzones(template_name: str, **kwargs) -> ColorzonesParams:
+def apply_curve_template_colorzones(template_name: str, **kwargs: float | int) -> ColorzonesParams:
     """Build a :class:`ColorzonesParams` from a named template."""
     template = get_template(template_name)
     cx, cy = _apply_template_to_channels(template)
     n = len(template.nodes_per_channel.get(template.channels[0], []))
     n_nodes = [n, n, n]
     return ColorzonesParams(
-        channel=kwargs.get("channel", 0),
+        channel=int(kwargs.get("channel", 0)),
         curve_x=cx,
         curve_y=cy,
         curve_num_nodes=n_nodes,
         curve_type=[MONOTONE_HERMITE] * 3,
         strength=kwargs.get("strength", 0.0),
-        mode=kwargs.get("mode", ZONES_SMOOTH),
-        splines_version=kwargs.get("splines_version", 1),
+        mode=int(kwargs.get("mode", ZONES_SMOOTH)),
+        splines_version=int(kwargs.get("splines_version", 1)),
     )
 
 
@@ -267,8 +260,12 @@ def pack_colorzones(params: ColorzonesParams) -> bytes:
     return struct.pack(
         COLORZONES_FMT,
         params.channel,
-        *params.curve_x[0], *params.curve_x[1], *params.curve_x[2],
-        *params.curve_y[0], *params.curve_y[1], *params.curve_y[2],
+        *params.curve_x[0],
+        *params.curve_x[1],
+        *params.curve_x[2],
+        *params.curve_y[0],
+        *params.curve_y[1],
+        *params.curve_y[2],
         *params.curve_num_nodes,
         *params.curve_type,
         params.strength,
@@ -312,17 +309,20 @@ def unpack_colorzones(blob: bytes) -> ColorzonesParams:
 # ---------------------------------------------------------------------------
 
 
-def apply_curve_template_rgbcurve(template_name: str, **kwargs) -> RGBCurveParams:
+def apply_curve_template_rgbcurve(template_name: str, **kwargs: float | int) -> RGBCurveParams:
     template = get_template(template_name)
     cx, cy = _apply_template_to_channels(template)
+    curve_num_nodes = kwargs.get("curve_num_nodes", [5, 5, 5])
+    if not isinstance(curve_num_nodes, list):
+        curve_num_nodes = [5, 5, 5]
     return RGBCurveParams(
         curve_nodes_x=cx,
         curve_nodes_y=cy,
-        curve_num_nodes=kwargs.get("curve_num_nodes", [5, 5, 5]),
+        curve_num_nodes=curve_num_nodes,
         curve_type=[MONOTONE_HERMITE] * 3,
-        curve_autoscale=kwargs.get("curve_autoscale", 1),
-        compensate_middle_grey=kwargs.get("compensate_middle_grey", 0),
-        preserve_colors=kwargs.get("preserve_colors", 0),
+        curve_autoscale=int(kwargs.get("curve_autoscale", 1)),
+        compensate_middle_grey=int(kwargs.get("compensate_middle_grey", 0)),
+        preserve_colors=int(kwargs.get("preserve_colors", 0)),
     )
 
 
@@ -330,8 +330,12 @@ def pack_rgbcurve(params: RGBCurveParams) -> bytes:
     params.validate()
     return struct.pack(
         RGBCURVE_FMT,
-        *params.curve_nodes_x[0], *params.curve_nodes_x[1], *params.curve_nodes_x[2],
-        *params.curve_nodes_y[0], *params.curve_nodes_y[1], *params.curve_nodes_y[2],
+        *params.curve_nodes_x[0],
+        *params.curve_nodes_x[1],
+        *params.curve_nodes_x[2],
+        *params.curve_nodes_y[0],
+        *params.curve_nodes_y[1],
+        *params.curve_nodes_y[2],
         *params.curve_num_nodes,
         *params.curve_type,
         params.curve_autoscale,
@@ -342,9 +346,7 @@ def pack_rgbcurve(params: RGBCurveParams) -> bytes:
 
 def unpack_rgbcurve(blob: bytes) -> RGBCurveParams:
     if len(blob) != RGBCURVE_SIZE:
-        raise ValueError(
-            f"rgbcurve blob must be exactly {RGBCURVE_SIZE} bytes, got {len(blob)}"
-        )
+        raise ValueError(f"rgbcurve blob must be exactly {RGBCURVE_SIZE} bytes, got {len(blob)}")
     parts = struct.unpack(RGBCURVE_FMT, blob)
     return RGBCurveParams(
         curve_nodes_x=[list(parts[0:20]), list(parts[20:40]), list(parts[40:60])],
@@ -362,7 +364,7 @@ def unpack_rgbcurve(blob: bytes) -> RGBCurveParams:
 # ---------------------------------------------------------------------------
 
 
-def apply_curve_template_tonecurve(template_name: str, **kwargs) -> TonecurveParams:
+def apply_curve_template_tonecurve(template_name: str, **kwargs: float | int) -> TonecurveParams:
     template = get_template(template_name)
     cx, cy = _apply_template_to_channels(template)
     n = len(template.nodes_per_channel.get(template.channels[0], []))
@@ -371,10 +373,10 @@ def apply_curve_template_tonecurve(template_name: str, **kwargs) -> TonecurvePar
         tonecurve_y=cy,
         tonecurve_nodes=[n, n, n],
         tonecurve_type=[MONOTONE_HERMITE] * 3,
-        tonecurve_autoscale_ab=kwargs.get("tonecurve_autoscale_ab", 1),
-        tonecurve_preset=kwargs.get("tonecurve_preset", 0),
-        tonecurve_unbound_ab=kwargs.get("tonecurve_unbound_ab", 1),
-        preserve_colors=kwargs.get("preserve_colors", 0),
+        tonecurve_autoscale_ab=int(kwargs.get("tonecurve_autoscale_ab", 1)),
+        tonecurve_preset=int(kwargs.get("tonecurve_preset", 0)),
+        tonecurve_unbound_ab=int(kwargs.get("tonecurve_unbound_ab", 1)),
+        preserve_colors=int(kwargs.get("preserve_colors", 0)),
     )
 
 
@@ -382,8 +384,12 @@ def pack_tonecurve(params: TonecurveParams) -> bytes:
     params.validate()
     return struct.pack(
         TONECURVE_FMT,
-        *params.tonecurve_x[0], *params.tonecurve_x[1], *params.tonecurve_x[2],
-        *params.tonecurve_y[0], *params.tonecurve_y[1], *params.tonecurve_y[2],
+        *params.tonecurve_x[0],
+        *params.tonecurve_x[1],
+        *params.tonecurve_x[2],
+        *params.tonecurve_y[0],
+        *params.tonecurve_y[1],
+        *params.tonecurve_y[2],
         *params.tonecurve_nodes,
         *params.tonecurve_type,
         params.tonecurve_autoscale_ab,
@@ -395,9 +401,7 @@ def pack_tonecurve(params: TonecurveParams) -> bytes:
 
 def unpack_tonecurve(blob: bytes) -> TonecurveParams:
     if len(blob) != TONECURVE_SIZE:
-        raise ValueError(
-            f"tonecurve blob must be exactly {TONECURVE_SIZE} bytes, got {len(blob)}"
-        )
+        raise ValueError(f"tonecurve blob must be exactly {TONECURVE_SIZE} bytes, got {len(blob)}")
     parts = struct.unpack(TONECURVE_FMT, blob)
     return TonecurveParams(
         tonecurve_x=[list(parts[0:20]), list(parts[20:40]), list(parts[40:60])],
@@ -417,13 +421,18 @@ def unpack_tonecurve(blob: bytes) -> TonecurveParams:
 
 
 _CURVE_IOPS = {
-    "colorzones": (pack_colorzones, unpack_colorzones, apply_curve_template_colorzones, COLORZONES_SIZE),
+    "colorzones": (
+        pack_colorzones,
+        unpack_colorzones,
+        apply_curve_template_colorzones,
+        COLORZONES_SIZE,
+    ),
     "rgbcurve": (pack_rgbcurve, unpack_rgbcurve, apply_curve_template_rgbcurve, RGBCURVE_SIZE),
     "tonecurve": (pack_tonecurve, unpack_tonecurve, apply_curve_template_tonecurve, TONECURVE_SIZE),
 }
 
 
-def apply_curve_template(op: str, template_name: str, **kwargs) -> bytes:
+def apply_curve_template(op: str, template_name: str, **kwargs: float | int) -> bytes:
     """High-level convenience: apply a named template to a curve-IOP.
 
     Args:
@@ -439,7 +448,7 @@ def apply_curve_template(op: str, template_name: str, **kwargs) -> bytes:
     if op not in _CURVE_IOPS:
         raise ValueError(f"{op!r} is not a curve-based IOP")
     pack, _, apply, _ = _CURVE_IOPS[op]
-    return pack(apply(template_name, **kwargs))
+    return pack(apply(template_name, **kwargs))  # type: ignore[no-any-return, operator]
 
 
 def curve_iop_size(op: str) -> int:

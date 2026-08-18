@@ -27,30 +27,30 @@ This project pivots from "LLM generates binary blobs" to "VLM selects/composes v
 ## Project Snapshot
 > See `plan.md` → `## Project Snapshot`
 
-**Runtime**: Python 3.11+  
-**Language**: Python (type-hinted, dataclasses, pathlib)  
-**VLM Runtime**: Ollama (local) — default `gemma3:27b`; also `llava:7b`, `gemma3:4b`, `llama3.2-vision:11b` (override with `--model`)  
-**Database**: SQLite (preset index + semantic embeddings)  
-**Key Libraries**: Pillow, numpy, exifread, ollama (Python client), sqlite3, xml.etree, struct, zlib, base64, sentence-transformers (for embeddings)  
-**Folder Structure**:  
-- `dtstylekit/` — package root  
-- `dtstylekit/codec/` — XMP codec, blendop, IOP registry  
-- `dtstylekit/presets/` — preset parser, indexer, semantic search  
-- `dtstylekit/analyzer/` — image analysis (histogram, EXIF, scene detection)  
-- `dtstylekit/vlm/` — prompt builder, VLM client, response parser  
-- `dtstylekit/composer/` — style composer, serializer, report generator  
-- `dtstylekit/curves/` — curve templates + pack/unpack for curve-based IOPs (added post-plan)  
-- `dtstylekit/paths.py` — portable project-root path resolution (added post-plan)  
-- `dtstylekit/cli.py` — entry point (generate/analyze, preset, vlm, curves subcommands)  
-- `tests/` — round-trip tests with real darktable  
-- `data/presets/` — symlink to `../../data/styles/` (534 .dtstyle files) 
+**Runtime**: Python 3.11+
+**Language**: Python (type-hinted, dataclasses, pathlib)
+**VLM Runtime**: Ollama (local) — default `gemma3:27b`; also `llava:7b`, `gemma3:4b`, `llama3.2-vision:11b` (override with `--model`)
+**Database**: SQLite (preset index + semantic embeddings)
+**Key Libraries**: Pillow, numpy, exifread, ollama (Python client), sqlite3, xml.etree, struct, zlib, base64, sentence-transformers (for embeddings)
+**Folder Structure**:
+- `dtstylekit/` — package root
+- `dtstylekit/codec/` — XMP codec, blendop, IOP registry
+- `dtstylekit/presets/` — preset parser, indexer, semantic search
+- `dtstylekit/analyzer/` — image analysis (histogram, EXIF, scene detection)
+- `dtstylekit/vlm/` — prompt builder, VLM client, response parser
+- `dtstylekit/composer/` — style composer, serializer, report generator
+- `dtstylekit/curves/` — curve templates + pack/unpack for curve-based IOPs (added post-plan)
+- `dtstylekit/paths.py` — portable project-root path resolution (added post-plan)
+- `dtstylekit/cli.py` — entry point (generate/analyze, preset, vlm, curves subcommands)
+- `tests/` — round-trip tests with real darktable
+- `data/presets/` — symlink to `../../data/styles/` (534 .dtstyle files)
 
-**Conventions**:  
-- Type hints everywhere, `dataclass` for data structures  
-- `struct.pack` format strings per IOP (little-endian `<`)  
-- Default blendop blob stored as constant (420 bytes, verified)  
-- JSON schema for VLM output validation  
-- Embeddings: `sentence-transformers/all-MiniLM-L6-v2` (384-dim) for semantic search  
+**Conventions**:
+- Type hints everywhere, `dataclass` for data structures
+- `struct.pack` format strings per IOP (little-endian `<`)
+- Default blendop blob stored as constant (420 bytes, verified)
+- JSON schema for VLM output validation
+- Embeddings: `sentence-transformers/all-MiniLM-L6-v2` (384-dim) for semantic search
 
 ## Phases
 

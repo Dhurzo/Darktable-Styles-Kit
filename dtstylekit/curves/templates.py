@@ -18,6 +18,7 @@ exposes both all-channel and per-channel templates.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ def _pin_endpoints(nodes: list[tuple[float, float]]) -> list[tuple[float, float]
     return out
 
 
-def _resample(n: int, fn) -> list[tuple[float, float]]:
+def _resample(n: int, fn: Callable[[float], float]) -> list[tuple[float, float]]:
     """Sample a function in [0, 1] at ``n`` evenly spaced nodes, pin
     endpoints, and clamp the output to [0, 1].
 
@@ -106,7 +107,13 @@ def _contrast_s(n: int = 7, strength: float = 0.4) -> list[tuple[float, float]]:
     * strength>0  ⇒ increased contrast
     """
     s = max(0.0, min(1.0, strength))
-    return _resample(n, lambda x: 0.5 + math.sin(math.pi * (x - 0.5)) * s / 2.0 + (x - 0.5) * (1 - s) * 0 + (x - 0.5) * (1 - s))
+    return _resample(
+        n,
+        lambda x: 0.5
+        + math.sin(math.pi * (x - 0.5)) * s / 2.0
+        + (x - 0.5) * (1 - s) * 0
+        + (x - 0.5) * (1 - s),
+    )
 
 
 def _contrast_s_v2(n: int = 7, strength: float = 0.5) -> list[tuple[float, float]]:
@@ -142,10 +149,9 @@ def _crush_blacks(crush: float = 0.05, n: int = 5) -> list[tuple[float, float]]:
     return _resample(
         n,
         # Above x=0.15 follow a steeper-than-identity line
-        lambda x: 0.0 if x == 0.0 else (
-            (x ** (1.0 + crush * 4.0)) * (1.0 / (1.0 ** (1.0 + crush * 4.0)))
-            if x > 0 else 0.0
-        ),
+        lambda x: 0.0
+        if x == 0.0
+        else ((x ** (1.0 + crush * 4.0)) * (1.0 / (1.0 ** (1.0 + crush * 4.0))) if x > 0 else 0.0),
     )
 
 
@@ -220,6 +226,7 @@ def _bleach_bypass(n: int = 9) -> list[tuple[float, float]]:
     Implemented piecewise: lifted blacks below 0.15, flat mids 0.15-0.55,
     then aggressive contrast between 0.55 and 1.0.
     """
+
     def fn(x: float) -> float:
         if x < 0.15:
             # Lift: y = 0.18 + (0.65 * x) — pushes blacks towards 0.18
@@ -244,6 +251,7 @@ def _sepia_warm(n: int = 5) -> list[tuple[float, float]]:
     Curve is mostly linear with a small lift in the mid-range and a
     gentle tilt down at the very top to keep the print feel.
     """
+
     def fn(x: float) -> float:
         # Lift mids ~5% darker for sepia feel
         if x < 0.1:
@@ -258,6 +266,7 @@ def _sepia_warm(n: int = 5) -> list[tuple[float, float]]:
 
 def _sepia_cool(n: int = 5) -> list[tuple[float, float]]:
     """Cool variant: stronger mid-shadow lift, gentle highlight push."""
+
     def fn(x: float) -> float:
         if x < 0.1:
             return x * 0.85
@@ -275,6 +284,7 @@ def _cross_process_warm(n: int = 7) -> list[tuple[float, float]]:
     colour channels (cyan/magenta) — here we emulate it with a curve
     that lifts shadows, holds mids, and rolls the highlights warmly.
     """
+
     def fn(x: float) -> float:
         if x < 0.18:
             # Cool/lifted shadow tone
@@ -297,11 +307,12 @@ def _matte_film(n: int = 7) -> list[tuple[float, float]]:
     Combines lift_blacks (0.18) with a soft highlight rolloff and a
     mild toe compression for the print feel.
     """
+
     def fn(x: float) -> float:
         # Toe (0..0.15): crush slightly then lift
         if x < 0.15:
-            toe = x ** 1.3  # slow rise
-            return 0.18 + toe * (0.42 - 0.18) / 0.42  # map to 0.18..0.42
+            toe = x**1.3  # slow rise
+            return float(0.18 + toe * (0.42 - 0.18) / 0.42)  # map to 0.18..0.42
         # Mids (0.15..0.7): linear-ish but slightly compressed
         if x < 0.7:
             t = (x - 0.15) / (0.7 - 0.15)
@@ -324,204 +335,242 @@ def _build_registry() -> list[CurveTemplate]:
     reg: list[CurveTemplate] = []
 
     # ---- Identity ---------------------------------------------------------
-    reg.append(CurveTemplate(
-        name="identity",
-        title="Identity (no change)",
-        category="tone",
-        description="Linear y=x — no contrast or color changes. Use as neutral baseline.",
-        channels=["all"],
-        nodes_per_channel={"all": _identity(5)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="identity",
+            title="Identity (no change)",
+            category="tone",
+            description="Linear y=x — no contrast or color changes. Use as neutral baseline.",
+            channels=["all"],
+            nodes_per_channel={"all": _identity(5)},
+        )
+    )
 
     # ---- S curves (contrast) ---------------------------------------------
-    reg.append(CurveTemplate(
-        name="s_soft",
-        title="Soft S-curve",
-        category="contrast",
-        description="Gentle global contrast: darken shadows, lift highlights, subtle mid-separation.",
-        channels=["all"],
-        nodes_per_channel={"all": _contrast_s_v2(7, strength=0.35)},
-    ))
-    reg.append(CurveTemplate(
-        name="s_strong",
-        title="Strong S-curve",
-        category="contrast",
-        description="Heavy contrast — dark blacks, bright whites, accentuated midtone separation.",
-        channels=["all"],
-        nodes_per_channel={"all": _contrast_s_v2(7, strength=0.85)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="s_soft",
+            title="Soft S-curve",
+            category="contrast",
+            description="Gentle global contrast: darken shadows, lift highlights, subtle mid-separation.",
+            channels=["all"],
+            nodes_per_channel={"all": _contrast_s_v2(7, strength=0.35)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="s_strong",
+            title="Strong S-curve",
+            category="contrast",
+            description="Heavy contrast — dark blacks, bright whites, accentuated midtone separation.",
+            channels=["all"],
+            nodes_per_channel={"all": _contrast_s_v2(7, strength=0.85)},
+        )
+    )
 
     # ---- Inverted-S (faded / vintage) ------------------------------------
-    reg.append(CurveTemplate(
-        name="inverted_s_soft",
-        title="Soft inverted-S",
-        category="vintage",
-        description="Gentle faded look: subtly pulled mids, soft highlight rolloff.",
-        channels=["all"],
-        nodes_per_channel={"all": _inverted_s(7, strength=0.30)},
-    ))
-    reg.append(CurveTemplate(
-        name="inverted_s_strong",
-        title="Strong inverted-S",
-        category="vintage",
-        description="Heavily faded / vintage look with pronounced mid pull.",
-        channels=["all"],
-        nodes_per_channel={"all": _inverted_s(7, strength=0.70)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="inverted_s_soft",
+            title="Soft inverted-S",
+            category="vintage",
+            description="Gentle faded look: subtly pulled mids, soft highlight rolloff.",
+            channels=["all"],
+            nodes_per_channel={"all": _inverted_s(7, strength=0.30)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="inverted_s_strong",
+            title="Strong inverted-S",
+            category="vintage",
+            description="Heavily faded / vintage look with pronounced mid pull.",
+            channels=["all"],
+            nodes_per_channel={"all": _inverted_s(7, strength=0.70)},
+        )
+    )
 
     # ---- Lift / crush ----------------------------------------------------
-    reg.append(CurveTemplate(
-        name="lift_subtle",
-        title="Subtle black lift",
-        category="vintage",
-        description="Lift black point by ~5 % — filmic fade, soft contrast.",
-        channels=["all"],
-        nodes_per_channel={"all": _lift_blacks(0.05, n=5)},
-    ))
-    reg.append(CurveTemplate(
-        name="lift_medium",
-        title="Medium black lift",
-        category="vintage",
-        description="Lift black point by ~12 % — clearly faded / washed-out look.",
-        channels=["all"],
-        nodes_per_channel={"all": _lift_blacks(0.12, n=5)},
-    ))
-    reg.append(CurveTemplate(
-        name="crush_subtle",
-        title="Subtle black crush",
-        category="contrast",
-        description="Deepen blacks ~5 % for cleaner contrast.",
-        channels=["all"],
-        nodes_per_channel={"all": _simple_crush(0.05, n=5)},
-    ))
-    reg.append(CurveTemplate(
-        name="crush_strong",
-        title="Strong black crush",
-        category="contrast",
-        description="Heavy black-point crush for high-contrast edge emphasis.",
-        channels=["all"],
-        nodes_per_channel={"all": _simple_crush(0.15, n=5)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="lift_subtle",
+            title="Subtle black lift",
+            category="vintage",
+            description="Lift black point by ~5 % — filmic fade, soft contrast.",
+            channels=["all"],
+            nodes_per_channel={"all": _lift_blacks(0.05, n=5)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="lift_medium",
+            title="Medium black lift",
+            category="vintage",
+            description="Lift black point by ~12 % — clearly faded / washed-out look.",
+            channels=["all"],
+            nodes_per_channel={"all": _lift_blacks(0.12, n=5)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="crush_subtle",
+            title="Subtle black crush",
+            category="contrast",
+            description="Deepen blacks ~5 % for cleaner contrast.",
+            channels=["all"],
+            nodes_per_channel={"all": _simple_crush(0.05, n=5)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="crush_strong",
+            title="Strong black crush",
+            category="contrast",
+            description="Heavy black-point crush for high-contrast edge emphasis.",
+            channels=["all"],
+            nodes_per_channel={"all": _simple_crush(0.15, n=5)},
+        )
+    )
 
     # ---- Highlight roll-off ---------------------------------------------
-    reg.append(CurveTemplate(
-        name="highlights_soft",
-        title="Soft highlight roll-off",
-        category="filmic",
-        description="Cap highlights at ~0.95 with smooth ease — filmic highlight compression. (Note: caps rather than pinning 1.0)",
-        channels=["all"],
-        nodes_per_channel={"all": _highlights_rolloff(0.95, n=5)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="highlights_soft",
+            title="Soft highlight roll-off",
+            category="filmic",
+            description="Cap highlights at ~0.95 with smooth ease — filmic highlight compression. (Note: caps rather than pinning 1.0)",
+            channels=["all"],
+            nodes_per_channel={"all": _highlights_rolloff(0.95, n=5)},
+        )
+    )
 
     # ---- Shadow tints ----------------------------------------------------
-    reg.append(CurveTemplate(
-        name="shadow_cool",
-        title="Cool shadow tint",
-        category="color",
-        description="Add cool/blue cast in the shadow region only. Suggests cinematic teal-orange or dusk lighting.",
-        channels=["all"],
-        nodes_per_channel={"all": _shadow_tint("blue", 0.08, n=5)},
-    ))
-    reg.append(CurveTemplate(
-        name="shadow_warm",
-        title="Warm shadow tint",
-        category="color",
-        description="Add amber/warm cast in the shadow region only. Classic 'moody' look; pairs with highlights_soft.",
-        channels=["all"],
-        nodes_per_channel={"all": _shadow_tint("red", 0.08, n=5)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="shadow_cool",
+            title="Cool shadow tint",
+            category="color",
+            description="Add cool/blue cast in the shadow region only. Suggests cinematic teal-orange or dusk lighting.",
+            channels=["all"],
+            nodes_per_channel={"all": _shadow_tint("blue", 0.08, n=5)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="shadow_warm",
+            title="Warm shadow tint",
+            category="color",
+            description="Add amber/warm cast in the shadow region only. Classic 'moody' look; pairs with highlights_soft.",
+            channels=["all"],
+            nodes_per_channel={"all": _shadow_tint("red", 0.08, n=5)},
+        )
+    )
 
     # ---- Low-key / High-key (general tone biases) -----------------------
     # Implementation: gain/gamma-style scaling around the midtone.
-    reg.append(CurveTemplate(
-        name="low_key",
-        title="Low-key (dark overall)",
-        category="tone",
-        description=(
-            "Compresses the upper half of the curve, darkening overall "
-            "while preserving highlight detail. Classic low-key cinematic look."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _resample(7, lambda x: x ** 1.4)},
-    ))
-    reg.append(CurveTemplate(
-        name="high_key",
-        title="High-key (bright overall)",
-        category="tone",
-        description=(
-            "Lifts the lower half of the curve while compressing "
-            "highlights toward white. Bright, airy look."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _resample(7, lambda x: x ** 0.7)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="low_key",
+            title="Low-key (dark overall)",
+            category="tone",
+            description=(
+                "Compresses the upper half of the curve, darkening overall "
+                "while preserving highlight detail. Classic low-key cinematic look."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _resample(7, lambda x: x**1.4)},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="high_key",
+            title="High-key (bright overall)",
+            category="tone",
+            description=(
+                "Lifts the lower half of the curve while compressing "
+                "highlights toward white. Bright, airy look."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _resample(7, lambda x: x**0.7)},
+        )
+    )
 
     # ---- Bleach bypass (Saving Private Ryan feel) -----------------------
     # Curve shape: very strong contrast (extreme S) + lifted blacks
     # in the lower midrange, then a roll-off near the highlights.
-    reg.append(CurveTemplate(
-        name="bleach_bypass",
-        title="Bleach bypass (Saving Private Ryan)",
-        category="filmic",
-        description=(
-            "Extreme contrast with flat mids and aggressive highlight "
-            "compression. Emulates the bleach-bypass film processing "
-            "look (lifts + crush)."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _bleach_bypass(n=9)},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="bleach_bypass",
+            title="Bleach bypass (Saving Private Ryan)",
+            category="filmic",
+            description=(
+                "Extreme contrast with flat mids and aggressive highlight "
+                "compression. Emulates the bleach-bypass film processing "
+                "look (lifts + crush)."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _bleach_bypass(n=9)},
+        )
+    )
 
     # ---- Sepia warm / cool (slight global bias) -------------------------
-    reg.append(CurveTemplate(
-        name="sepia_warm",
-        title="Sepia warm",
-        category="color",
-        description=(
-            "Mild global warm cast + slight mid-darkening. Implies a "
-            "vintage photograph. For per-channel brown tone use the "
-            "monochrome + colorbalance IOPs instead."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _sepia_warm()},
-    ))
-    reg.append(CurveTemplate(
-        name="sepia_cool",
-        title="Sepia cool",
-        category="color",
-        description=(
-            "Mild global cool/blue cast + slight mid-darkening. Harder, "
-            "more clinical vintage-photo look."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _sepia_cool()},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="sepia_warm",
+            title="Sepia warm",
+            category="color",
+            description=(
+                "Mild global warm cast + slight mid-darkening. Implies a "
+                "vintage photograph. For per-channel brown tone use the "
+                "monochrome + colorbalance IOPs instead."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _sepia_warm()},
+        )
+    )
+    reg.append(
+        CurveTemplate(
+            name="sepia_cool",
+            title="Sepia cool",
+            category="color",
+            description=(
+                "Mild global cool/blue cast + slight mid-darkening. Harder, "
+                "more clinical vintage-photo look."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _sepia_cool()},
+        )
+    )
 
     # ---- Cross-process (cyan/magenta swap on Lab-like) ------------------
-    reg.append(CurveTemplate(
-        name="cross_process_warm",
-        title="Cross-process warm",
-        category="color",
-        description=(
-            "Emulates cross-processed film: warm highlights, cool "
-            "shadows, slightly crushed mids. Pairs well with filmicrgb."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _cross_process_warm()},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="cross_process_warm",
+            title="Cross-process warm",
+            category="color",
+            description=(
+                "Emulates cross-processed film: warm highlights, cool "
+                "shadows, slightly crushed mids. Pairs well with filmicrgb."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _cross_process_warm()},
+        )
+    )
 
     # ---- Matte (filmic fade with extra contrast) -------------------------
-    reg.append(CurveTemplate(
-        name="matte_film",
-        title="Matte film print",
-        category="filmic",
-        description=(
-            "Heavy black lift + soft highlight rolloff + slight toe "
-            "compression. Emulates a film print with a darker base."
-        ),
-        channels=["all"],
-        nodes_per_channel={"all": _matte_film()},
-    ))
+    reg.append(
+        CurveTemplate(
+            name="matte_film",
+            title="Matte film print",
+            category="filmic",
+            description=(
+                "Heavy black lift + soft highlight rolloff + slight toe "
+                "compression. Emulates a film print with a darker base."
+            ),
+            channels=["all"],
+            nodes_per_channel={"all": _matte_film()},
+        )
+    )
 
     # === Sanity check: all templates must pin (0,0) and (1,1) ============
     for tmpl in reg:
@@ -572,7 +621,10 @@ def list_templates(category: str | None = None) -> list[CurveTemplate]:
 
 def render_template_summary() -> str:
     """Return a compact markdown summary of templates for VLM prompts."""
-    lines: list[str] = ["| Template | Category | Description |", "|----------|----------|-------------|"]
+    lines: list[str] = [
+        "| Template | Category | Description |",
+        "|----------|----------|-------------|",
+    ]
     for tmpl in REGISTRY:
         desc = tmpl.description.replace("\n", " ")[:90]
         lines.append(f"| `{tmpl.name}` | {tmpl.category} | {desc} |")

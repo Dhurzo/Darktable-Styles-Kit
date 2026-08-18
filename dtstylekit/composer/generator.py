@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from dtstylekit.analyzer.models import ImageAnalysis
 from dtstylekit.codec.serializer import build_dtstyle_xml
+from dtstylekit.presets.models import Preset
+from dtstylekit.vlm.models import StyleSpec
 
 from .merger import merge_presets
 
@@ -13,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 def generate_dtstyle(
-    spec,  # StyleSpec
-    presets: list,  # list[Preset]
+    spec: StyleSpec,
+    presets: list[Preset],
     output_path: Path,
-    _analysis=None,  # ImageAnalysis — reserved for context reporting
+    analysis: ImageAnalysis | None = None,
 ) -> Path:
     """Generate a `.dtstyle` file from a validated StyleSpec.
 
@@ -33,8 +36,8 @@ def generate_dtstyle(
     # Dark display-referred images (mean luminance < 0.3) must not get a
     # fresh filmicrgb instance — see merger.merge_presets(dark_image=...).
     dark_image = False
-    if _analysis is not None:
-        mean_lum = getattr(getattr(_analysis, "luminance", None), "mean", None)
+    if analysis is not None:
+        mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
         if isinstance(mean_lum, (int, float)) and not isinstance(mean_lum, bool):
             dark_image = mean_lum < 0.3
     plugins = merge_presets(presets, adjustments, dark_image=dark_image)
@@ -46,24 +49,24 @@ def generate_dtstyle(
     # re-packed by ``pack_params`` without a ``curve_preset``.
     xml_plugins: list[dict] = []
     for i, plg in enumerate(plugins):
-        xml_plugins.append({
-            "num": i,
-            "module": plg.module,
-            "operation": plg.operation,
-            "op_params_override": plg.op_params,
-            "params": {},  # not used when override is supplied
-            "enabled": 1 if plg.enabled else 0,
-            "blendop_override": plg.blendop_params or None,
-            "blendop_version": plg.blendop_version,
-            "multi_priority": plg.multi_priority,
-            "multi_name": plg.multi_name,
-            "multi_name_hand_edited": plg.multi_name_hand_edited,
-        })
+        xml_plugins.append(
+            {
+                "num": i,
+                "module": plg.module,
+                "operation": plg.operation,
+                "op_params_override": plg.op_params,
+                "params": {},  # not used when override is supplied
+                "enabled": 1 if plg.enabled else 0,
+                "blendop_override": plg.blendop_params or None,
+                "blendop_version": plg.blendop_version,
+                "multi_priority": plg.multi_priority,
+                "multi_name": plg.multi_name,
+                "multi_name_hand_edited": plg.multi_name_hand_edited,
+            }
+        )
 
     # Filter out None overrides so the serializer picks defaults
-    xml_plugins = [
-        {k: v for k, v in p.items() if v is not None} for p in xml_plugins
-    ]
+    xml_plugins = [{k: v for k, v in p.items() if v is not None} for p in xml_plugins]
 
     xml_str = build_dtstyle_xml(
         name=spec.style_name,

@@ -52,7 +52,10 @@ def render_iop_schema(registry: dict, max_iops: int = 16) -> str:
     # colorharmonizer in RGB.  (relight is deprecated in darktable and
     # deliberately not registered.)
     refinement = [
-        "temperature", "basicadj", "toneequal", "colorequal",
+        "temperature",
+        "basicadj",
+        "toneequal",
+        "colorequal",
         "colorharmonizer",
     ]
 
@@ -81,9 +84,7 @@ def render_iop_schema(registry: dict, max_iops: int = 16) -> str:
             )
             # Show scalar fields (skip the synthetic `curve_preset`)
             scalar_fields = [f for f in reg.fields if f != "curve_preset"]
-            range_summary = ", ".join(
-                f"{f}: {reg.ranges[f]}" for f in scalar_fields
-            )
+            range_summary = ", ".join(f"{f}: {reg.ranges[f]}" for f in scalar_fields)
             lines.append(f"Scalars: {range_summary}")
         else:
             fields = list(reg.ranges.keys())[:8]
@@ -95,6 +96,7 @@ def render_iop_schema(registry: dict, max_iops: int = 16) -> str:
     # in the registry or the templates module is importable).
     try:
         from dtstylekit.curves import render_template_summary
+
         lines.append("---")
         lines.append("")
         lines.append("## Curve Templates")

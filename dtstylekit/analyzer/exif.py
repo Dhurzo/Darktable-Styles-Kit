@@ -50,9 +50,7 @@ def extract_exif(path: str) -> dict[str, Any]:
 
     try:
         with p.open("rb") as f:
-            tags = exifread.process_file(
-                f, details=True, stop_tag="UNDEF", strict=False
-            )
+            tags = exifread.process_file(f, details=True, stop_tag="UNDEF", strict=False)
     except (OSError, ValueError, AttributeError):
         # Corrupt file, truncated header, etc. — treat as empty.
         return {}

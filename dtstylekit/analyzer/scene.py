@@ -24,8 +24,8 @@ _TONAL_SHADOWS = 0.18
 _TONAL_HIGHLIGHTS = 0.75
 
 # Brightness buckets, applied to luminance mean.
-_BRIGHT_HIGH_KEY = 0.65   # luma >= this → high-key
-_BRIGHT_LOW_KEY = 0.30    # luma <  this → low-key
+_BRIGHT_HIGH_KEY = 0.65  # luma >= this → high-key
+_BRIGHT_LOW_KEY = 0.30  # luma <  this → low-key
 
 # Histogram dynamic-range heuristic: stdev across all channels.
 _CONTRAST_HIGH = 0.18

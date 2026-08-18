@@ -171,7 +171,8 @@ def merge_presets(
                 logger.info(
                     "Skipping %s from preset %r — operation already "
                     "contributed by an earlier preset",
-                    plg.operation, preset.name,
+                    plg.operation,
+                    preset.name,
                 )
                 continue
 
@@ -204,13 +205,15 @@ def merge_presets(
                     )
                     logger.info(
                         "Multi-instance conflict: %s — created instance %r",
-                        plg.operation, mname,
+                        plg.operation,
+                        mname,
                     )
                 else:
                     logger.info(
                         "Skipping duplicate %s from preset %r — "
                         "first occurrence wins (no multi-instance)",
-                        plg.operation, preset.name,
+                        plg.operation,
+                        preset.name,
                     )
                 continue
 
@@ -265,9 +268,7 @@ def merge_presets(
                 # would read the 420 blendop bytes as the IOP's parameters
                 # and render garbage (corrupted/black image).  Skip the
                 # adjustment and keep the style free of this module.
-                logger.warning(
-                    "Pack %s failed: %s — omitting adjustment from style", op, exc
-                )
+                logger.warning("Pack %s failed: %s — omitting adjustment from style", op, exc)
                 continue
             merged[(op, "")] = ComposerPlugin(
                 operation=op,
@@ -313,7 +314,8 @@ def merge_presets(
             pick.enabled = True
             logger.info(
                 "Enabled %s instance %r to apply adjustment",
-                op, pick.multi_name,
+                op,
+                pick.multi_name,
             )
 
     return list(merged.values())

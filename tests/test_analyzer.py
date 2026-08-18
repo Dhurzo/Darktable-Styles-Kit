@@ -22,8 +22,11 @@ from dtstylekit.analyzer.pipeline import (
 from dtstylekit.analyzer.scene import detect_scene
 
 
-def make_image(mode: str = "RGB", size: tuple[int, int] = (64, 64),
-               color: tuple[int, int, int] = (128, 128, 128)) -> Image.Image:
+def make_image(
+    mode: str = "RGB",
+    size: tuple[int, int] = (64, 64),
+    color: tuple[int, int, int] = (128, 128, 128),
+) -> Image.Image:
     return Image.new(mode, size, color)
 
 
@@ -102,26 +105,28 @@ class TestPipeline:
 # ---------------------------------------------------------------------------
 
 
-def _solid_color_image(path: Path, size: tuple[int, int] = (128, 128),
-                      color: tuple[int, int, int] = (128, 128, 128)) -> Path:
+def _solid_color_image(
+    path: Path, size: tuple[int, int] = (128, 128), color: tuple[int, int, int] = (128, 128, 128)
+) -> Path:
     """Write a solid-color JPEG. Luminance is derived from BT.709; the tonal
     zone (shadows/midtones/highlights) depends on the color."""
     Image.new("RGB", size, color).save(path, format="JPEG")
     return path
 
 
-def _gradient_image(path: Path, top_color: tuple[int, int, int],
-                    bottom_color: tuple[int, int, int],
-                    size: tuple[int, int] = (128, 512)) -> Path:
+def _gradient_image(
+    path: Path,
+    top_color: tuple[int, int, int],
+    bottom_color: tuple[int, int, int],
+    size: tuple[int, int] = (128, 512),
+) -> Path:
     """Vertical gradient JPEG. Top row = top_color, bottom row = bottom_color.
     Useful for placing saturated pixels in a specific tonal zone."""
     w, h = size
     arr = np.zeros((h, w, 3), dtype=np.uint8)
     for y in range(h):
         t = y / max(h - 1, 1)
-        arr[y, :, :] = [
-            int(top_color[c] * (1 - t) + bottom_color[c] * t) for c in range(3)
-        ]
+        arr[y, :, :] = [int(top_color[c] * (1 - t) + bottom_color[c] * t) for c in range(3)]
     Image.fromarray(arr, "RGB").save(path, format="JPEG")
     return path
 
@@ -129,6 +134,7 @@ def _gradient_image(path: Path, top_color: tuple[int, int, int],
 def _hue_to_rgb(hue_deg: float, sat: float = 1.0, lum: float = 0.5) -> tuple[int, int, int]:
     """Convert HSV to 0-255 RGB. lum here is HSV value, not luminance."""
     import colorsys
+
     r, g, b = colorsys.hsv_to_rgb((hue_deg % 360) / 360.0, sat, lum)
     return int(r * 255), int(g * 255), int(b * 255)
 
@@ -254,7 +260,7 @@ class TestAnalyzeReferenceHues:
         # Two references: one very slightly orange-red (hue ~5°), one slightly
         # pink-red (hue ~355°). Arithmetic mean would be 180° (catastrophic).
         # Circular mean should land near 0°.
-        c1 = _dark_saturated_color(5, scale=0.2)   # near-red, slightly orange
+        c1 = _dark_saturated_color(5, scale=0.2)  # near-red, slightly orange
         c2 = _dark_saturated_color(355, scale=0.2)  # near-red, slightly pink
         p1 = _solid_color_image(tmp_path / "red1.jpg", color=c1)
         p2 = _solid_color_image(tmp_path / "red2.jpg", color=c2)
@@ -262,9 +268,7 @@ class TestAnalyzeReferenceHues:
         sh = result["shadows_hue"]
         assert sh is not None
         # Should be near 0° (or 360°), NOT near 180°
-        assert min(abs(sh - 0), abs(sh - 360)) < 15.0, (
-            f"expected hue near 0/360, got {sh}"
-        )
+        assert min(abs(sh - 0), abs(sh - 360)) < 15.0, f"expected hue near 0/360, got {sh}"
 
     def test_dispersion_lowers_confidence_for_disagreeing_refs(self, tmp_path: Path) -> None:
         # Two refs with strongly different hues in shadows: 0° and 120°
@@ -291,6 +295,7 @@ class TestAnalyzeReferenceHues:
             hue = 200.0 if y < h / 2 else 30.0
             # Use HSV→RGB then scale down to keep luminance < 0.25
             import colorsys
+
             r, g, b = colorsys.hsv_to_rgb((hue % 360) / 360.0, 0.9, 0.4)
             # Scale to a luminance just below 0.25 threshold in BT.709
             # RGB ~ (0.1, 0.18, 0.27) for teal at V=0.4 -> luminance ~0.18
@@ -426,9 +431,7 @@ class TestGlobalGradeDetection:
         # ±45° of their joint mean): 15/38/45, 10/35/42, 20/40/48.
         refs = [
             _triple_zone_image(tmp_path / f"warm{i}.jpg", sh, mt, hi)
-            for i, (sh, mt, hi) in enumerate(
-                [(15, 38, 45), (10, 35, 42), (20, 40, 48)]
-            )
+            for i, (sh, mt, hi) in enumerate([(15, 38, 45), (10, 35, 42), (20, 40, 48)])
         ]
         result = analyze_reference_hues(refs)
         for zone in ("shadows", "midtones", "highlights"):
@@ -443,8 +446,8 @@ class TestGlobalGradeDetection:
     def test_split_grade_is_not_global(self, tmp_path: Path) -> None:
         # One ref: teal shadows (200°) only; another: warm highlights (30°)
         # only. No ref has a coherent tint across ALL zones → not global.
-        teal = _dark_saturated_color(200, scale=0.2)          # shadows-only
-        warm_hi = _hue_to_rgb(30, sat=0.9, lum=0.9)           # highlights-only
+        teal = _dark_saturated_color(200, scale=0.2)  # shadows-only
+        warm_hi = _hue_to_rgb(30, sat=0.9, lum=0.9)  # highlights-only
         p1 = _solid_color_image(tmp_path / "teal.jpg", color=teal)
         p2 = _solid_color_image(tmp_path / "warmhi.jpg", color=warm_hi)
         result = analyze_reference_hues([p1, p2])
@@ -462,14 +465,18 @@ class TestReferenceVoteAggregation:
         # 4 teal refs (200°) + 1 green ref (90°), all in shadows.
         refs = []
         for i in range(4):
-            refs.append(_solid_color_image(
-                tmp_path / f"teal{i}.jpg",
-                color=_dark_saturated_color(200, scale=0.2),
-            ))
-        refs.append(_solid_color_image(
-            tmp_path / "green.jpg",
-            color=_dark_saturated_color(90, scale=0.2),
-        ))
+            refs.append(
+                _solid_color_image(
+                    tmp_path / f"teal{i}.jpg",
+                    color=_dark_saturated_color(200, scale=0.2),
+                )
+            )
+        refs.append(
+            _solid_color_image(
+                tmp_path / "green.jpg",
+                color=_dark_saturated_color(90, scale=0.2),
+            )
+        )
         result = analyze_reference_hues(refs)
         sh = result["shadows_hue"]
         assert sh is not None
@@ -481,15 +488,19 @@ class TestReferenceVoteAggregation:
         # 2 teal + 3 green → 40% agreement → neutral (no tint invented).
         refs = []
         for i in range(2):
-            refs.append(_solid_color_image(
-                tmp_path / f"teal{i}.jpg",
-                color=_dark_saturated_color(200, scale=0.2),
-            ))
+            refs.append(
+                _solid_color_image(
+                    tmp_path / f"teal{i}.jpg",
+                    color=_dark_saturated_color(200, scale=0.2),
+                )
+            )
         for i in range(3):
-            refs.append(_solid_color_image(
-                tmp_path / f"green{i}.jpg",
-                color=_dark_saturated_color(90, scale=0.2),
-            ))
+            refs.append(
+                _solid_color_image(
+                    tmp_path / f"green{i}.jpg",
+                    color=_dark_saturated_color(90, scale=0.2),
+                )
+            )
         result = analyze_reference_hues(refs)
         assert result["shadows_hue_mode"] == "neutral"
         assert result["shadows_hue"] is None

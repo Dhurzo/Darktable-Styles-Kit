@@ -57,21 +57,19 @@ def probe(darktable_root: Path) -> list[dict]:
                 continue
             n_bytes = len(hex_params) // 2
             reg = IOP_REGISTRY.get(op)
-            legacy_match = bool(
-                reg and n_bytes in (reg.legacy_size_bytes or ())
+            legacy_match = bool(reg and n_bytes in (reg.legacy_size_bytes or ()))
+            records.append(
+                {
+                    "file": xmp.name,
+                    "op": op,
+                    "modversion": int(modversion),
+                    "bytes": n_bytes,
+                    "registered": reg is not None,
+                    "registered_size": reg.size_bytes if reg else None,
+                    "matches": bool(reg and (reg.size_bytes == n_bytes or legacy_match)),
+                    "legacy_match": legacy_match,
+                }
             )
-            records.append({
-                "file": xmp.name,
-                "op": op,
-                "modversion": int(modversion),
-                "bytes": n_bytes,
-                "registered": reg is not None,
-                "registered_size": reg.size_bytes if reg else None,
-                "matches": bool(reg and (
-                    reg.size_bytes == n_bytes or legacy_match
-                )),
-                "legacy_match": legacy_match,
-            })
     return records
 
 
@@ -103,13 +101,14 @@ def report(darktable_root: Path) -> str:
         lines.append(f"{op:<28}{r['modversion']:<5}{r['bytes']:<7}{status}")
 
     mismatches = [
-        r for r in distinct.values()
-        if r["registered"] and not r["matches"]
-        and r["registered_size"] is not None
+        r
+        for r in distinct.values()
+        if r["registered"] and not r["matches"] and r["registered_size"] is not None
     ]
     unregistered = [op for op, r in distinct.items() if not r["registered"]]
     unverified = [
-        op for op, r in distinct.items()
+        op
+        for op, r in distinct.items()
         if r["registered"] and not r["matches"] and r["registered_size"] is None
     ]
     lines.append("")
@@ -125,7 +124,8 @@ def report(darktable_root: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "darktable_root", type=Path,
+        "darktable_root",
+        type=Path,
         help="Path to the darktable checkout (e.g. /path/to/darktable)",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON")

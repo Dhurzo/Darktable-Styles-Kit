@@ -7,16 +7,17 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import sys
 from collections import defaultdict
 
 
-def add_curves_parser(subparsers) -> None:
+def add_curves_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register 'curves' subcommand."""
     parser = subparsers.add_parser(
         "curves",
         help="Inspect available curve templates for curve-based IOPs "
-             "(colorzones, rgbcurve, tonecurve)",
+        "(colorzones, rgbcurve, tonecurve)",
     )
     sub = parser.add_subparsers(dest="curves_command", required=True)
 
@@ -46,7 +47,7 @@ def add_curves_parser(subparsers) -> None:
     info_cmd.add_argument("name", help="Template name (e.g. 's_strong')")
 
 
-def cmd_curves_list(args) -> int:
+def cmd_curves_list(args: argparse.Namespace) -> int:
     """List all curve templates, optionally filtered by category."""
     from dtstylekit.curves import REGISTRY, list_templates
 
@@ -100,7 +101,7 @@ def cmd_curves_list(args) -> int:
     return 0
 
 
-def cmd_curves_info(args) -> int:
+def cmd_curves_info(args: argparse.Namespace) -> int:
     """Print details of a single template."""
     from dtstylekit.curves import get_template
 
@@ -133,13 +134,13 @@ def cmd_curves_info(args) -> int:
     print("Example JSON:")
     print('  {"operation": "tonecurve", "params": {')
     print(f'    "curve_preset": "{tmpl.name}",')
-    print('    ...other scalars...')
-    print('  }}')
+    print("    ...other scalars...")
+    print("  }}")
 
     return 0
 
 
-def cmd_curves(args) -> int:
+def cmd_curves(args: argparse.Namespace) -> int:
     """Dispatch based on the chosen subcommand."""
     if args.curves_command == "list":
         return cmd_curves_list(args)

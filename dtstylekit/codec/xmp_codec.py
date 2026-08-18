@@ -25,7 +25,7 @@ def encode_xmp(data: bytes, compress_threshold: int = 100) -> str:
     if len(data) > compress_threshold:
         compressed = zlib.compress(data)
         factor = min(len(data) // len(compressed) + 1, 99)
-        b64 = base64.b64encode(compressed).decode('ascii')
+        b64 = base64.b64encode(compressed).decode("ascii")
         return f"gz{factor // 10}{factor % 10}{b64}"
     else:
         return data.hex()
@@ -52,7 +52,7 @@ def decode_xmp(s: str) -> bytes:
             raise ValueError(f"Invalid gz format: too short: {s!r}")
         # Extract compression factor (2 digits)
         try:
-            factor = 10 * (ord(s[2]) - ord('0')) + (ord(s[3]) - ord('0'))
+            factor = 10 * (ord(s[2]) - ord("0")) + (ord(s[3]) - ord("0"))
         except (ValueError, IndexError):
             raise ValueError(f"Invalid gz factor in: {s!r}") from None
         b64_data = s[4:]

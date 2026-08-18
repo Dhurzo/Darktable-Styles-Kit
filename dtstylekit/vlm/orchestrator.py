@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,11 @@ from .iterative_refiner import iterative_refine
 from .parser import parse_response
 from .prompt_builder import build_prompt
 from .schema_renderer import render_iop_schema
+
+if TYPE_CHECKING:
+    from dtstylekit.analyzer.models import ImageAnalysis
+    from dtstylekit.presets.search import PresetSearcher
+    from dtstylekit.vlm.models import StyleSpec
 from .validator import validate_style
 
 if TYPE_CHECKING:
@@ -37,7 +43,7 @@ def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 8
 
     img = Image.open(image_path)
     if img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGB")
+        img = img.convert("RGB")  # type: ignore[assignment]
     if max(img.size) > max_dim:
         img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
@@ -48,13 +54,13 @@ def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 8
 def generate_style_spec(
     image_path: str | Path,
     direction: str,
-    searcher,  # PresetSearcher
-    analyzer,  # callable path -> ImageAnalysis
+    searcher: PresetSearcher,
+    analyzer: Callable[[str | Path], ImageAnalysis],
     registry: dict,
     model: str | None = None,
     temperature: float = 0.4,
     references: list[str | Path] | None = None,
-    refine_iterations: int = 0,          # 0 = no iterative refinement
+    refine_iterations: int = 0,  # 0 = no iterative refinement
     refine_raw_path: str | Path | None = None,  # RAW file for test renders
 ) -> tuple[StyleSpec, str, list[str], ImageAnalysis]:
     """Generate a validated StyleSpec for a given image.
@@ -140,7 +146,8 @@ def generate_style_spec(
                 logger.info(
                     "Dropped %d candidate preset(s) with unsuitable net "
                     "exposure for a %.2f-luminance image",
-                    dropped, mean_lum,
+                    dropped,
+                    mean_lum,
                 )
             presets = fitted
         elif len(presets) > len(fitted) > 0:
@@ -217,14 +224,19 @@ def generate_style_spec(
                 reference_analysis["global_saturation"] = sum(_sats) / len(_sats)
                 logger.info(
                     "Reference global HSV saturation: %.3f (%d refs)",
-                    reference_analysis["global_saturation"], len(_sats),
+                    reference_analysis["global_saturation"],
+                    len(_sats),
                 )
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("Could not compute reference global saturation: %s", exc)
 
     # 5. Build prompt
     messages = build_prompt(
-        analysis, presets, direction, schema, image_b64,
+        analysis,
+        presets,
+        direction,
+        schema,
+        image_b64,
         reference_b64s=reference_b64s or None,
         reference_analysis=reference_analysis,
     )
@@ -256,7 +268,8 @@ def generate_style_spec(
         )
         spec, report = parse_response(response_text)
         validated, warns = validate_style(
-            spec, registry,
+            spec,
+            registry,
             reference_analysis=reference_analysis,
             target_analysis=analysis,
         )
@@ -293,9 +306,13 @@ def generate_style_spec(
         logger.info("Starting iterative refinement (%d iterations)...", refine_iterations)
 
         # Build a generate function that the refiner can call
-        def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]):
+        def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]) -> StyleSpec:
             build_prompt(
-                analysis, presets, refine_direction, schema, image_b64,
+                analysis,
+                presets,
+                refine_direction,
+                schema,
+                image_b64,
                 reference_b64s=ref_b64s or None,
             )
             refine_spec, refine_report, refine_warns = _call(temperature)
@@ -373,9 +390,7 @@ def _preset_ev_fits(preset: Preset, mean_lum: float) -> bool:
         return False
     if mean_lum < 0.3:
         name = " ".join(
-            part.lower()
-            for part in (preset.name, getattr(preset, "description", "") or "")
-            if part
+            part.lower() for part in (preset.name, getattr(preset, "description", "") or "") if part
         )
         if any(kw in name for kw in ("dehaze", "defog", "fog", "mist")):
             return False

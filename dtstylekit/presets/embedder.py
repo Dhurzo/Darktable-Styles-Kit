@@ -1,5 +1,8 @@
 """Embedding generator for Darktable preset semantic search."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -31,10 +34,12 @@ class PresetEmbedder:
     def model(self) -> SentenceTransformer:
         """Lazy-load the sentence transformer model."""
         if self._model is None:
-            self._model = SentenceTransformer(self.model_name, cache_folder=str(self.cache_dir) if self.cache_dir else None)
+            self._model = SentenceTransformer(
+                self.model_name, cache_folder=str(self.cache_dir) if self.cache_dir else None
+            )
         return self._model
 
-    def _build_preset_text(self, preset) -> str:
+    def _build_preset_text(self, preset: object) -> str:
         """
         Build the text representation for embedding.
 
@@ -48,31 +53,33 @@ class PresetEmbedder:
         # New path: PresetIndexEntry exposes a populated search_text.
         search_text = getattr(preset, "search_text", None)
         if search_text:
-            return search_text
+            return search_text  # type: ignore[no-any-return]
 
         # Fallback path: build from the parsed Preset using cleaned labels.
         from .models import clean_description, derive_category, derive_display_name
 
         parts = []
-        display_name = derive_display_name(preset.name)
+        display_name = derive_display_name(getattr(preset, "name", ""))
         if display_name:
             parts.append(display_name)
 
-        cleaned_desc = clean_description(preset.description)
+        cleaned_desc = clean_description(getattr(preset, "description", ""))
         if cleaned_desc:
             parts.append(cleaned_desc)
 
         # Add enabled operations as semantic context (skip camera profiles'
         # generic baseline ops so artistic presets cluster apart from them).
-        category = derive_category(preset.name)
+        category = derive_category(getattr(preset, "name", ""))
         if category != "camera":
-            enabled_ops = [p.operation for p in preset.plugins if p.enabled == 1]
+            enabled_ops = [
+                p.operation for p in getattr(preset, "plugins", []) if getattr(p, "enabled", 0) == 1
+            ]
             if enabled_ops:
                 parts.append(" ".join(enabled_ops))
 
         return " ".join(parts)
 
-    def generate_embeddings(self, presets: list) -> np.ndarray:
+    def generate_embeddings(self, presets: Sequence[object]) -> np.ndarray:
         """
         Generate embeddings for a list of presets.
 
@@ -93,7 +100,7 @@ class PresetEmbedder:
             normalize_embeddings=True,  # L2 normalize for cosine similarity
         )
 
-        return embeddings.astype(np.float32)
+        return embeddings.astype(np.float32)  # type: ignore[no-any-return]
 
     def save_embeddings(self, embeddings: np.ndarray, output_path: Path) -> None:
         """
@@ -116,9 +123,9 @@ class PresetEmbedder:
         Returns:
             Embeddings array.
         """
-        return np.load(input_path)
+        return np.load(input_path)  # type: ignore[no-any-return]
 
-    def generate_and_save(self, presets: list, output_path: Path) -> np.ndarray:
+    def generate_and_save(self, presets: Sequence[object], output_path: Path) -> np.ndarray:
         """
         Generate embeddings for presets and save to file.
 
@@ -134,7 +141,9 @@ class PresetEmbedder:
         return embeddings
 
 
-def build_embeddings(preset_dir: Path, output_path: Path, model_name: str = DEFAULT_MODEL) -> np.ndarray:
+def build_embeddings(
+    preset_dir: Path, output_path: Path, model_name: str = DEFAULT_MODEL
+) -> np.ndarray:
     """
     Convenience function to build embeddings from a preset directory.
 

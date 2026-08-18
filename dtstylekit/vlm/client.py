@@ -25,6 +25,8 @@ class VLMClient:
         max_retries: Number of retries on transient errors.
     """
 
+    _client: ollama.Client | None
+
     def __init__(
         self,
         host: str | None = None,
@@ -128,8 +130,7 @@ class VLMClient:
                         thinking = msg.get("thinking") or ""
                         if thinking.strip():
                             logger.info(
-                                "VLM content empty; falling back to "
-                                "thinking field (%d chars)",
+                                "VLM content empty; falling back to " "thinking field (%d chars)",
                                 len(thinking),
                             )
                             return thinking

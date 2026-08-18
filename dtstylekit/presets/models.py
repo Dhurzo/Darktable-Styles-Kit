@@ -57,15 +57,15 @@ class PresetIndexEntry:
     iop_list: str
     plugin_count: int
     xml_hash: str
-    display_name: str = ""        # Human-readable label ("sepia", "faded"...)
-    category: str = ""            # "camera" | "examples" | "other"
-    search_text: str = ""         # Clean text used for FTS + embeddings
-    file_path: str = ""           # Absolute path to the .dtstyle on disk
+    display_name: str = ""  # Human-readable label ("sepia", "faded"...)
+    category: str = ""  # "camera" | "examples" | "other"
+    search_text: str = ""  # Clean text used for FTS + embeddings
+    file_path: str = ""  # Absolute path to the .dtstyle on disk
 
 
 def _strip_l10n(segment: str) -> str:
     """Remove a single leading ``_l10n_`` marker from one pipe-segment."""
-    return segment[len("_l10n_"):] if segment.startswith("_l10n_") else segment
+    return segment[len("_l10n_") :] if segment.startswith("_l10n_") else segment
 
 
 def derive_display_name(i18n_name: str) -> str:
