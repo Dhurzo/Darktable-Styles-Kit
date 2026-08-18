@@ -136,7 +136,7 @@ def generate_style_spec(
     # brighter), but always keep at least two candidates so the VLM
     # still has a choice.
     mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
-    if not isinstance(mean_lum, (int, float)) or isinstance(mean_lum, bool):
+    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
         mean_lum = None
     if mean_lum is not None:
         fitted = [p for p in presets if _preset_ev_fits(p, mean_lum)]
@@ -216,7 +216,7 @@ def generate_style_spec(
                 try:
                     _a = _analyze_ref(ref)
                     _s = getattr(getattr(_a, "luminance", None), "saturation_mean", None)
-                    if isinstance(_s, (int, float)) and not isinstance(_s, bool):
+                    if isinstance(_s, int | float) and not isinstance(_s, bool):
                         _sats.append(float(_s))
                 except Exception:
                     continue
@@ -315,7 +315,7 @@ def generate_style_spec(
                 image_b64,
                 reference_b64s=ref_b64s or None,
             )
-            refine_spec, refine_report, refine_warns = _call(temperature)
+            refine_spec, _, refine_warns = _call(temperature)
             # Merge warnings
             warnings.extend(refine_warns)
             return refine_spec

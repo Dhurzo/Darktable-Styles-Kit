@@ -129,7 +129,7 @@ def validate_style(
 
             # ---- String-valued range (enum-like) ---------------------------
             if in_range and range_val is not None:
-                lo_r, hi_r = range_val
+                lo_r, _ = range_val
                 if isinstance(lo_r, str):
                     # Range is a tuple of valid string choices
                     if val not in range_val:
@@ -381,7 +381,7 @@ def validate_style(
             gsat = (reference_analysis or {}).get("global_saturation")
             sat = float(clamped_params.get("saturation") or 0.0)
             if (
-                isinstance(gsat, (int, float))
+                isinstance(gsat, int | float)
                 and not isinstance(gsat, bool)
                 and gsat >= 0.25
                 and sat < 0.0

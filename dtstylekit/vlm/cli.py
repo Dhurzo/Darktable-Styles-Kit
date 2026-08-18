@@ -55,7 +55,7 @@ def cmd_vlm_generate(args: argparse.Namespace) -> int:
         return 1
 
     searcher = PresetSearcher(db_path, emb_path)
-    spec, report, warnings, analysis = generate_style_spec(
+    spec, report, warnings, _ = generate_style_spec(
         image_path=args.image,
         direction=args.direction,
         searcher=searcher,

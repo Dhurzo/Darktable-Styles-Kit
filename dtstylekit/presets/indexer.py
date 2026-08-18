@@ -411,6 +411,38 @@ class PresetIndexer:
         cursor = conn.execute("SELECT id FROM presets ORDER BY id ASC")
         return [row["id"] for row in cursor.fetchall()]
 
+    def list_presets(self, category: str | None = None) -> list[PresetIndexEntry]:
+        """List all presets, optionally filtered by category.
+
+        Args:
+            category: Optional category filter.
+
+        Returns:
+            List of PresetIndexEntry objects.
+        """
+        conn = self.connect()
+        if category:
+            cursor = conn.execute(
+                """
+                SELECT id, name, description, iop_list, plugin_count, xml_hash,
+                       display_name, category, search_text, file_path
+                FROM presets
+                WHERE category = ?
+                ORDER BY id ASC
+                """,
+                (category,),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                SELECT id, name, description, iop_list, plugin_count, xml_hash,
+                       display_name, category, search_text, file_path
+                FROM presets
+                ORDER BY id ASC
+                """
+            )
+        return [self._row_to_entry(row) for row in cursor.fetchall()]
+
 
 def build_index(preset_dir: Path, db_path: Path, force: bool = False) -> int:
     """

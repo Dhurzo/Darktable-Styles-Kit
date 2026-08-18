@@ -85,9 +85,8 @@ def _mean_saturation(rgb: np.ndarray) -> float:
     total = 0.0
     count = flat.shape[0]
     for px in flat:
-        h, l_, s = colorsys.rgb_to_hls(float(px[0]), float(px[1]), float(px[2]))
-        # ``l_`` here is the lightness used by colorsys; saturation ``s`` is
-        # what we need (HSV-style saturation in [0, 1]).
+        _, _, s = colorsys.rgb_to_hls(float(px[0]), float(px[1]), float(px[2]))
+        # saturation ``s`` is what we need (HSV-style saturation in [0, 1]).
         total += s
     return total / max(count, 1)
 

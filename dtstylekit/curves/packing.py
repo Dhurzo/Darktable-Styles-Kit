@@ -210,7 +210,7 @@ def _apply_template_to_channels(
     """
     # Build all-channel default (identity)
     identity = [(0.0, 0.0), (1.0, 1.0)]
-    identity_x, identity_y = _pad_nodes(identity)
+    _ = _pad_nodes(identity)
 
     if "all" in template.channels:
         src_x, src_y = _pad_nodes(template.nodes_per_channel["all"])
