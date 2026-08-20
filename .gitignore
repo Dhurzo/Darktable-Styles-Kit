@@ -221,3 +221,7 @@ __marimo__/
 data/presets
 dtstylekit/data/
 work/
+
+# Local test photos (photographers' images are never redistributed)
+test_data/*
+!test_data/README.md

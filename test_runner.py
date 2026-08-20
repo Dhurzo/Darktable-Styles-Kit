@@ -47,14 +47,16 @@ TEST_CASES: list[dict[str, Any]] = [
 ]
 
 
-def run_generation(image: str, direction: str, output_dir: Path) -> tuple[bool, str, Path | None]:
+def run_generation(
+    test_dir: Path, image: str, direction: str, output_dir: Path
+) -> tuple[bool, str, Path | None]:
     """Run dtstylekit generate on a single image."""
     cmd = [
         sys.executable,
         "-m",
         "dtstylekit.cli",
         "generate",
-        str(Path("test_data") / image),
+        str(test_dir / image),
         "--direction",
         direction,
         "--model",
@@ -105,12 +107,33 @@ def check_style(dtstyle_path: Path, expected_modules: list[str]) -> tuple[bool, 
 
 
 def main() -> int:
-    test_dir = Path(__file__).parent / "test_data"
+    import argparse
+
+    parser = argparse.ArgumentParser(description="dtstylekit end-to-end test runner")
+    parser.add_argument(
+        "--dir",
+        default=str(Path(__file__).parent / "test_data"),
+        help="Directory with your own test JPEG images (default: test_data/)",
+    )
+    args = parser.parse_args()
+
+    test_dir = Path(args.dir)
     output_base = Path(__file__).parent / "test_outputs"
 
     if not test_dir.exists():
-        print(f"ERROR: Test data directory not found: {test_dir}")
+        print(
+            f"ERROR: Test image directory not found: {test_dir}\n"
+            "  test_data/ ships with NO images (photographers' photos are not\n"
+            "  redistributed). Drop your own JPEGs in test_data/ and re-run:\n"
+            "    cp /path/to/my_photos/*.jpg test_data/\n"
+            "  or pass --dir /path/to/my_photos"
+        )
         return 1
+
+    available = {case["image"] for case in TEST_CASES if (test_dir / case["image"]).exists()}
+    missing = [c["image"] for c in TEST_CASES if not (test_dir / c["image"]).exists()]
+    if missing:
+        print(f"NOTE: skipping {len(missing)} case(s) with no local image: {missing}")
 
     output_base.mkdir(parents=True, exist_ok=True)
 
@@ -120,10 +143,17 @@ def main() -> int:
         print(f"Test {i + 1}/{len(TEST_CASES)}: {case['image']} -> {case['direction']}")
         print(f"{'=' * 60}")
 
+        if case["image"] not in available:
+            print(f"- Skipped (no local image at {test_dir / case['image']})")
+            results.append(
+                {"test": i + 1, "image": case["image"], "success": True, "skipped": True}
+            )
+            continue
+
         output_dir = output_base / f"test_{i + 1}_{Path(case['image']).stem}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        success, output, dtstyle_path = run_generation(case["image"], case["direction"], output_dir)
+        success, output, dtstyle_path = run_generation(test_dir, case["image"], case["direction"], output_dir)
 
         if success and dtstyle_path:
             print(f"✓ Generation succeeded: {dtstyle_path.name}")
@@ -166,11 +196,18 @@ def main() -> int:
     print("SUMMARY")
     print(f"{'=' * 60}")
     passed = sum(1 for r in results if r.get("success", False))
+    skipped = sum(1 for r in results if r.get("skipped", False))
+    failed = sum(1 for r in results if not r.get("success", False))
     total = len(results)
-    print(f"Passed: {passed}/{total}")
+    print(f"Passed: {passed}/{total} (skipped: {skipped}, failed: {failed})")
 
     for r in results:
-        status = "✓" if r.get("success", False) else "✗"
+        if r.get("skipped"):
+            status = "○"
+        elif r.get("success", False):
+            status = "✓"
+        else:
+            status = "✗"
         print(f"  {status} Test {r['test']}: {r['image']}")
 
     # Save results JSON
@@ -179,7 +216,7 @@ def main() -> int:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to: {results_path}")
 
-    return 0 if passed == total else 1
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
