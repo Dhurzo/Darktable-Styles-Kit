@@ -1,0 +1,29 @@
+# Pre-commit hooks for dtstylekit
+# Install with: pre-commit install
+
+repos:
+  # ruff - fast Python linter (replaces flake8, isort, pyupgrade, etc.)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: [--fix, --unsafe-fixes, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # Check for common issues
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+ci:
+  autofix_commit_msg: "style: pre-commit auto-fixes"
+  autofix_prs: true

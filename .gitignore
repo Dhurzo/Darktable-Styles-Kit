@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# darktable style library symlinks (point at a local darktable checkout)
+data/presets
+dtstylekit/data/
+work/
