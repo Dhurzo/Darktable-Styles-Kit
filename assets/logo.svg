@@ -4,30 +4,41 @@
       <stop offset="0%" stop-color="#fbbf24"/>
       <stop offset="100%" stop-color="#d97706"/>
     </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fcd34d"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.18"/>
+      <stop offset="70%" stop-color="#f59e0b" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <rect x="1" y="1" width="798" height="198" rx="24" fill="#0d0d10" stroke="#26262c" stroke-width="2"/>
+  <rect x="1" y="1" width="798" height="198" rx="28" fill="#0d0d10" stroke="#22222a" stroke-width="1.5"/>
 
-  <g stroke="#00000055" stroke-width="1">
-    <path d="M110 100 L168 100 A58 58 0 0 1 139 150.2 Z" fill="#fbbf24"/>
-    <path d="M110 100 L139 150.2 A58 58 0 0 1 61 150.2 Z" fill="#b45309"/>
-    <path d="M110 100 L61 150.2 A58 58 0 0 1 52 100 Z" fill="#fbbf24"/>
-    <path d="M110 100 L52 100 A58 58 0 0 1 61 49.8 Z" fill="#b45309"/>
-    <path d="M110 100 L61 49.8 A58 58 0 0 1 139 49.8 Z" fill="#fbbf24"/>
-    <path d="M110 100 L139 49.8 A58 58 0 0 1 168 100 Z" fill="#b45309"/>
+  <circle cx="105" cy="100" r="74" fill="url(#glow)"/>
+  <circle cx="105" cy="100" r="58" fill="#121217" stroke="#2e2e36" stroke-width="1.5"/>
+  <circle cx="105" cy="100" r="55.5" fill="none" stroke="#f59e0b22" stroke-width="1.25"/>
+
+  <g stroke="#0d0d10" stroke-width="1.5">
+    <path d="M105 100 L156.2 77.2 A58 58 0 0 1 156.2 122.8 Z" fill="url(#blade)"/>
+    <path d="M105 100 L150.3 132.9 A58 58 0 0 1 110.9 155.7 Z" fill="url(#blade)"/>
+    <path d="M105 100 L99.1 155.7 A58 58 0 0 1 59.7 132.9 Z" fill="url(#blade)"/>
+    <path d="M105 100 L53.8 122.8 A58 58 0 0 1 53.8 77.2 Z" fill="url(#blade)"/>
+    <path d="M105 100 L59.7 67.1 A58 58 0 0 1 99.1 44.3 Z" fill="url(#blade)"/>
+    <path d="M105 100 L110.9 44.3 A58 58 0 0 1 150.3 67.1 Z" fill="url(#blade)"/>
   </g>
-  <circle cx="110" cy="100" r="15" fill="#0d0d10" stroke="#f59e0b" stroke-width="3"/>
-  <circle cx="110" cy="100" r="4.5" fill="#fbbf24"/>
+  <circle cx="105" cy="100" r="15" fill="#0d0d10" stroke="#f59e0b" stroke-width="2.5"/>
+  <circle cx="105" cy="100" r="4.5" fill="#fbbf24"/>
 
-  <text x="208" y="88" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="50" font-weight="600" fill="#e5e7eb" letter-spacing="-0.5">Style Generation</text>
-  <text x="208" y="140" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="50" font-weight="800" fill="url(#amber)" letter-spacing="6">Kit</text>
-  <text x="212" y="172" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="19" font-weight="500" fill="#8b8f98">AI style engine for darktable</text>
+  <rect x="99" y="32" width="12" height="5" rx="2.5" fill="#f59e0b55"/>
 
-  <rect x="660" y="24" width="104" height="32" rx="16" fill="none" stroke="#f59e0b66" stroke-width="1.5"/>
-  <text x="712" y="41" text-anchor="middle" dominant-baseline="central"
-        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="15" font-weight="700" fill="#fbbf24" letter-spacing="3">BETA</text>
+  <text x="210" y="84" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="47" font-weight="300" fill="#f3f4f6" letter-spacing="0.5">Style Generation</text>
+  <text x="210" y="136" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="47" font-weight="800" fill="url(#amber)" letter-spacing="7">Kit</text>
+  <text x="215" y="170" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="17" font-weight="500" fill="#7d828c" letter-spacing="2.5">AI STYLE ENGINE FOR DARKTABLE</text>
 </svg>
