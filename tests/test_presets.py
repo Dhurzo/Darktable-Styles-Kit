@@ -267,6 +267,10 @@ def test_indexer_indexes_real_presets(
 
 def test_fts5_search_finds_sepia(tmp_path: Path, preset_dir: Path) -> None:
     """FTS5 must find the 'sepia' example preset by keyword match on its name."""
+    if not list(preset_dir.glob("*.dtstyle")):
+        pytest.skip(
+            f"No .dtstyle files found in {preset_dir} (darktable style library not available)"
+        )
     db_path = tmp_path / "fts.db"
     build_index(preset_dir, db_path, force=True)
     idx = PresetIndexer(db_path)
@@ -280,6 +284,10 @@ def test_fts5_search_finds_sepia(tmp_path: Path, preset_dir: Path) -> None:
 
 def test_fts5_returns_ranked_results(tmp_path: Path, preset_dir: Path) -> None:
     """search_presets_fts_ranked must include a BM25 rank per result."""
+    if not list(preset_dir.glob("*.dtstyle")):
+        pytest.skip(
+            f"No .dtstyle files found in {preset_dir} (darktable style library not available)"
+        )
     db_path = tmp_path / "fts2.db"
     build_index(preset_dir, db_path, force=True)
     idx = PresetIndexer(db_path)
@@ -310,6 +318,10 @@ def built_searcher(tmp_path: Path, preset_dir: Path) -> PresetSearcher:
     embeddings_path = tmp_path / "search.npy"
 
     # Build the real index using the real preset library
+    if not list(preset_dir.glob("*.dtstyle")):
+        pytest.skip(
+            f"No .dtstyle files found in {preset_dir} (darktable style library not available)"
+        )
     build_index(preset_dir, db_path, force=True)
 
     # Write deterministic fake embeddings (one-hot per row, kept L2-normalized

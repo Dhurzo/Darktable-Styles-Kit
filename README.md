@@ -30,7 +30,7 @@ A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze p
 
 ## Overview
 
-This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The 534 presets in `data/styles/` provide a validated library of Darktable styles. The VLM (default: `gemma3:27b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets, and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
+This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The VLM (default: `gemma3:27b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets from the **official darktable style library** (indexed locally via `setup.sh` — not vendored in this repository), and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
 
 **Output:** Valid `.dtstyle` file + markdown report explaining the choices.
 
@@ -94,6 +94,14 @@ files in `data/styles/` of the darktable source tree) to build its
 semantic search index. Those styles are *not* vendored into this
 repository — you need a darktable checkout (or any directory containing
 `.dtstyle` files) on your machine.
+
+**What is `data/presets`?** It is a *symlink* (created by `./setup.sh`)
+that points at your darktable checkout's `data/styles` directory — the
+official style library dtstylekit indexes for semantic search. It is a
+machine-specific pointer, not a directory of files: the styles themselves
+live in your darktable checkout, so the symlink is gitignored and never
+committed. Filling it is the first step of the setup below; if you prefer
+no symlink at all, use the `DTSTYLEKIT_PRESETS_DIR` option (Option C).
 
 **Option A — automatic (recommended):**
 
@@ -225,7 +233,7 @@ variables, so the CLI works from any working directory.
 
 ## Preset Library
 
-The 534 presets in `data/styles/` cover camera-specific styles (Canon, Nikon, Sony, Fujifilm, etc.), film simulations, creative looks, and technical corrections. Each preset is a valid Darktable `.dtstyle` file with verified XMP structure.
+dtstylekit indexes the **534 official darktable styles** (camera-specific styles for Canon, Nikon, Sony, Fujifilm, etc., film simulations, creative looks, and technical corrections). The library is **not vendored in this repository**: `./setup.sh` locates your darktable checkout and builds the search index (see [Preset library setup](#preset-library-setup)). Each preset is a valid Darktable `.dtstyle` file with verified XMP structure.
 
 ## VLM Integration
 

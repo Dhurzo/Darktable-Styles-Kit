@@ -70,3 +70,8 @@ logs/test_outputs/
 
 # E2E test-runner artifacts (recreated by test_runner.py)
 test_outputs/
+
+# darktable style library symlinks (point at a local darktable checkout)
+data/presets
+dtstylekit/data/
+work/
