@@ -1,4 +1,12 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="dtstylekit logo" width="560">
+</p>
+
 # dtstylekit — AI-Powered Darktable Style Generator
+
+> **⚠️ BETA / EXPERIMENTAL**
+>
+> dtstylekit is in **beta / experimental state**. It is built on a *vibe-coding* foundation: the codec and binary formats were reverse-engineered against the darktable source code. It can **fail when creating styles**, produce unexpected results, or generate `.dtstyle` files that do not behave as expected. Review the visual result of every generated style before using it in real work. See the [DISCLAIMERS](#disclaimers) section below.
 
 A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze photographs, select and compose from 534 existing Darktable presets, apply safe scalar adjustments on verified IOP structs, and output valid `.dtstyle` files with explanatory markdown reports.
 
