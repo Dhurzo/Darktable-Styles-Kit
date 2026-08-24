@@ -254,6 +254,35 @@ Each run produces:
 - **Markdown report** — Explains preset selection, parameter choices, and expected visual effect
 - **`*_EXPLICACION.md` explanation document** — When `--references` are given, a natural-language narrative companion is auto-generated: it analyses the reference photographs (tonal key, contrast, saturation, white balance, per-zone hue grading) and explains in plain language how they are edited and why every module/parameter of the generated style was chosen. Language: `--lang es` (default) or `--lang en`.
 
+## Contributing / Release flow
+
+This repository is the **release channel** for dtstylekit. Day-to-day
+development happens in a private working copy that lives *inside* a
+darktable checkout (that layout gives the dev tools direct access to the
+darktable C sources for IOP-struct verification). Changes are synced here
+as clean, reviewed commits — so:
+
+- **Bug reports and feature requests**: open an [Issue](https://github.com/Dhurzo/Darktable-Styles-Kit/issues) — very welcome.
+- **Small PRs** (typo fixes, docs) are fine too; larger changes are best
+  discussed in an issue first, then integrated upstream and released here.
+- CI runs the full test suite (with a sparse darktable checkout) on every
+  push and PR, so the `main` branch is always usable standalone.
+
 ## License
 
 MIT License — see LICENSE file for details.
+
+## Acknowledgements & legal
+
+- Built for and around [darktable](https://www.darktable.org/) — this
+  project is **not affiliated with, endorsed by, or connected to** the
+  darktable project or its maintainers. "darktable" is used
+  descriptively to denote interoperability.
+- The official darktable style library (534 `.dtstyle` files) is **not
+  redistributed**: users link their own darktable checkout via
+  `data/presets`. All credit for those styles belongs to the darktable
+  contributors.
+- No photographer photographs are included in this repository.
+- Binary layouts (IOP struct versions, blendop format) were
+  reverse-engineered from darktable's open source code solely for
+  interoperability, under the terms of its GPLv3 license.
