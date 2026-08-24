@@ -206,8 +206,8 @@ class TestWarmthCap:
         ref["shadows_sat"] = 0.158
         out, warns = auto_fit_signature(_spec(cb0), ref, _Analysis())
         cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
-        assert cb.params["midtones_C"] == pytest.approx(0.115)
-        assert cb.params["shadows_C"] == pytest.approx(0.047, abs=0.002)
+        assert cb.params["midtones_C"] == pytest.approx(0.057, abs=0.002)
+        assert cb.params["shadows_C"] == pytest.approx(0.024, abs=0.002)
         assert any("FIDELITY warmth cap" in w for w in warns)
 
     def test_keeps_chroma_below_cap(self):
@@ -216,11 +216,11 @@ class TestWarmthCap:
             operation="colorbalancergb",
             enabled=True,
             multi_name="",
-            params={"midtones_C": 0.06, "midtones_H": 195.7},
+            params={"midtones_C": 0.05, "midtones_H": 195.7},
         )
         ref = _ref_analysis(midtones_hue_confidence=1.0, midtones_hue_mode="bi")
         ref["midtones_sat"] = 0.383
         out, warns = auto_fit_signature(_spec(cb0), ref, _Analysis())
         cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
-        assert cb.params["midtones_C"] == 0.06
+        assert cb.params["midtones_C"] == 0.05
         assert not any("warmth cap" in w for w in warns)

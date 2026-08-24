@@ -153,17 +153,20 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
 
         # 3a. Chroma calibration cap: the reference zone hue describes the
         # color of ALREADY-SATURATED areas, not an order to tint the whole
-        # zone. Cap the spec chroma at ref_zone_sat × 0.3 (measured render
+        # zone. Cap the spec chroma at ref_zone_sat × 0.15 (measured render
         # calibration: C=0.15 in two zones shifts global R-B by ≈ -0.42 —
-        # a full-image tint). Applies to every hue mode.
+        # a full-image tint; C=0.06 ≈ neutral). The ref zone_sat measures
+        # the reference's CONTENT (neons, saturated skies) — the grade
+        # transferred to a different scene must be a fraction of it.
+        # Applies to every hue mode.
         zone_sat = reference_analysis.get(f"{zone}_sat")
         if (
             isinstance(zone_sat, int | float)
             and not isinstance(zone_sat, bool)
             and float(zone_sat) > 0.01
-            and cur_c > float(zone_sat) * 0.3
+            and cur_c > float(zone_sat) * 0.15
         ):
-            cap = round(min(0.12, float(zone_sat) * 0.3), 3)
+            cap = round(min(0.08, float(zone_sat) * 0.15), 3)
             cb.params[c_key] = cap
             warnings.append(
                 f"FIDELITY warmth cap: refs {zone}_sat {float(zone_sat):.2f} → "
