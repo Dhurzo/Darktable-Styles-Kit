@@ -182,3 +182,45 @@ class TestNoop:
         exp = next(p for p in out.plugins if p.operation == "exposure")
         assert exp.params["exposure"] == 0.5
         assert warns == []
+
+
+class TestWarmthCap:
+    def test_caps_chroma_proportional_to_ref_saturation(self):
+        """Nishimura regression: midtones_sat 0.38 → C cap 0.115; a spec
+        with C=0.15 (full-image blue tint) gets clamped."""
+        cb0 = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.15, "midtones_H": 195.7, "shadows_C": 0.15, "shadows_H": 191.3},
+        )
+        ref = _ref_analysis(
+            midtones_hue=195.7,
+            midtones_hue_confidence=1.0,
+            midtones_hue_mode="bi",
+            shadows_hue=191.3,
+            shadows_hue_confidence=1.0,
+            shadows_hue_mode="mono",
+        )
+        ref["midtones_sat"] = 0.383
+        ref["shadows_sat"] = 0.158
+        out, warns = auto_fit_signature(_spec(cb0), ref, _Analysis())
+        cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert cb.params["midtones_C"] == pytest.approx(0.115)
+        assert cb.params["shadows_C"] == pytest.approx(0.047, abs=0.002)
+        assert any("FIDELITY warmth cap" in w for w in warns)
+
+    def test_keeps_chroma_below_cap(self):
+        """C already under the cap → untouched."""
+        cb0 = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.06, "midtones_H": 195.7},
+        )
+        ref = _ref_analysis(midtones_hue_confidence=1.0, midtones_hue_mode="bi")
+        ref["midtones_sat"] = 0.383
+        out, warns = auto_fit_signature(_spec(cb0), ref, _Analysis())
+        cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert cb.params["midtones_C"] == 0.06
+        assert not any("warmth cap" in w for w in warns)

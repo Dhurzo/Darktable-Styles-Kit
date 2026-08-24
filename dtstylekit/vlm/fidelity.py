@@ -146,12 +146,37 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
         hue = reference_analysis.get(f"{zone}_hue")
         conf = reference_analysis.get(f"{zone}_hue_confidence", 0) or 0
         mode = reference_analysis.get(f"{zone}_hue_mode")
-        if hue is None or conf < _HUE_CONF_MIN or mode not in ("bi", "global"):
-            continue
         cb = _ensure("colorbalancergb")
         c_key = f"{zone}_C"
         h_key = f"{zone}_H"
         cur_c = float(cb.params.get(c_key, 0.0) or 0.0)
+
+        # 3a. Chroma calibration cap: the reference zone hue describes the
+        # color of ALREADY-SATURATED areas, not an order to tint the whole
+        # zone. Cap the spec chroma at ref_zone_sat × 0.3 (measured render
+        # calibration: C=0.15 in two zones shifts global R-B by ≈ -0.42 —
+        # a full-image tint). Applies to every hue mode.
+        zone_sat = reference_analysis.get(f"{zone}_sat")
+        if (
+            isinstance(zone_sat, int | float)
+            and not isinstance(zone_sat, bool)
+            and float(zone_sat) > 0.01
+            and cur_c > float(zone_sat) * 0.3
+        ):
+            cap = round(min(0.12, float(zone_sat) * 0.3), 3)
+            cb.params[c_key] = cap
+            warnings.append(
+                f"FIDELITY warmth cap: refs {zone}_sat {float(zone_sat):.2f} → "
+                f"{c_key} {cur_c:.3f}→{cap} (hue describes already-saturated "
+                f"areas, not a whole-zone tint)"
+            )
+            cur_c = cap
+
+        if hue is None or conf < _HUE_CONF_MIN or mode not in ("bi", "global"):
+            continue
+
+        # 3b. Missing chroma: confident reference hue with no visible spec
+        # chroma → set hue + subtle chroma (global mode respects caps).
         if cur_c >= _CHROMA_VISIBLE * 0.66:  # already carries a tint
             continue
         if mode == "global":

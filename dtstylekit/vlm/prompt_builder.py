@@ -362,6 +362,16 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
     direction justifies them, add NONE — a clean style with 3-5 core
     modules beats a cluttered one. NEVER emit negadoctor or
     profile_gamma for normal photos.
+22. COLORBALANCERGB CHROMA CALIBRATION (zone_C): the reference zone hue
+    describes the color of ALREADY-SATURATED areas in the reference —
+    it is NOT an order to tint the whole zone. Calibrate:
+    zone_C ≈ ref_zone_sat × 0.3 (e.g. refs midtones_sat 0.38 →
+    midtones_C ≈ 0.11; refs shadows_sat 0.16 → shadows_C ≈ 0.05).
+    NEVER exceed 0.15. Measured impact (darktable render calibration):
+    shadows_C+midtones_C at 0.15 shifts global R-B by ≈ -0.42 (full
+    image tint); at 0.06 by ≈ -0.10 (subtle grade). Most of each zone
+    must stay neutral — only the already-colored areas should pick up
+    the grade.
 """
 
 
