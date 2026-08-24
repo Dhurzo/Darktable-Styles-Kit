@@ -19,6 +19,13 @@ Internal ledger for the IOP reverse-engineering workflow
 | graduatednd | PASS | v1 | `<6f` / 24B | visual loop: blue ND gradient (density 3, hue .55, sat .6) → top-vs-bottom delta -0.114, R-B -0.073 — see same doc |
 | agx | PASS | v7 | `<5f3f8fi2f2i6f2f6fi` / 144B | 36 fields, full AgX tone mapping; visual loop: global tone shift + highlight compression with defaults — see same doc |
 | channelmixerrgb | PASS | v3 | `<24f10i4f2i` / 160B | 40 fields (mix matrix 4/ch + WB CAT16 + gamut); visual loop: illuminant 7500K → warmer (+R-B) per module semantics — see same doc |
+| primaries | PASS | v1 | `<8f` / 32B | 3 real blobs decode with exact field order (blue-LED-fix presets); visual loop: blue purity 1→0.3 desaturates blues — see `docs/reversed_iops/batch3_iops.md` |
+| diffuse | PASS | v2 | `<ifi2f4ff4fi` / 60B | real blob (sharpen+diffuse preset) decodes cleanly; anisotropic solver sharpens OR smooths per speed signs (+10.9% lstd) — see same doc |
+| negadoctor | PASS | v2 | `<i18f` / 76B | defaults on a positive → massive negative-remap (MAE 125) = documented purpose; only for scanned negatives — see same doc |
+| defringe | PASS | v1 | `<2fi` / 12B | synthetic-CA test: CA metric -18%; conditional module (no-CA → passthrough) — see same doc |
+| cacorrectrgb | PASS | v1 | `<i2f2i` / 20B | synthetic-CA test: CA metric -57% (strength 2.5, radius 12) — see same doc |
+| globaltonemap | PASS | v3 | `<i3f` / 16B | Drago defaults → lum +0.085, lstd +17.4% (highlight compression) — see same doc |
+| profile_gamma | PASS | v2 | `<i6f` / 28B | GOTCHA: op name has underscore (add_iop profile_gamma); wrong name silently no-ops. Correct name + extreme values → MAE 8.17 — see same doc |
 
 ## Status legend
 

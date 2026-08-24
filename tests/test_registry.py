@@ -59,7 +59,7 @@ class TestRegistryAccess:
         # originals and the refinement IOPs (temperature, basicadj, toneequal,
         # colorequal, colorharmonizer) — all with verified sizes.
         # (relight is deprecated in darktable and not registered.)
-        assert len(verified) == 22
+        assert len(verified) == 29
         assert "hazeremoval" in verified
 
     def test_list_unverified(self):

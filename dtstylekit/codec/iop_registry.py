@@ -882,6 +882,266 @@ _VERIFIED_IOPS = {
         size_bytes=160,  # struct.calcsize("<24f10i4f2i"); absent from the 534-preset library
         blendop_cst=4,  # RGB_SCENE — white-balance/mixing module, scene-referred
     ),
+    "primaries": IOPRegistry(
+        operation="primaries",
+        version=1,  # DT_MODULE_INTROSPECTION(1), primaries.c
+        # Layout (primaries.c): 8 floats → "<8f" = 32 B: achromatic tint
+        # hue/purity, then red/green/blue hue/purity. VERIFIED against 3
+        # real blobs (32 B each, e.g. "examples_colors_blue LED lighting
+        # fix": blue_hue=-0.1047, blue_purity=0.95) — field order matches.
+        pack_format="<8f",
+        fields=(
+            "achromatic_tint_hue",
+            "achromatic_tint_purity",
+            "red_hue",
+            "red_purity",
+            "green_hue",
+            "green_purity",
+            "blue_hue",
+            "blue_purity",
+        ),
+        defaults={
+            "achromatic_tint_hue": 0.0,
+            "achromatic_tint_purity": 0.0,
+            "red_hue": 0.0,
+            "red_purity": 1.0,
+            "green_hue": 0.0,
+            "green_purity": 1.0,
+            "blue_hue": 0.0,
+            "blue_purity": 1.0,
+        },
+        ranges={
+            "achromatic_tint_hue": (-3.14159, 3.14159),
+            "achromatic_tint_purity": (0.0, 0.99),
+            "red_hue": (-3.14159, 3.14159),
+            "red_purity": (0.01, 5.0),
+            "green_hue": (-3.14159, 3.14159),
+            "green_purity": (0.01, 5.0),
+            "blue_hue": (-3.14159, 3.14159),
+            "blue_purity": (0.01, 5.0),
+        },
+        size_bytes=32,  # Verified against 3 real .dtstyle blobs
+        blendop_cst=4,  # RGB_SCENE — per the real style blobs
+    ),
+    "diffuse": IOPRegistry(
+        operation="diffuse",
+        version=2,  # DT_MODULE_INTROSPECTION(2), diffuse.c
+        # v2 layout (diffuse.c): iterations(i), sharpness(f), radius(i),
+        # regularization(f), variance_threshold(f), anisotropy_first..fourth
+        # (4f), threshold(f), first..fourth speed (4f) [v1 = 56 B],
+        # radius_center(i) [v2] → "<ifi2f4ff4fi" = 15 fields = 60 B.
+        # VERIFIED against the real blob in
+        # "examples_contrast and sharpness_sharpen..." (60 B, module=2):
+        # iterations=30, radius=2, regularization=1.5, variance=-0.05,
+        # aniso2=3.0, speeds=(0.02, 0.04, -0.12, 0.04), radius_center=0.
+        pack_format="<ifi2f4ff4fi",
+        fields=(
+            "iterations",
+            "sharpness",
+            "radius",
+            "regularization",
+            "variance_threshold",
+            "anisotropy_first",
+            "anisotropy_second",
+            "anisotropy_third",
+            "anisotropy_fourth",
+            "threshold",
+            "first",
+            "second",
+            "third",
+            "fourth",
+            "radius_center",
+        ),
+        defaults={
+            "iterations": 1,
+            "sharpness": 0.0,
+            "radius": 8,
+            "regularization": 0.0,
+            "variance_threshold": 0.0,
+            "anisotropy_first": 0.0,
+            "anisotropy_second": 0.0,
+            "anisotropy_third": 0.0,
+            "anisotropy_fourth": 0.0,
+            "threshold": 0.0,
+            "first": 0.0,
+            "second": 0.0,
+            "third": 0.0,
+            "fourth": 0.0,
+            "radius_center": 0,
+        },
+        ranges={
+            "iterations": (0, 500),
+            "sharpness": (-1.0, 1.0),
+            "radius": (0, 2048),
+            "regularization": (0.0, 4.0),
+            "variance_threshold": (-2.0, 2.0),
+            "anisotropy_first": (-10.0, 10.0),
+            "anisotropy_second": (-10.0, 10.0),
+            "anisotropy_third": (-10.0, 10.0),
+            "anisotropy_fourth": (-10.0, 10.0),
+            "threshold": (0.0, 8.0),
+            "first": (-1.0, 1.0),
+            "second": (-1.0, 1.0),
+            "third": (-1.0, 1.0),
+            "fourth": (-1.0, 1.0),
+            "radius_center": (0, 1024),
+        },
+        size_bytes=60,  # Verified against real .dtstyle blob (60 B, module=2)
+        blendop_cst=4,  # RGB_SCENE — per the real style blob
+    ),
+    "negadoctor": IOPRegistry(
+        operation="negadoctor",
+        version=2,  # DT_MODULE_INTROSPECTION(2), negadoctor.c
+        # Layout: film_stock(int enum NB=0/COLOR=1), Dmin[4], wb_high[4],
+        # wb_low[4], D_max, offset, black, gamma, soft_clip, exposure
+        # → "<i18f" = 19 fields = 76 B. Absent from the 534-preset library.
+        pack_format="<i18f",
+        fields=(
+            "film_stock",
+            "Dmin_0",
+            "Dmin_1",
+            "Dmin_2",
+            "Dmin_3",
+            "wb_high_0",
+            "wb_high_1",
+            "wb_high_2",
+            "wb_high_3",
+            "wb_low_0",
+            "wb_low_1",
+            "wb_low_2",
+            "wb_low_3",
+            "D_max",
+            "offset",
+            "black",
+            "gamma",
+            "soft_clip",
+            "exposure",
+        ),
+        defaults={
+            "film_stock": 1,  # DT_FILMSTOCK_COLOR
+            **{f"Dmin_{i}": 1.0 for i in range(4)},
+            **{f"wb_high_{i}": 1.0 for i in range(4)},
+            **{f"wb_low_{i}": 1.0 for i in range(4)},
+            "D_max": 2.046,
+            "offset": -0.05,
+            "black": 0.0755,
+            "gamma": 4.0,
+            "soft_clip": 0.75,
+            "exposure": 0.9245,
+        },
+        ranges={
+            "film_stock": (0, 1),
+            **{f"Dmin_{i}": (0.00001, 1.5) for i in range(4)},
+            **{f"wb_high_{i}": (0.25, 2.0) for i in range(4)},
+            **{f"wb_low_{i}": (0.25, 2.0) for i in range(4)},
+            "D_max": (0.1, 6.0),
+            "offset": (-1.0, 1.0),
+            "black": (-0.5, 0.5),
+            "gamma": (1.0, 8.0),
+            "soft_clip": (0.0001, 1.0),
+            "exposure": (0.5, 2.0),
+        },
+        size_bytes=76,  # struct.calcsize("<i18f"); absent from the 534-preset library
+        blendop_cst=4,  # RGB_SCENE — negative-film reconstruction, scene-referred
+    ),
+    "defringe": IOPRegistry(
+        operation="defringe",
+        version=1,  # DT_MODULE_INTROSPECTION(1), defringe.c
+        # Layout: radius(f, 0.5..20, def 4.0), thresh(f, 0.5..128, def 20.0),
+        # op_mode(int enum GLOBAL_AVERAGE=0/LOCAL_AVERAGE=1/STATIC=2)
+        # → "<2fi" = 12 B. Absent from the 534-preset library.
+        pack_format="<2fi",
+        fields=("radius", "thresh", "op_mode"),
+        defaults={"radius": 4.0, "thresh": 20.0, "op_mode": 0},
+        ranges={"radius": (0.5, 20.0), "thresh": (0.5, 128.0), "op_mode": (0, 2)},
+        size_bytes=12,  # struct.calcsize("<2fi"); absent from the 534-preset library
+        blendop_cst=2,  # LAB — default_colorspace() returns IOP_CS_LAB
+    ),
+    "cacorrectrgb": IOPRegistry(
+        operation="cacorrectrgb",
+        version=1,  # DT_MODULE_INTROSPECTION(1), cacorrectrgb.c
+        # Layout: guide_channel(int enum R=0/G=1/B=2, def G=1), radius(f,
+        # 1..500, def 5), strength(f, 0..4, def 0.5), mode(int enum
+        # STANDARD=0/DARKEN=1/BRIGHTEN=2), refine_manifolds(gboolean FALSE)
+        # → "<i2f2i" = 20 B. Absent from the 534-preset library.
+        pack_format="<i2f2i",
+        fields=("guide_channel", "radius", "strength", "mode", "refine_manifolds"),
+        defaults={
+            "guide_channel": 1,
+            "radius": 5.0,
+            "strength": 0.5,
+            "mode": 0,
+            "refine_manifolds": 0,
+        },
+        ranges={
+            "guide_channel": (0, 2),
+            "radius": (1.0, 500.0),
+            "strength": (0.0, 4.0),
+            "mode": (0, 2),
+            "refine_manifolds": (0, 1),
+        },
+        size_bytes=20,  # struct.calcsize("<2f3i"); absent from the 534-preset library
+        blendop_cst=4,  # RGB_SCENE — CA correction early in the pipeline
+    ),
+    "globaltonemap": IOPRegistry(
+        operation="globaltonemap",
+        version=3,  # DT_MODULE_INTROSPECTION(3), globaltonemap.c
+        # Layout: operator(int enum REINHARD=0/FILMIC=1/DRAGO=2, def DRAGO),
+        # drago.bias(f, 0.5..1, def 0.85), drago.max_light(f, 1..500, def
+        # 100.0), detail(f, -1..1, def 0.0) → "<i3f" = 16 B. Absent from
+        # the 534-preset library.
+        pack_format="<i3f",
+        fields=("operator", "bias", "max_light", "detail"),
+        defaults={"operator": 2, "bias": 0.85, "max_light": 100.0, "detail": 0.0},
+        ranges={
+            "operator": (0, 2),
+            "bias": (0.5, 1.0),
+            "max_light": (1.0, 500.0),
+            "detail": (-1.0, 1.0),
+        },
+        size_bytes=16,  # struct.calcsize("<i3f"); absent from the 534-preset library
+        blendop_cst=2,  # LAB — default_colorspace() returns IOP_CS_LAB
+    ),
+    "profile_gamma": IOPRegistry(
+        operation="profile_gamma",
+        version=2,  # DT_MODULE_INTROSPECTION(2), profile_gamma.c
+        # Layout: mode(int enum LOG=0/GAMMA=1, def LOG), linear(f, 0..1,
+        # def 0.1), gamma(f, 0..1, def 0.45), dynamic_range(f, 0.01..32,
+        # def 10.0), grey_point(f, 0.1..100, def 18.0), shadows_range(f,
+        # -16..16, def -5.0), security_factor(f, -100..100, def 0.0)
+        # → "<i6f" = 28 B. Absent from the 534-preset library.
+        # Operation name is "profile_gamma" (file profile_gamma.c; add_iop in iop CMakeLists).
+        pack_format="<i6f",
+        fields=(
+            "mode",
+            "linear",
+            "gamma",
+            "dynamic_range",
+            "grey_point",
+            "shadows_range",
+            "security_factor",
+        ),
+        defaults={
+            "mode": 0,
+            "linear": 0.1,
+            "gamma": 0.45,
+            "dynamic_range": 10.0,
+            "grey_point": 18.0,
+            "shadows_range": -5.0,
+            "security_factor": 0.0,
+        },
+        ranges={
+            "mode": (0, 1),
+            "linear": (0.0, 1.0),
+            "gamma": (0.0, 1.0),
+            "dynamic_range": (0.01, 32.0),
+            "grey_point": (0.1, 100.0),
+            "shadows_range": (-16.0, 16.0),
+            "security_factor": (-100.0, 100.0),
+        },
+        size_bytes=28,  # struct.calcsize("<i6f"); absent from the 534-preset library
+        blendop_cst=4,  # RGB_SCENE — log/scene workflow module
+    ),
 }
 
 # Simple IOPs (Tier 1 from iop_modules_catalog.md)
