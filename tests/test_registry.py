@@ -59,7 +59,7 @@ class TestRegistryAccess:
         # originals and the refinement IOPs (temperature, basicadj, toneequal,
         # colorequal, colorharmonizer) — all with verified sizes.
         # (relight is deprecated in darktable and not registered.)
-        assert len(verified) == 17
+        assert len(verified) == 22
         assert "hazeremoval" in verified
 
     def test_list_unverified(self):
@@ -467,9 +467,18 @@ class TestRegistryStructure:
             assert set(reg.ranges.keys()) == set(reg.fields)
 
     def test_all_have_blendop_cst(self):
-        """All registry entries should have blendop_cst (2, 3, or 4)."""
+        """All registry entries should have blendop_cst (1, 2, 3, or 4).
+
+        1 = DEVELOP_BLEND_CS_RAW (e.g. highlights, which works on raw data
+        at the start of the pipeline — per blend.h of this master).
+        """
         for op, reg in IOP_REGISTRY.items():
-            assert reg.blendop_cst in (2, 3, 4), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
+            assert reg.blendop_cst in (
+                1,
+                2,
+                3,
+                4,
+            ), f"{op} has invalid blendop_cst: {reg.blendop_cst}"
 
     def test_verified_iops_blendop_cst(self):
         """Verified IOPs should have correct blendop_cst (per blend.h:

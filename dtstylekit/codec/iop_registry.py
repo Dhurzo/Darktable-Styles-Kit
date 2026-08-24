@@ -509,6 +509,379 @@ _VERIFIED_IOPS = {
         legacy_pack_format="<ffi",  # v2: strength, distance, compatibility_mode
         legacy_fields=("strength", "distance", "compatibility_mode"),
     ),
+    "highlights": IOPRegistry(
+        operation="highlights",
+        version=4,  # DT_MODULE_INTROSPECTION(4), highlights.c
+        # v4 layout (highlights.c:~40): mode(int enum), blendL, blendC
+        # (unused), strength, clip [v2], noise_level, iterations(int),
+        # scales(int enum), candidating, combine, recovery(int enum)
+        # [v3], solid_color [v4] → "<iffffifiiffif" = 12 × 4B = 48 B.
+        #
+        # VERIFIED against the real blob in "darktable_Fujifilm_X-E1"
+        # (module=4, 48 B): decodes to exactly the documented defaults —
+        # mode=5 (OPPOSED), blendL=1.0, blendC=0.0, strength=0.0, clip=1.0,
+        # noise_level=0.0, iterations=30, scales=6 (WAVELETS_7_SCALE),
+        # candidating=0.4, combine=2.0, recovery=0 (OFF), solid_color=0.0.
+        # Its blendop cst=1 → DEVELOP_BLEND_CS_RAW (module works on raw
+        # data at the start of the pipeline; default_colorspace() is
+        # RAW-or-RGB dynamic).
+        #
+        # Enum values (highlights.c:57-88): mode CLIP=0, LCH=1, INPAINT=2,
+        # LAPLACIAN=3, SEGMENTS=4, OPPOSED=5. scales WAVELETS_1..7 = 0..6.
+        # recovery OFF=0, ADAPT=5, ADAPTF=6.
+        pack_format="<i5f2i2fif",
+        fields=(
+            "mode",
+            "blendL",
+            "blendC",
+            "strength",
+            "clip",
+            "noise_level",
+            "iterations",
+            "scales",
+            "candidating",
+            "combine",
+            "recovery",
+            "solid_color",
+        ),
+        defaults={
+            "mode": 5,  # DT_IOP_HIGHLIGHTS_OPPOSED
+            "blendL": 1.0,  # unused
+            "blendC": 0.0,  # unused
+            "strength": 0.0,
+            "clip": 1.0,
+            "noise_level": 0.0,
+            "iterations": 30,
+            "scales": 6,  # WAVELETS_7_SCALE
+            "candidating": 0.4,
+            "combine": 2.0,
+            "recovery": 0,  # DT_RECOVERY_MODE_OFF
+            "solid_color": 0.0,
+        },
+        ranges={
+            "mode": (0, 5),
+            "blendL": (0.0, 1.0),
+            "blendC": (0.0, 1.0),
+            "strength": (0.0, 1.0),
+            "clip": (0.0, 2.0),
+            "noise_level": (0.0, 0.5),
+            "iterations": (1, 256),
+            "scales": (0, 6),
+            "candidating": (0.0, 1.0),
+            "combine": (0.0, 8.0),
+            "recovery": (0, 6),
+            "solid_color": (0.0, 1.0),
+        },
+        size_bytes=48,  # Verified against real .dtstyle blob (darktable_Fujifilm_X-E1)
+        blendop_cst=1,  # DEVELOP_BLEND_CS_RAW — per the real style blob
+    ),
+    "rgblevels": IOPRegistry(
+        operation="rgblevels",
+        version=1,  # DT_MODULE_INTROSPECTION(1), rgblevels.c
+        # Layout (rgblevels.c:52-57): autoscale(int enum), preserve_colors
+        # (int enum DT_RGB_NORM_*), levels[3][3] floats = per-channel
+        # {black, middle, white} for R, G, B → "<2i9f" = 11 × 4B = 44 B.
+        # Defaults (rgblevels.c:923-930): levels[c] = {0.0, 0.5, 1.0}
+        # (RGBLEVELS_MIN/MID/MAX).  No real preset carries rgblevels —
+        # visual loop is the only blob validation.
+        pack_format="<2i9f",
+        fields=(
+            "autoscale",
+            "preserve_colors",
+            "levels_r_0",
+            "levels_r_1",
+            "levels_r_2",
+            "levels_g_0",
+            "levels_g_1",
+            "levels_g_2",
+            "levels_b_0",
+            "levels_b_1",
+            "levels_b_2",
+        ),
+        defaults={
+            "autoscale": 0,  # DT_IOP_RGBLEVELS_LINKED_CHANNELS
+            "preserve_colors": 1,  # DT_RGB_NORM_LUMINANCE (rgb_norms.h:25)
+            **{
+                f"levels_{c}_{i}": v
+                for c in ("r", "g", "b")
+                for i, v in zip((0, 1, 2), (0.0, 0.5, 1.0), strict=False)
+            },
+        },
+        ranges={
+            "autoscale": (0, 1),
+            "preserve_colors": (0, 6),
+            **{f"levels_{c}_{i}": (0.0, 1.0) for c in ("r", "g", "b") for i in (0, 1, 2)},
+        },
+        size_bytes=44,  # struct.calcsize("<2i9f"); absent from the 534-preset library
+        blendop_cst=3,  # RGB_DISPLAY — default_colorspace() returns IOP_CS_RGB
+    ),
+    "graduatednd": IOPRegistry(
+        operation="graduatednd",
+        version=1,  # DT_MODULE_INTROSPECTION(1), graduatednd.c
+        # Layout (graduatednd.c:~40): 6 floats → "<6f" = 24 B.
+        # density (-8..8 EV, def 1.0), hardness (0..100 %, def 0.0),
+        # rotation (-180..180 deg, def 0.0), offset (def 50.0, centered),
+        # hue (0..1, def 0.0), saturation (0..1, def 0.0).
+        # Absent from the 534-preset library — visual loop validates.
+        pack_format="<6f",
+        fields=("density", "hardness", "rotation", "offset", "hue", "saturation"),
+        defaults={
+            "density": 1.0,
+            "hardness": 0.0,
+            "rotation": 0.0,
+            "offset": 50.0,
+            "hue": 0.0,
+            "saturation": 0.0,
+        },
+        ranges={
+            "density": (-8.0, 8.0),
+            "hardness": (0.0, 100.0),
+            "rotation": (-180.0, 180.0),
+            "offset": (0.0, 100.0),
+            "hue": (0.0, 1.0),
+            "saturation": (0.0, 1.0),
+        },
+        size_bytes=24,  # struct.calcsize("<6f"); absent from the 534-preset library
+        blendop_cst=3,  # RGB_DISPLAY — default_colorspace() returns IOP_CS_RGB
+    ),
+    "agx": IOPRegistry(
+        operation="agx",
+        version=7,  # DT_MODULE_INTROSPECTION(7), agx.c
+        # v7 layout (agx.c:98-155, all 4-byte fields) → 36 fields = 144 B:
+        #   5f look (lift, slope, brightness, saturation, hue mix 0.6)
+        #   3f log mapping (black EV -10, white EV 6.5, DR scaling 0.1)
+        #   8f curve (pivot x 10/16.5, pivot y 0.18, contrast 3.0,
+        #            toe/shoulder ratios 0, toe power 1.5, shoulder 3.3,
+        #            gamma 2.2)
+        #   i  auto_gamma FALSE
+        #   2f target display black 0 / white 1
+        #   2i base_primaries DT_AGX_REC2020=2, disable_primaries FALSE
+        #   6f primaries inset/rotation (red/green/blue, all 0)
+        #   2f master outset/unrotation ratio (1, 1)
+        #   6f per-channel outset/unrotation (all 0)
+        #   i  completely_reverse_primaries FALSE [v5]
+        # Absent from the 534-preset library — visual loop validates.
+        # base_primaries enum (agx.c:87-95): EXPORT=0, WORK=1, REC2020=2,
+        # P3=3, ADOBE=4, SRGB=5.
+        pack_format="<5f3f8fi2f2i6f2f6fi",
+        fields=(
+            "look_lift",
+            "look_slope",
+            "look_brightness",
+            "look_saturation",
+            "look_original_hue_mix_ratio",
+            "range_black_relative_ev",
+            "range_white_relative_ev",
+            "dynamic_range_scaling",
+            "curve_pivot_x",
+            "curve_pivot_y_linear_output",
+            "curve_contrast_around_pivot",
+            "curve_linear_ratio_below_pivot",
+            "curve_linear_ratio_above_pivot",
+            "curve_toe_power",
+            "curve_shoulder_power",
+            "curve_gamma",
+            "auto_gamma",
+            "curve_target_display_black_ratio",
+            "curve_target_display_white_ratio",
+            "base_primaries",
+            "disable_primaries_adjustments",
+            "red_inset",
+            "red_rotation",
+            "green_inset",
+            "green_rotation",
+            "blue_inset",
+            "blue_rotation",
+            "master_outset_ratio",
+            "master_unrotation_ratio",
+            "red_outset",
+            "red_unrotation",
+            "green_outset",
+            "green_unrotation",
+            "blue_outset",
+            "blue_unrotation",
+            "completely_reverse_primaries",
+        ),
+        defaults={
+            "look_lift": 0.0,
+            "look_slope": 1.0,
+            "look_brightness": 1.0,
+            "look_saturation": 1.0,
+            "look_original_hue_mix_ratio": 0.6,
+            "range_black_relative_ev": -10.0,
+            "range_white_relative_ev": 6.5,
+            "dynamic_range_scaling": 0.1,
+            "curve_pivot_x": 0.606060606061,  # 10/16.5 mid-gray position
+            "curve_pivot_y_linear_output": 0.18,
+            "curve_contrast_around_pivot": 3.0,
+            "curve_linear_ratio_below_pivot": 0.0,
+            "curve_linear_ratio_above_pivot": 0.0,
+            "curve_toe_power": 1.5,
+            "curve_shoulder_power": 3.3,
+            "curve_gamma": 2.2,
+            "auto_gamma": 0,
+            "curve_target_display_black_ratio": 0.0,
+            "curve_target_display_white_ratio": 1.0,
+            "base_primaries": 2,  # DT_AGX_REC2020
+            "disable_primaries_adjustments": 0,
+            "red_inset": 0.0,
+            "red_rotation": 0.0,
+            "green_inset": 0.0,
+            "green_rotation": 0.0,
+            "blue_inset": 0.0,
+            "blue_rotation": 0.0,
+            "master_outset_ratio": 1.0,
+            "master_unrotation_ratio": 1.0,
+            "red_outset": 0.0,
+            "red_unrotation": 0.0,
+            "green_outset": 0.0,
+            "green_unrotation": 0.0,
+            "blue_outset": 0.0,
+            "blue_unrotation": 0.0,
+            "completely_reverse_primaries": 0,
+        },
+        ranges={
+            "look_lift": (-1.0, 1.0),
+            "look_slope": (0.0, 10.0),
+            "look_brightness": (0.0, 100.0),
+            "look_saturation": (0.0, 10.0),
+            "look_original_hue_mix_ratio": (0.0, 1.0),
+            "range_black_relative_ev": (-20.0, -0.1),
+            "range_white_relative_ev": (0.1, 20.0),
+            "dynamic_range_scaling": (-0.5, 2.0),
+            "curve_pivot_x": (0.0, 1.0),
+            "curve_pivot_y_linear_output": (0.0, 1.0),
+            "curve_contrast_around_pivot": (0.1, 10.0),
+            "curve_linear_ratio_below_pivot": (0.0, 1.0),
+            "curve_linear_ratio_above_pivot": (0.0, 1.0),
+            "curve_toe_power": (0.0, 10.0),
+            "curve_shoulder_power": (0.0, 10.0),
+            "curve_gamma": (0.01, 100.0),
+            "auto_gamma": (0, 1),
+            "curve_target_display_black_ratio": (0.0, 0.15),
+            "curve_target_display_white_ratio": (0.2, 1.0),
+            "base_primaries": (0, 5),
+            "disable_primaries_adjustments": (0, 1),
+            "red_inset": (0.0, 0.99),
+            "red_rotation": (-0.5236, 0.5236),
+            "green_inset": (0.0, 0.99),
+            "green_rotation": (-0.5236, 0.5236),
+            "blue_inset": (0.0, 0.99),
+            "blue_rotation": (-0.5236, 0.5236),
+            "master_outset_ratio": (0.0, 2.0),
+            "master_unrotation_ratio": (0.0, 2.0),
+            "red_outset": (0.0, 0.99),
+            "red_unrotation": (-0.5236, 0.5236),
+            "green_outset": (0.0, 0.99),
+            "green_unrotation": (-0.5236, 0.5236),
+            "blue_outset": (0.0, 0.99),
+            "blue_unrotation": (-0.5236, 0.5236),
+            "completely_reverse_primaries": (0, 1),
+        },
+        size_bytes=144,  # struct.calcsize("<5f3f8fi2f2i6f2f6fi"); absent from the 534-preset library
+        blendop_cst=4,  # RGB_SCENE — tone-mapping module, default_colorspace() = IOP_CS_RGB
+    ),
+    "channelmixerrgb": IOPRegistry(
+        operation="channelmixerrgb",
+        version=3,  # DT_MODULE_INTROSPECTION(3), channelmixerrgb.c
+        # v3 layout (channelmixerrgb.c:91-121, CHANNEL_SIZE=4):
+        #   6 × float[4]: red, green, blue (mix matrix, identity default),
+        #   saturation, lightness, grey (all 0) → 24 f
+        #   6 × gboolean normalize_* (0)
+        #   4 × int enum: illuminant (DT_ILLUMINANT_D=2), illum_fluo
+        #   (DT_ILLUMINANT_FLUO_F3=2), illum_led (DT_ILLUMINANT_LED_B5=4),
+        #   adaptation (DT_ADAPTATION_CAT16=1)
+        #   4 × float: x (0.333), y (0.333), temperature (5003.0), gamut (1.0)
+        #   2 × int: clip TRUE (1), version CHANNELMIXERRGB_V_3=2
+        # → "<24f10i4f2i" = 40 fields = 160 B.
+        # Absent from the 534-preset library — visual loop validates.
+        pack_format="<24f10i4f2i",
+        fields=(
+            *(
+                f"{c}_{i}"
+                for c in ("red", "green", "blue", "saturation", "lightness", "grey")
+                for i in range(4)
+            ),
+            "normalize_R",
+            "normalize_G",
+            "normalize_B",
+            "normalize_sat",
+            "normalize_light",
+            "normalize_grey",
+            "illuminant",
+            "illum_fluo",
+            "illum_led",
+            "adaptation",
+            "x",
+            "y",
+            "temperature",
+            "gamut",
+            "clip",
+            "version",
+        ),
+        defaults={
+            "red_0": 1.0,
+            "green_1": 1.0,
+            "blue_2": 1.0,  # identity mix matrix (channelmixerrgb.c:3859)
+            **{
+                f"{c}_{i}": 0.0
+                for c in ("red", "green", "blue", "saturation", "lightness", "grey")
+                for i in range(4)
+                if not (c == "red" and i == 0 or c == "green" and i == 1 or c == "blue" and i == 2)
+            },
+            **{
+                n: 0
+                for n in (
+                    "normalize_R",
+                    "normalize_G",
+                    "normalize_B",
+                    "normalize_sat",
+                    "normalize_light",
+                    "normalize_grey",
+                )
+            },
+            "illuminant": 2,  # DT_ILLUMINANT_D (illuminants.h:30)
+            "illum_fluo": 2,  # DT_ILLUMINANT_FLUO_F3 (illuminants.h:47)
+            "illum_led": 4,  # DT_ILLUMINANT_LED_B5 (illuminants.h:67)
+            "adaptation": 1,  # DT_ADAPTATION_CAT16 (chromatic_adaptation.h:28)
+            "x": 0.333,
+            "y": 0.333,
+            "temperature": 5003.0,
+            "gamut": 1.0,
+            "clip": 1,  # gboolean TRUE
+            "version": 2,  # CHANNELMIXERRGB_V_3 (channelmixerrgb.c:88)
+        },
+        ranges={
+            **{
+                f"{c}_{i}": (-2.0, 2.0)
+                for c in ("red", "green", "blue", "saturation", "lightness", "grey")
+                for i in range(4)
+            },
+            **{
+                n: (0, 1)
+                for n in (
+                    "normalize_R",
+                    "normalize_G",
+                    "normalize_B",
+                    "normalize_sat",
+                    "normalize_light",
+                    "normalize_grey",
+                )
+            },
+            "illuminant": (0, 10),
+            "illum_fluo": (0, 12),
+            "illum_led": (0, 12),
+            "adaptation": (0, 4),
+            "x": (0.0, 1.0),
+            "y": (0.0, 1.0),
+            "temperature": (1667.0, 25000.0),
+            "gamut": (0.0, 12.0),
+            "clip": (0, 1),
+            "version": (0, 2),
+        },
+        size_bytes=160,  # struct.calcsize("<24f10i4f2i"); absent from the 534-preset library
+        blendop_cst=4,  # RGB_SCENE — white-balance/mixing module, scene-referred
+    ),
 }
 
 # Simple IOPs (Tier 1 from iop_modules_catalog.md)

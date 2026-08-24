@@ -14,6 +14,11 @@ Internal ledger for the IOP reverse-engineering workflow
 | temperature | FAIL (3/3) | v4 | `<4fi` / 20B | blob decodes but render shows no color shift; blendop suspect |
 | lowlight | PASS | v1 | `<13f` / 52B | struct mapped from C; round-trips both real preset blobs; visual loop passed on WebP test image (blue cast in midtones/highlights, shadow darkening) — see `docs/reversed_iops/lowlight.md` |
 | hazeremoval | PASS | v3 | `<ffii` / 16B (legacy v2 `<ffi` / 12B, v1 `<ff` / 8B in official styles) | real v2 blob round-trips (dehaze strong preset); visual loop passed on ref_01 + ref_03 (sat +35/+122%, local contrast +2/+16%, veil removal) — see `docs/reversed_iops/hazeremoval.md` |
+| highlights | PASS | v4 | `<i5f2i2fif` / 48B | real blob (Fujifilm_X-E1) decodes to exact defaults; visual loop: blown test image clip 16.8% → 0.0% with strength=1/clip=0.5 — see `docs/reversed_iops/highlights.md` |
+| rgblevels | PASS | v1 | `<2i9f` / 44B | levels[3][3]={black,mid,white} per channel, auto-gamma anchors mid; visual loop PASS after diagnosing mid-anchor darkening — see `docs/reversed_iops/rgblevels_graduatednd_agx_channelmixerrgb.md` |
+| graduatednd | PASS | v1 | `<6f` / 24B | visual loop: blue ND gradient (density 3, hue .55, sat .6) → top-vs-bottom delta -0.114, R-B -0.073 — see same doc |
+| agx | PASS | v7 | `<5f3f8fi2f2i6f2f6fi` / 144B | 36 fields, full AgX tone mapping; visual loop: global tone shift + highlight compression with defaults — see same doc |
+| channelmixerrgb | PASS | v3 | `<24f10i4f2i` / 160B | 40 fields (mix matrix 4/ch + WB CAT16 + gamut); visual loop: illuminant 7500K → warmer (+R-B) per module semantics — see same doc |
 
 ## Status legend
 
