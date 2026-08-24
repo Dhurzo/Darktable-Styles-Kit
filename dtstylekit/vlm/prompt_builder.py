@@ -221,11 +221,49 @@ STEP 3 - MAP TO MODULES WITH STRONG VALUES (use FULL ranges, not timid defaults)
   │   -> Bright airy/high-key                   -> 1.0–1.3                  │
   │   -> [WARNING] AVOID for RAW: darktable adds default filmicrgb; sigmoid       │
   │     stacks = double tone-mapping = crushed/blue images                    │
-  │ sigmoid.contrast_skewness:     -1.0=lift shadows -> +1.0=crush shadows │
-  │   -> Crushed moody shadows                  -> +0.3 to +0.8             │
-  │   -> Lifted shadows for detail/airy         -> -0.3 to -0.1             │
-  │   -> Preserve as-is                         -> -0.1 to +0.1             │
-  └─────────────────────────────────────────────────────────────────────────┘
+   │ sigmoid.contrast_skewness:     -1.0=lift shadows -> +1.0=crush shadows │
+   │   -> Crushed moody shadows                  -> +0.3 to +0.8             │
+   │   -> Lifted shadows for detail/airy         -> -0.3 to -0.1             │
+   │   -> Preserve as-is                         -> -0.1 to +0.1             │
+   ├─────────────────────────────────────────────────────────────────────────┤
+   │ CORRECTION & CREATIVE IOPs (v0.5.0) - add to "adjustments" ONLY when   │
+   │ the scene/direction calls for it. Everything here is OPTIONAL.         │
+   ├─────────────────────────────────────────────────────────────────────────┤
+   │ hazeremoval (v3): dehaze. strength(-1..1, def 0.2), distance(0..1).    │
+   │   -> Hazy/flat scenes (low local contrast, lifted blacks): strength    │
+   │      0.2-0.5, distance 0.2-0.8. Skip for clean high-contrast scenes.   │
+   │ highlights (v4): blown-highlight reconstruction. strength(0..1),       │
+   │   clip(0..2, def 1.0), mode(5=OPPOSED def).                            │
+   │   -> ONLY when the analysis/reference shows clipped highlights         │
+   │      (bright sky, windows): strength 0.3-0.8, clip 0.6-1.0.            │
+   │ graduatednd (v1): graduated ND filter. density(-8..8 EV), hue(0..1),   │
+   │   saturation(0..1), rotation(-180..180), offset(0..100, 50=center).    │
+   │   -> Landscape skies: density 1-3, hue 0.55 (blue) darkens sky.        │
+   │ channelmixerrgb (v3): advanced WB + channel mixing (RGB scene).        │
+   │   temperature(1667..25000 = SCENE illuminant K; higher => warmer out), │
+   │   gamut(0..12, def 1), red/green/blue_0..3 mix matrix rows (-2..2).    │
+   │   -> Creative channel grading: small matrix tweaks (±0.1). Prefer      │
+   │      colorbalancergb for simple grading; use this only for looks       │
+   │      that need per-channel mixing or a known illuminant shift.         │
+   │ primaries (v1): per-primary hue/purity. *_hue(±3.14 rad),              │
+   │   *_purity(0.01..5, 1=neutral), achromatic_tint_*.                     │
+   │   -> Neon/LED/creative looks: hue ±0.1 rad, purity 0.8-1.2. Subtle.    │
+   │ diffuse (v2): anisotropic diffusion (glow OR sharpen). iterations,     │
+   │   radius, regularization, anisotropy_second, first..fourth speeds.     │
+   │   -> Dreamy glow/bloom: iterations 5-20. Skip by default.              │
+   │ globaltonemap (v3): Drago/Reinhard tone map (Lab). operator(0..2,      │
+   │   2=Drago), bias(0.5..1, def 0.85), max_light(1..500).                 │
+   │   -> Alternative compressor. Do NOT stack with filmicrgb.              │
+   │ rgblevels (v1): per-channel black/mid/white levels. [WARNING] auto-    │
+   │   gamma anchors mid=0.5 — small white moves shift midtones hard.       │
+   │   -> Rarely needed; prefer exposure + colorbalancergb.                 │
+   │ defringe (v1) / cacorrectrgb (v1): chromatic-aberration correction.    │
+   │   -> ONLY if the style direction mentions CA/fringing/purple edges.    │
+   │ negadoctor (v2): film-negative reconstruction. NEVER for normal        │
+   │   photos — scanned negatives only.                                     │
+   │ profile_gamma (v2): log/gamma workflow converter. Skip unless the      │
+   │   direction explicitly requests a log workflow.                        │
+   └─────────────────────────────────────────────────────────────────────────┘
 
 STEP 4 - OUTPUT FORMAT (exact JSON, no extra text)
 ```json
@@ -249,6 +287,14 @@ STEP 4 - OUTPUT FORMAT (exact JSON, no extra text)
   "rationale": "Technical reasoning: [1 sentence per major module choice citing numbers from analysis AND reference hues]"
 }
 ```
+
+OPTIONAL correction/creative modules: you MAY add any of `hazeremoval`,
+`highlights`, `graduatednd`, `channelmixerrgb`, `primaries`, `diffuse`,
+`globaltonemap`, `rgblevels`, `defringe`, `cacorrectrgb` to
+`adjustments` — but ONLY when a visible trait of the image or the style
+direction justifies it (see the CORRECTION & CREATIVE IOPs box above).
+NEVER add `negadoctor` (scanned negatives only) or `profile_gamma`
+(log workflows only) for normal photos.
 
 ==================================================================
 CRITICAL RULES - VIOLATION = BROKEN STYLE
@@ -308,6 +354,14 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
     bands ±0.8 max, colorequal sat_* 1.1-1.5 max, basicadj exposure ±0.3,
     colorharmonizer pull_strength 0.1-0.3. Each must be
     traceable to a reference trait.
+21. CONDITIONAL CORRECTION MODULES (hazeremoval, highlights, graduatednd,
+    channelmixerrgb, primaries, diffuse, globaltonemap, rgblevels,
+    defringe, cacorrectrgb): add AT MOST 1-2 per style, ONLY with a
+    visible justification ("hazy horizon -> hazeremoval strength 0.4",
+    "blown sky -> highlights strength 0.5"). If nothing in the image or
+    direction justifies them, add NONE — a clean style with 3-5 core
+    modules beats a cluttered one. NEVER emit negadoctor or
+    profile_gamma for normal photos.
 """
 
 

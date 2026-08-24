@@ -661,6 +661,38 @@ class TestPromptBuilder:
         assert messages[1]["role"] == "user"
         assert "warm cinematic" in messages[1]["content"]
 
+    def test_prompt_documents_conditional_iops(self) -> None:
+        """v0.5.0: the prompt documents the correction & creative IOPs with
+        usage rules, so the VLM can propose them when the scene calls for it."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(mean=0.5)
+        messages = build_prompt(analysis, [], "moody", iop_schema="### filmicrgb")
+        content = messages[0]["content"] + messages[1]["content"]
+        # every conditional IOP is documented
+        for op in (
+            "hazeremoval",
+            "highlights",
+            "graduatednd",
+            "channelmixerrgb",
+            "primaries",
+            "diffuse",
+            "globaltonemap",
+            "rgblevels",
+            "defringe",
+            "cacorrectrgb",
+        ):
+            assert op in content, f"{op} missing from prompt"
+        # usage guards
+        assert "ONLY" in content  # conditional usage rules present
+        assert "NEVER for normal" in content  # negadoctor guard
+        assert "profile_gamma" in content
+        # output schema allows the optional modules
+        assert "OPTIONAL correction/creative modules" in content
+        # critical rule 21 present
+        assert "CONDITIONAL CORRECTION MODULES" in content
+        assert "AT MOST 1-2 per style" in content
+
     def test_dark_image_gets_exposure_guard(self) -> None:
         """A dark image must trigger the EXPOSURE GUARD in the prompt."""
         from dtstylekit.vlm.prompt_builder import build_prompt
