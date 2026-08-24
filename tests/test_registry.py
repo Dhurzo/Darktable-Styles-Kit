@@ -55,11 +55,12 @@ class TestRegistryAccess:
         assert "tonecurve" in verified
         # Simple IOPs should NOT be in verified
         assert "vibrance" not in verified
-        # Now includes bilat (20B), basecurve (520B), plus the originals
-        # and the refinement IOPs (temperature, basicadj, toneequal,
+        # Now includes bilat (20B), basecurve (520B), lowlight (52B), plus the
+        # originals and the refinement IOPs (temperature, basicadj, toneequal,
         # colorequal, colorharmonizer) — all with verified sizes.
         # (relight is deprecated in darktable and not registered.)
-        assert len(verified) == 15
+        assert len(verified) == 17
+        assert "hazeremoval" in verified
 
     def test_list_unverified(self):
         """list_unverified returns operations without verified sizes."""

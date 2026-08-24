@@ -444,6 +444,71 @@ _VERIFIED_IOPS = {
         size_bytes=520,  # Verified from real .dtstyle files
         blendop_cst=3,  # RGB_DISPLAY (default for exposure per src/iop/exposure.c:324) (basecurve is scene-referred)
     ),
+    "lowlight": IOPRegistry(
+        operation="lowlight",
+        version=1,  # DT_MODULE_INTROSPECTION(1), lowlight.c
+        # Verified size: 52 bytes = blueness + transition_x[6] + transition_y[6]
+        # (13 floats). Confirmed against the real .dtstyle blobs in data/presets/
+        # ("examples_effects_day for night" and "...for twilight"), both exactly 52 B.
+        #
+        # Layout (lowlight.c:45-50): float blueness, transition_x[6], transition_y[6].
+        # init() sets x[k] = k/5; $DEFAULT y = 0.5 for every node. commit_params()
+        # builds a dt_draw_curve_new(0.0f, 1.0f) spline over the (x,y) points into
+        # the LUT, and process() uses lut(L/100) as blend weight w between the
+        # original pixel and a blue-shifted scotopic version — hence y in [0,1].
+        pack_format="<13f",
+        fields=(
+            "blueness",
+            *(f"transition_x_{i}" for i in range(6)),
+            *(f"transition_y_{i}" for i in range(6)),
+        ),
+        defaults={
+            "blueness": 0.0,  # $DEFAULT: no blue shift
+            **{f"transition_x_{i}": i / 5.0 for i in range(6)},
+            **{f"transition_y_{i}": 0.5 for i in range(6)},
+        },
+        ranges={
+            "blueness": (0.0, 100.0),  # $MIN/$MAX annotations, lowlight.c:47
+            **{f"transition_x_{i}": (0.0, 1.0) for i in range(6)},  # curve x-domain [0,1]
+            **{f"transition_y_{i}": (0.0, 1.0) for i in range(6)},  # blend weight w (process())
+        },
+        size_bytes=52,  # Verified against real .dtstyle blobs (examples_effects_day*)
+        blendop_cst=2,  # LAB — default_colorspace() returns IOP_CS_LAB
+    ),
+    "hazeremoval": IOPRegistry(
+        operation="hazeremoval",
+        version=3,  # DT_MODULE_INTROSPECTION(3), hazeremoval.c
+        # v3 layout (hazeremoval.c:~50): float strength ($MIN:-1.0 $MAX:1.0
+        # $DEFAULT:0.2), float distance ($MIN:0.0 $MAX:1.0 $DEFAULT:0.2),
+        # gboolean compatibility_mode ($DEFAULT:FALSE), gboolean adaptive
+        # ($DEFAULT:TRUE) → "<ffii" = 16 B.
+        #
+        # Real styles ship v2 blobs (module=2): "<ffi" = 12 B — e.g.
+        # "examples_contrast and sharpness_dehaze (strong, luminance only)"
+        # decodes to strength=0.5, distance=0.8, compatibility_mode=0 with
+        # blendop cst=4 (RGB_SCENE).  legacy_params() maps v1 ("<ff", 8 B)
+        # → v3 (compatibility_mode=TRUE, adaptive=FALSE) and v2 → v3
+        # (adaptive=FALSE).
+        pack_format="<ffii",
+        fields=("strength", "distance", "compatibility_mode", "adaptive"),
+        defaults={
+            "strength": 0.2,
+            "distance": 0.2,
+            "compatibility_mode": 0,  # gboolean FALSE
+            "adaptive": 1,  # gboolean TRUE
+        },
+        ranges={
+            "strength": (-1.0, 1.0),
+            "distance": (0.0, 1.0),
+            "compatibility_mode": (0, 1),
+            "adaptive": (0, 1),
+        },
+        size_bytes=16,  # v3 per struct.calcsize("<ffii"); real styles carry v2 (12 B)
+        blendop_cst=4,  # RGB_SCENE — real style blendop cst=4; default_colorspace() = IOP_CS_RGB
+        legacy_size_bytes=(12, 8),  # v2 and v1 blobs shipped in official styles
+        legacy_pack_format="<ffi",  # v2: strength, distance, compatibility_mode
+        legacy_fields=("strength", "distance", "compatibility_mode"),
+    ),
 }
 
 # Simple IOPs (Tier 1 from iop_modules_catalog.md)
