@@ -38,6 +38,10 @@ _SATURATION_RATIO_LOW = 0.65  # refs notably less saturated than the scene
 _SATURATION_RATIO_HIGH = 1.5  # refs notably more saturated
 _FILMIC_SAT_MIN = -65.0
 _EV_TOLERANCE = 0.3  # don't touch exposure if within ±0.3 EV of target
+# A style is one exposure recipe for MANY photos: never demand a huge EV
+# jump from a single (possibly atypical) preview — the user fine-tunes
+# exposure per shot.  Clamp the fitted EV correction.
+_EV_CLAMP = 0.8
 _HUE_CONF_MIN = 0.7
 
 
@@ -126,11 +130,11 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
         and lum > 0.02
     ):
         ev = math.log2(max(float(ref_lum), 1e-3) / max(float(lum), 1e-3))
-        ev = max(-1.5, min(1.5, ev))
+        ev = max(-_EV_CLAMP, min(_EV_CLAMP, ev))
         exposure_plg = _ensure("exposure")
         cur = float(exposure_plg.params.get("exposure", 0.0) or 0.0)
         if abs(cur - ev) > _EV_TOLERANCE:
-            new = round(max(-1.5, min(1.5, ev)) * 20) / 20  # snap to 0.05
+            new = round(ev * 20) / 20  # snap to 0.05
             exposure_plg.params["exposure"] = new
             warnings.append(
                 f"FIDELITY tone: refs lum {ref_lum:.2f} vs scene {lum:.2f} "
