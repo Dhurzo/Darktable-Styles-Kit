@@ -212,12 +212,16 @@ def generate_style_spec(
             from dtstylekit.analyzer.pipeline import analyze_image as _analyze_ref
 
             _sats: list[float] = []
+            _lums: list[float] = []
             for ref in reference_paths:
                 try:
                     _a = _analyze_ref(ref)
                     _s = getattr(getattr(_a, "luminance", None), "saturation_mean", None)
                     if isinstance(_s, int | float) and not isinstance(_s, bool):
                         _sats.append(float(_s))
+                    _m = getattr(getattr(_a, "luminance", None), "mean", None)
+                    if isinstance(_m, int | float) and not isinstance(_m, bool):
+                        _lums.append(float(_m))
                 except Exception:
                     continue
             if _sats:
@@ -226,6 +230,13 @@ def generate_style_spec(
                     "Reference global HSV saturation: %.3f (%d refs)",
                     reference_analysis["global_saturation"],
                     len(_sats),
+                )
+            if _lums:
+                reference_analysis["global_luminance"] = sum(_lums) / len(_lums)
+                logger.info(
+                    "Reference global luminance: %.3f (%d refs)",
+                    reference_analysis["global_luminance"],
+                    len(_lums),
                 )
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("Could not compute reference global saturation: %s", exc)
@@ -295,6 +306,18 @@ def generate_style_spec(
                 "even after a retry — cannot generate a style. "
                 "Check the model and the analysis output."
             )
+
+    # 6c. Signature fidelity: deterministically fit the spec to the
+    # reference signature (saturation level, tonal placement, warmth).
+    # No-op without references.  Runs after validation so the fitted
+    # values are the ones serialized.
+    if reference_analysis:
+        from dtstylekit.vlm.fidelity import auto_fit_signature
+
+        validated_spec, fit_warnings = auto_fit_signature(
+            validated_spec, reference_analysis, analysis
+        )
+        warnings.extend(fit_warnings)
 
     # 7. Report + warnings for the CLI
     logger.info("VLM report: %s", (report or "(empty)")[:500])
