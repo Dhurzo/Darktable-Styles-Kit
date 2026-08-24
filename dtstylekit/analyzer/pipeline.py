@@ -261,6 +261,12 @@ def _detect_bimodal(
     Builds a 12-bin circular histogram (30° per bin). If the top 2 bins
     together hold >=70% of total weight AND are NOT adjacent (i.e. genuinely
     distinct modes), returns the weighted circular mean of each peak.
+
+    The PRIMARY peak is the one covering more *pixels* (area), not more
+    saturation weight: a look is defined by the hue covering most of the
+    image, not by a small cluster of extremely saturated highlights (e.g.
+    a teal-graded frame with a warm neon sign — the neon outweighs teal
+    under sat² weighting but covers a fraction of the area).
     """
     import numpy as np
 
@@ -271,12 +277,14 @@ def _detect_bimodal(
     total_w = float(w.sum())
     if total_w <= 0:
         return None
-    # 12 bins of 30°, circular layout
+    # 12 bins of 30°, circular layout — weight and pixel-count histograms
     bins: np.ndarray = np.zeros(12, dtype=np.float32)
+    counts: np.ndarray = np.zeros(12, dtype=np.float32)
     for hi, wi in zip(h, w, strict=False):
         bin_idx = int(hi // 30) % 12
         bins[bin_idx] += wi
-    # Find top 2 bins
+        counts[bin_idx] += 1.0
+    # Find top 2 bins by weight (the modes that carry the look's chroma)
     order = np.argsort(bins)[::-1]
     top1, top2 = int(order[0]), int(order[1])
     share = (bins[top1] + bins[top2]) / total_w
@@ -286,7 +294,7 @@ def _detect_bimodal(
     secondary_share = bins[top2] / total_w
     if share < 0.70 or adjacent or secondary_share < 0.20:
         return None
-    # Compute primary hue: circular mean of pixels in top1 +/- 15°
+    # Compute peak hues: circular mean of pixels in peak +/- 15°
     # Wrap-around handling: shift hues so top1's center is at 0
     center1 = (top1 * 30 + 15) % 360
     center2 = (top2 * 30 + 15) % 360
@@ -294,10 +302,15 @@ def _detect_bimodal(
     d1 = np.minimum(np.abs(h - center1), 360 - np.abs(h - center1))
     d2 = np.minimum(np.abs(h - center2), 360 - np.abs(h - center2))
     mask1 = d1 <= d2
-    primary = _circular_mean(h[mask1].tolist(), w[mask1].tolist()) if mask1.any() else center1
-    secondary = (
-        _circular_mean(h[~mask1].tolist(), w[~mask1].tolist()) if (~mask1).any() else center2
-    )
+    mean1 = _circular_mean(h[mask1].tolist(), w[mask1].tolist()) if mask1.any() else center1
+    mean2 = _circular_mean(h[~mask1].tolist(), w[~mask1].tolist()) if (~mask1).any() else center2
+    # Primary = the mode covering more PIXELS (area). Tie-break by weight.
+    area1 = float(mask1.sum())
+    area2 = float((~mask1).sum())
+    if area1 >= area2:
+        primary, secondary = mean1, mean2
+    else:
+        primary, secondary = mean2, mean1
     primary_share = float(w[mask1].sum() / total_w)
     return (primary, secondary, primary_share)
 

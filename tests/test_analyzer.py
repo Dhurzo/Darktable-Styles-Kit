@@ -219,6 +219,24 @@ class TestBimodalDetection:
     def test_bimodal_empty(self) -> None:
         assert _detect_bimodal([], []) is None
 
+    def test_bimodal_primary_by_area_not_saturation_weight(self) -> None:
+        """Regression (Nishimura): a small cluster of extremely saturated
+        warm pixels (neon signs, skin highlights) must NOT become the
+        primary hue of a frame whose look is teal over most of the area.
+        Primary = the mode covering more pixels."""
+        # 150 teal pixels at moderate saturation vs 50 warm pixels at
+        # very high saturation (sat² weighting: 50*0.81=40.5 vs
+        # 150*0.09=13.5 → the warm cluster outweighs 3:1 under sat²).
+        hues = [192.0] * 150 + [35.0] * 50
+        weights = [0.3] * 150 + [0.9] * 50
+        result = _detect_bimodal(hues, weights)
+        assert result is not None
+        primary, secondary, _share = result
+        assert (
+            abs((primary % 360) - 192) < 25
+        ), f"primary should be the area-dominant teal, got {primary}"
+        assert abs((secondary % 360) - 35) < 25
+
 
 class TestAnalyzeReferenceHues:
     """Hito 1: end-to-end reference hue analysis with circular + bimodal logic."""
