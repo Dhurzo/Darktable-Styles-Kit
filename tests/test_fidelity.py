@@ -38,7 +38,7 @@ def _ref_analysis(**overrides) -> dict:
         "shadows_hue_confidence": 1.0,
         "shadows_hue_mode": "global",
         "midtones_hue": 9.7,
-        "midtones_hue_confidence": 0.55,
+        "midtones_hue_confidence": 0.4,
         "midtones_hue_mode": "global",
         "highlights_hue": 16.1,
         "highlights_hue_confidence": 1.0,

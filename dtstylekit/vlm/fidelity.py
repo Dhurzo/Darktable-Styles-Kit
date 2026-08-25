@@ -46,7 +46,9 @@ _EV_TOLERANCE = 0.3  # don't touch exposure if within ±0.3 EV of target
 # jump from a single (possibly atypical) preview — the user fine-tunes
 # exposure per shot.  Clamp the fitted EV correction.
 _EV_CLAMP = 0.8
-_HUE_CONF_MIN = 0.7
+_HUE_CONF_MIN = (
+    0.5  # lowered to capture moderate-confidence reference hues (e.g., Nishimura/Moumarion shadows)
+)
 
 
 def compute_reference_luminance(reference_paths) -> float | None:
