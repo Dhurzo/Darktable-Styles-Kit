@@ -69,6 +69,45 @@ def compute_reference_luminance(reference_paths) -> float | None:
     return sum(lums) / len(lums)
 
 
+def compute_reference_profile(reference_paths) -> dict:
+    """Extended reference profile: contrast, dynamic range, saturation
+    peaks and warmth — the *shape* of the look, not just its averages.
+
+    These feed the adaptive fidelity ranges (contrast fit, saturation
+    peaks, warmth factor) so the same constants do not have to fit every
+    kind of reference.
+    """
+    import numpy as np
+    from PIL import Image
+
+    stds: list[float] = []
+    drs: list[float] = []
+    sp90s: list[float] = []
+    rbs: list[float] = []
+    for ref in reference_paths:
+        try:
+            im = np.asarray(Image.open(ref).convert("RGB"), dtype=np.float32) / 255.0
+            lum = 0.2126 * im[..., 0] + 0.7152 * im[..., 1] + 0.0722 * im[..., 2]
+            stds.append(float(lum.std()))
+            drs.append(float(np.percentile(lum, 95) - np.percentile(lum, 5)))
+            mx, mn = im.max(-1), im.min(-1)
+            sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
+            sp90s.append(float(np.percentile(sat, 90)))
+            rbs.append(float((im[..., 0] - im[..., 2]).mean()))
+        except Exception:
+            continue
+    out: dict = {}
+    if stds:
+        out["global_contrast"] = sum(stds) / len(stds)
+    if drs:
+        out["global_dynamic_range"] = sum(drs) / len(drs)
+    if sp90s:
+        out["global_saturation_p90"] = sum(sp90s) / len(sp90s)
+    if rbs:
+        out["global_warmth_rb"] = sum(rbs) / len(rbs)
+    return out
+
+
 def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple[object, list[str]]:
     """Deterministically fit ``spec`` to the reference signature.
 
@@ -99,7 +138,18 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
 
     # ---- 1. SATURATION -----------------------------------------------------
     ref_sat = reference_analysis.get("global_saturation")
+    scene_sp90 = getattr(getattr(analysis, "luminance", None), "saturation_p90", None)
+    ref_sp90 = reference_analysis.get("global_saturation_p90")
     if (
+        isinstance(ref_sp90, int | float)
+        and isinstance(scene_sp90, int | float)
+        and not isinstance(ref_sp90, bool)
+        and scene_sp90 > 0.02
+    ):
+        # Saturation PEAKS define a look (neons, saturated skies) and are
+        # robust against large neutral areas that drag the mean down.
+        ratio = float(ref_sp90) / float(scene_sp90)
+    elif (
         isinstance(ref_sat, int | float)
         and isinstance(scene_sat, int | float)
         and not isinstance(ref_sat, bool)
@@ -170,6 +220,28 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
                 f"(target {ev:+.2f} EV) → exposure.exposure {cur:+.2f}→{new:+.2f}"
             )
 
+    # ---- 2b. CONTRAST ---------------------------------------------------------
+    ref_contrast = reference_analysis.get("global_contrast")
+    scene_std = getattr(getattr(analysis, "luminance", None), "std", None)
+    if (
+        isinstance(ref_contrast, int | float)
+        and isinstance(scene_std, int | float)
+        and not isinstance(ref_contrast, bool)
+        and scene_std > 0.01
+    ):
+        cratio = float(ref_contrast) / float(scene_std)
+        if abs(cratio - 1.0) > 0.15:
+            filmic = _ensure("filmicrgb")
+            cur = float(filmic.params.get("contrast", 1.0) or 1.0)
+            target = max(0.8, min(1.8, round(cratio**0.7, 2)))
+            if abs(cur - target) > 0.15:
+                filmic.params["contrast"] = target
+                warnings.append(
+                    f"FIDELITY contrast: refs std {ref_contrast:.2f} vs scene "
+                    f"{scene_std:.2f} (ratio {cratio:.2f}) → filmicrgb.contrast "
+                    f"{cur:.2f}→{target:.2f}"
+                )
+
     # ---- 3. WARMTH ------------------------------------------------------------
     for zone in ("shadows", "midtones", "highlights"):
         hue = reference_analysis.get(f"{zone}_hue")
@@ -182,20 +254,32 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
 
         # 3a. Chroma calibration cap: the reference zone hue describes the
         # color of ALREADY-SATURATED areas, not an order to tint the whole
-        # zone. Cap the spec chroma at ref_zone_sat × 0.15 (measured render
-        # calibration: C=0.15 in two zones shifts global R-B by ≈ -0.42 —
-        # a full-image tint; C=0.06 ≈ neutral). The ref zone_sat measures
-        # the reference's CONTENT (neons, saturated skies) — the grade
-        # transferred to a different scene must be a fraction of it.
-        # Applies to every hue mode.
+        # zone. Cap the spec chroma at ref_zone_sat × factor, where the
+        # factor ADAPTS to the hue consistency of the reference: a pure
+        # grade (secondary hue close to primary) earns a stronger factor
+        # (up to 0.30); a split-tone (secondary far away) stays subtle
+        # (0.15). Measured render calibration: C=0.15 in two zones shifts
+        # global R-B by ≈ -0.42 — a full-image tint; C=0.06 ≈ neutral.
+        # The ref zone_sat measures the reference's CONTENT (neons,
+        # saturated skies) — the grade transferred to a different scene
+        # must be a fraction of it. Applies to every hue mode.
         zone_sat = reference_analysis.get(f"{zone}_sat")
+        hue_sec = reference_analysis.get(f"{zone}_hue_secondary")
+        consistency = None
+        if hue is not None and hue_sec is not None:
+            from dtstylekit.analyzer.pipeline import _circular_diff
+
+            diff = _circular_diff(float(hue), float(hue_sec))
+            consistency = max(0.0, 1.0 - diff / 90.0)  # 1 = pure, 0 = split
+        factor = 0.15 + 0.15 * consistency if consistency is not None else 0.15
+        cap_ceiling = 0.08 + 0.07 * (consistency or 0.0)
         if (
             isinstance(zone_sat, int | float)
             and not isinstance(zone_sat, bool)
             and float(zone_sat) > 0.01
-            and cur_c > float(zone_sat) * 0.15
+            and cur_c > float(zone_sat) * factor
         ):
-            cap = round(min(0.08, float(zone_sat) * 0.15), 3)
+            cap = round(min(cap_ceiling, float(zone_sat) * factor), 3)
             cb.params[c_key] = cap
             warnings.append(
                 f"FIDELITY warmth cap: refs {zone}_sat {float(zone_sat):.2f} → "

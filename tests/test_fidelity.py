@@ -13,7 +13,9 @@ from dtstylekit.vlm.models import Plugin, StyleSpec
 @dataclass
 class _Lum:
     mean: float = 0.35
+    std: float = 0.114
     saturation_mean: float = 0.29
+    saturation_p90: float = 0.52
 
 
 @dataclass
@@ -250,3 +252,98 @@ class TestMonochromeFit:
         ce = next(p for p in out.plugins if p.operation == "colorequal")
         assert ce.params["sat_red"] == pytest.approx(0.15)
         assert any("FIDELITY monochrome" in w for w in warns)
+
+
+class TestAdaptiveFidelity:
+    def _profile_refs(self, **overrides) -> dict:
+        base = _ref_analysis()
+        base.update(
+            global_contrast=overrides.get("contrast", 0.20),
+            global_dynamic_range=overrides.get("dr", 0.60),
+            global_saturation_p90=overrides.get("sat_p90", 0.55),
+            global_warmth_rb=overrides.get("warmth", 0.0),
+        )
+        return base
+
+    def test_contrast_fit_flat_refs(self):
+        """Flat references (std 0.08) vs contrasty scene (std 0.20) →
+        filmic contrast pulled below 1.0."""
+        from tests.test_fidelity import _Lum
+
+        out, warns = auto_fit_signature(
+            _spec(),
+            self._profile_refs(contrast=0.08),
+            _Analysis(_Lum(mean=0.35, saturation_mean=0.29, std=0.20)),
+        )
+        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert filmic.params["contrast"] < 1.0
+        assert any("FIDELITY contrast" in w for w in warns)
+
+    def test_contrast_fit_punchy_refs(self):
+        """Punchy references (std 0.32) vs flat scene (std 0.15) →
+        filmic contrast pushed above 1.2."""
+        from tests.test_fidelity import _Lum
+
+        out, warns = auto_fit_signature(
+            _spec(),
+            self._profile_refs(contrast=0.32),
+            _Analysis(_Lum(mean=0.35, saturation_mean=0.29)),
+        )
+        # scene std defaults to 0.114 in _Lum → ratio 2.8 → target ≈ 2.1 clamped 1.8
+        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert filmic.params["contrast"] >= 1.5
+        assert any("FIDELITY contrast" in w for w in warns)
+
+    def test_contrast_fit_noop_when_close(self):
+        """ratio ≈ 1 → no contrast change."""
+        from tests.test_fidelity import _Lum
+
+        _out, warns = auto_fit_signature(
+            _spec(),
+            self._profile_refs(contrast=0.115),
+            _Analysis(_Lum(mean=0.35, saturation_mean=0.29)),
+        )
+        assert not any("FIDELITY contrast" in w for w in warns)
+
+    def test_warmth_adaptive_factor_pure_grade(self):
+        """Pure grade (secondary 20° from primary) → factor 0.30, cap 0.15:
+        C=0.20 spec gets clamped to zone_sat×0.30."""
+        ref = self._profile_refs()
+        ref.update(
+            midtones_hue=195.7,
+            midtones_hue_confidence=1.0,
+            midtones_hue_mode="bi",
+            midtones_hue_secondary=215.0,  # 20° away → consistency ≈ 0.78
+            midtones_sat=0.50,
+        )
+        cb0 = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.20, "midtones_H": 195.7},
+        )
+        out, _warns = auto_fit_signature(_spec(cb0), ref, _Analysis())
+        cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        # factor = 0.15+0.15*0.78 = 0.267 → cap = min(0.135, 0.5*0.267=0.133)
+        assert cb.params["midtones_C"] == pytest.approx(0.133, abs=0.005)
+
+    def test_warmth_adaptive_factor_split_grade(self):
+        """Split grade (secondary 160° from primary) → factor 0.15:
+        C=0.20 spec gets clamped harder (zone_sat×0.15)."""
+        ref = self._profile_refs()
+        ref.update(
+            midtones_hue=195.7,
+            midtones_hue_confidence=1.0,
+            midtones_hue_mode="bi",
+            midtones_hue_secondary=35.0,  # 160° away → consistency 0
+            midtones_sat=0.50,
+        )
+        cb0 = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.20, "midtones_H": 195.7},
+        )
+        out, _ = auto_fit_signature(_spec(cb0), ref, _Analysis())
+        cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert cb.params["midtones_C"] == pytest.approx(0.075, abs=0.005)

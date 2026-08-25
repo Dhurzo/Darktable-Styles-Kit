@@ -241,6 +241,22 @@ def generate_style_spec(
         except Exception as exc:  # pragma: no cover — defensive
             logger.warning("Could not compute reference global saturation: %s", exc)
 
+        # 4c-ter. Extended reference profile (contrast, dynamic range,
+        # saturation peaks, warmth) — feeds the adaptive fidelity ranges.
+        try:
+            from dtstylekit.vlm.fidelity import compute_reference_profile
+
+            reference_analysis.update(compute_reference_profile(reference_paths))
+            logger.info(
+                "Reference profile: contrast=%.3f DR=%.3f sat_p90=%.3f warmth=%+.3f",
+                reference_analysis.get("global_contrast", 0),
+                reference_analysis.get("global_dynamic_range", 0),
+                reference_analysis.get("global_saturation_p90", 0),
+                reference_analysis.get("global_warmth_rb", 0),
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Could not compute reference profile: %s", exc)
+
     # 5. Build prompt
     messages = build_prompt(
         analysis,

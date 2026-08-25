@@ -48,10 +48,13 @@ class LuminanceStats:
     mean: float = 0.0
     std: float = 0.0
     saturation_mean: float = 0.0
+    saturation_p90: float = 0.0
     white_balance_ratio_rb: float = 1.0
     shadows_pct: float = 0.0
     midtones_pct: float = 0.0
     highlights_pct: float = 0.0
+    p5: float = 0.0
+    p95: float = 0.0
 
 
 @dataclass

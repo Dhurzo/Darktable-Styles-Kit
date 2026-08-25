@@ -61,6 +61,7 @@ def compute_luminance_stats(rgb_arrays: Iterable[float] | np.ndarray) -> Luminan
     luma = LUMA_R * r + LUMA_G * g + LUMA_B * b
 
     saturation_mean = _mean_saturation(rgb)
+    saturation_p90 = _saturation_p90(rgb)
     wb_ratio = _white_balance_ratio(float(r.mean()), float(b.mean()))
 
     shadows, midtones, highlights = _tonal_distribution(luma)
@@ -69,10 +70,13 @@ def compute_luminance_stats(rgb_arrays: Iterable[float] | np.ndarray) -> Luminan
         mean=float(luma.mean()),
         std=float(luma.std()),
         saturation_mean=saturation_mean,
+        saturation_p90=saturation_p90,
         white_balance_ratio_rb=wb_ratio,
         shadows_pct=shadows,
         midtones_pct=midtones,
         highlights_pct=highlights,
+        p5=float(np.percentile(luma, 5)),
+        p95=float(np.percentile(luma, 95)),
     )
 
 
@@ -89,6 +93,16 @@ def _mean_saturation(rgb: np.ndarray) -> float:
     mn = rgb.min(axis=1)
     s = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
     return float(s.mean())
+
+
+def _saturation_p90(rgb: np.ndarray) -> float:
+    """90th percentile of HSV saturation — the saturation *peaks* that
+    define a look (neons, saturated skies), robust against large neutral
+    areas that drag the mean down."""
+    mx = rgb.max(axis=1)
+    mn = rgb.min(axis=1)
+    s = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
+    return float(np.percentile(s, 90))
 
 
 def _white_balance_ratio(mean_r: float, mean_b: float) -> float:
