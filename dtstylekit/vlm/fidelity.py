@@ -76,7 +76,7 @@ def auto_fit_signature(
                 filmic.params["saturation"] = 100.0
                 warnings.append("FIDELITY safety: filmicrgb.saturation clamped to 100")
 
-    # colorbalancergb: clamp chroma to [0, 1] (darktable range)
+    # colorbalancergb: clamp chroma to [0, 1] and hue to [0, 360)
     cb = _plugin("colorbalancergb")
     if cb:
         for zone in ("shadows", "midtones", "highlights"):
@@ -89,15 +89,15 @@ def auto_fit_signature(
                 elif c_val > 1:
                     cb.params[c_key] = 1.0
                     warnings.append(f"FIDELITY safety: {c_key} clamped to 1")
-            # hue in [0, 360)
-            for zone in ("shadows", "midtones", "highlights"):
-                h_key = f"{zone}_H"
-                h_val = cb.params.get(h_key)
-                if isinstance(h_val, int | float) and not isinstance(h_val, bool):
-                    if h_val < 0:
-                        cb.params[h_key] = 0.0
-                    elif h_val >= 360:
-                        cb.params[h_key] = float(h_val % 360)
+            h_key = f"{zone}_H"
+            h_val = cb.params.get(h_key)
+            if isinstance(h_val, int | float) and not isinstance(h_val, bool):
+                if h_val < 0:
+                    cb.params[h_key] = 0.0
+                    warnings.append(f"FIDELITY safety: {h_key} clamped to 0")
+                elif h_val >= 360:
+                    cb.params[h_key] = float(h_val % 360)
+                    warnings.append(f"FIDELITY safety: {h_key} wrapped to [0, 360)")
 
     # exposure: clamp to reasonable EV range
     exposure_plg = _plugin("exposure")

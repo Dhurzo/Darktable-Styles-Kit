@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from dtstylekit.vlm.fidelity import auto_fit_signature
+from dtstylekit.vlm.fidelity import auto_fit_signature, compute_reference_profile
 from dtstylekit.vlm.models import Plugin, StyleSpec
 
 
@@ -55,13 +55,6 @@ def _ref_analysis_bn(**overrides) -> dict:
 
 
 class TestSaturationFit:
-    def test_bn_refs_add_monochrome_iop(self):
-        """B/N refs (sat 0.0) → monochrome IOP added (filmic sat not a desaturator)."""
-        out, warns = auto_fit_signature(_spec(), _ref_analysis(global_saturation=0.0), _Analysis())
-        mono = next(p for p in out.plugins if p.operation == "monochrome")
-        assert mono.params["a"] == 0.0 and mono.params["b"] == 0.0
-        assert any("FIDELITY monochrome" in w for w in warns)
-
     def test_desaturates_when_refs_are_muted(self):
         """Refs with low saturation (0.086) vs scene 0.29 → NO auto desaturation.
         The VLM decides saturation; fidelity only clamps impossible values."""
@@ -125,17 +118,65 @@ class TestMonochromeFit:
 
 
 class TestWarmthFit:
-    def test_sets_missing_chroma_with_ref_hue(self):
+    def test_no_auto_chroma_added(self):
         """Confident ref hue but no chroma in spec → NO auto chroma.
         VLM decides chroma; fidelity only clamps invalid values."""
         cb0 = Plugin(operation="colorbalancergb", enabled=True, multi_name="", params={})
         out, warns = auto_fit_signature(_spec(cb0), _ref_analysis(), _Analysis())
         cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
-        # No auto chroma added — VLM decides
         assert "shadows_C" not in cb.params
         assert "highlights_C" not in cb.params
         assert not any("FIDELITY warmth" in w for w in warns)
-        """Chroma clamped to [0, 1] if somehow out of range."""
+
+
+class TestSafetyGuards:
+    """The absolute safety clamps (the ONLY behavior of the module)."""
+
+    def test_filmic_saturation_clamped_high(self):
+        filmic = Plugin(
+            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": 150.0}
+        )
+        out, warns = auto_fit_signature(_spec(filmic), _ref_analysis(), _Analysis())
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert f.params["saturation"] == 100.0
+        assert any("filmicrgb.saturation clamped" in w for w in warns)
+
+    def test_filmic_saturation_clamped_low(self):
+        filmic = Plugin(
+            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": -150.0}
+        )
+        out, _ = auto_fit_signature(_spec(filmic), _ref_analysis(), _Analysis())
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert f.params["saturation"] == -100.0
+
+    def test_filmic_contrast_latitude_balance_clamped(self):
+        filmic = Plugin(
+            operation="filmicrgb",
+            enabled=True,
+            multi_name="",
+            params={"contrast": 10.0, "latitude": 20.0, "balance": -20.0},
+        )
+        out, _ = auto_fit_signature(_spec(filmic), _ref_analysis(), _Analysis())
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert f.params["contrast"] == 5.0
+        assert f.params["latitude"] == 10.0
+        assert f.params["balance"] == -10.0
+
+    def test_exposure_clamped(self):
+        exp_hi = Plugin(
+            operation="exposure", enabled=True, multi_name="", params={"exposure": 10.0}
+        )
+        out, _ = auto_fit_signature(_spec(exp_hi), _ref_analysis(), _Analysis())
+        assert next(p for p in out.plugins if p.operation == "exposure").params["exposure"] == 4.0
+
+        exp_lo = Plugin(
+            operation="exposure", enabled=True, multi_name="", params={"exposure": -10.0}
+        )
+        out, warns = auto_fit_signature(_spec(exp_lo), _ref_analysis(), _Analysis())
+        assert next(p for p in out.plugins if p.operation == "exposure").params["exposure"] == -4.0
+        assert any("exposure clamped" in w for w in warns)
+
+    def test_colorbalance_chroma_clamped(self):
         cb0 = Plugin(
             operation="colorbalancergb",
             enabled=True,
@@ -144,5 +185,47 @@ class TestWarmthFit:
         )
         out, warns = auto_fit_signature(_spec(cb0), _ref_analysis(), _Analysis())
         cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
-        assert cb.params["shadows_C"] == 1.0  # clamped to max 1
-        assert cb.params["highlights_C"] == 0.0  # clamped to min 0
+        assert cb.params["shadows_C"] == 1.0
+        assert cb.params["highlights_C"] == 0.0
+        assert any("highlights_C clamped to 0" in w for w in warns)
+
+    def test_colorbalance_hue_clamped_and_wrapped(self):
+        cb0 = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"shadows_H": -10.0, "highlights_H": 400.0},
+        )
+        out, warns = auto_fit_signature(_spec(cb0), _ref_analysis(), _Analysis())
+        cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert cb.params["shadows_H"] == 0.0
+        assert cb.params["highlights_H"] == 40.0  # 400 % 360
+        assert any("highlights_H wrapped" in w for w in warns)
+
+    def test_noop_without_references(self):
+        exp = Plugin(operation="exposure", enabled=True, multi_name="", params={"exposure": 0.5})
+        out, warns = auto_fit_signature(_spec(exp), None, _Analysis())
+        exp = next(p for p in out.plugins if p.operation == "exposure")
+        assert exp.params["exposure"] == 0.5
+        assert warns == []
+
+
+class TestReferenceProfile:
+    def test_compute_reference_profile(self, tmp_path):
+        """Profile computed and contains the expected keys."""
+        import numpy as np
+        from PIL import Image
+
+        im = np.zeros((100, 100, 3), dtype=np.uint8)
+        im[:, :, 0] = 200
+        im[:, :, 1] = 100
+        im[:, :, 2] = 50
+        Image.fromarray(im).save(tmp_path / "ref1.jpg")
+        Image.fromarray(im).save(tmp_path / "ref2.jpg")
+
+        profile = compute_reference_profile([tmp_path / "ref1.jpg", tmp_path / "ref2.jpg"])
+
+        assert "global_contrast" in profile
+        assert "global_dynamic_range" in profile
+        assert "global_saturation_p90" in profile
+        assert "global_warmth_rb" in profile
