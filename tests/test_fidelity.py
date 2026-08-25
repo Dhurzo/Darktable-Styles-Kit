@@ -50,12 +50,13 @@ def _ref_analysis(**overrides) -> dict:
 
 class TestSaturationFit:
     def test_desaturates_when_refs_are_muted(self):
-        """Refs sat 0.086 vs scene 0.29 (ratio 0.30) → strong negative
-        filmicrgb.saturation."""
+        """Refs sat 0.086 vs scene 0.29 (ratio 0.30) → colorequal desaturation
+        sat_* ≈ 1-(1-0.30)/1.44 = 0.51 (measured render calibration)."""
         spec = _spec()
         out, warns = auto_fit_signature(spec, _ref_analysis(), _Analysis())
-        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic.params["saturation"] <= -35
+        ce = next(p for p in out.plugins if p.operation == "colorequal")
+        assert ce.params["sat_red"] == pytest.approx(0.51, abs=0.02)
+        assert ce.params["sat_blue"] == pytest.approx(0.51, abs=0.02)
         assert any("FIDELITY saturation" in w for w in warns)
 
     def test_no_change_when_saturation_close(self):
@@ -83,13 +84,16 @@ class TestSaturationFit:
         assert filmic2.params["saturation"] == -80.0
 
     def test_strengthens_insufficient_desaturation(self):
-        """If the VLM set -50 but the refs demand ≈-65, reinforce it."""
-        filmic = Plugin(
-            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": -50.0}
+        """If the VLM set sat_*=0.8 but the refs demand ≈0.51, reinforce."""
+        ce0 = Plugin(
+            operation="colorequal",
+            enabled=True,
+            multi_name="",
+            params={"sat_red": 0.8, "sat_green": 0.8, "sat_blue": 0.8},
         )
-        out, _ = auto_fit_signature(_spec(filmic), _ref_analysis(), _Analysis())
-        filmic2 = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic2.params["saturation"] == pytest.approx(-70.3, abs=0.5)
+        out, _ = auto_fit_signature(_spec(ce0), _ref_analysis(), _Analysis())
+        ce = next(p for p in out.plugins if p.operation == "colorequal")
+        assert ce.params["sat_red"] == pytest.approx(0.51, abs=0.02)
 
 
 class TestToneFit:
@@ -228,8 +232,21 @@ class TestWarmthCap:
 
 class TestSaturationFitBN:
     def test_bn_references_demand_full_desaturation(self):
-        """B/N refs (sat 0.0) vs colorful scene → filmicrgb.saturation=-100
-        (filmic sat is linear: -65 measured leaves 35% saturation)."""
+        """B/N refs (sat 0.0) vs colorful scene → monochrome IOP +
+        colorequal floor (filmic saturation is not a desaturator)."""
         out, _warns = auto_fit_signature(_spec(), _ref_analysis(global_saturation=0.0), _Analysis())
-        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic.params["saturation"] == -100.0
+        assert any(p.operation == "monochrome" for p in out.plugins)
+        ce = next(p for p in out.plugins if p.operation == "colorequal")
+        assert ce.params["sat_red"] == pytest.approx(0.15)
+
+
+class TestMonochromeFit:
+    def test_bn_refs_add_monochrome_iop(self):
+        """B/N refs (sat 0.0) → the monochrome IOP is added (filmic sat
+        cannot reach zero — measured -100 still leaves 35%)."""
+        out, warns = auto_fit_signature(_spec(), _ref_analysis(global_saturation=0.0), _Analysis())
+        mono = next(p for p in out.plugins if p.operation == "monochrome")
+        assert mono.params["a"] == 0.0 and mono.params["b"] == 0.0
+        ce = next(p for p in out.plugins if p.operation == "colorequal")
+        assert ce.params["sat_red"] == pytest.approx(0.15)
+        assert any("FIDELITY monochrome" in w for w in warns)

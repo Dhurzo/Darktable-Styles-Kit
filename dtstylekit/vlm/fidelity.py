@@ -36,9 +36,11 @@ _CHROMA_SUBTLE = 0.05
 
 _SATURATION_RATIO_LOW = 0.65  # refs notably less saturated than the scene
 _SATURATION_RATIO_HIGH = 1.5  # refs notably more saturated
-_FILMIC_SAT_MIN = (
-    -100.0
-)  # measured: filmic sat is linear — -65 leaves 35% saturation (B/N needs -100)
+# colorequal desaturation calibration (real darktable render): sat_* = 0.35
+# on all 8 channels → render saturation = 0.53 × scene saturation.
+# factor ≈ 1 - (1 - sat_equal) / 1.44
+_CE_DESAT_SCALE = 1.44
+_CE_CHANNELS = ("red", "orange", "yellow", "green", "cyan", "blue", "lavender", "magenta")
 _EV_TOLERANCE = 0.3  # don't touch exposure if within ±0.3 EV of target
 # A style is one exposure recipe for MANY photos: never demand a huge EV
 # jump from a single (possibly atypical) preview — the user fine-tunes
@@ -102,15 +104,38 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
         and scene_sat > 0.02
     ):
         ratio = float(ref_sat) / float(scene_sat)
-        if ratio < _SATURATION_RATIO_LOW:
-            filmic = _ensure("filmicrgb")
-            target = max(_FILMIC_SAT_MIN, min(0.0, round((ratio - 1.0) * 100.0)))
-            cur = float(filmic.params.get("saturation", 0.0) or 0.0)
-            if cur > target:
-                filmic.params["saturation"] = target
+        if ratio < 0.15 or float(ref_sat) < 0.03:
+            # Essentially monochrome references → real B/W via the
+            # monochrome IOP (a=b=0 is the luminance mix).  filmicrgb
+            # saturation is NOT a desaturator (measured: -100 still leaves
+            # ≈half the scene saturation — it shapes the tone mapper).
+            mono = _ensure("monochrome")
+            mono.params.setdefault("a", 0.0)
+            mono.params.setdefault("b", 0.0)
+            ce = _ensure("colorequal")
+            for c in _CE_CHANNELS:
+                ce.params.setdefault(f"sat_{c}", 0.15)
+            warnings.append(
+                f"FIDELITY monochrome: refs saturation {float(ref_sat):.2f} "
+                f"→ monochrome IOP added (colorequal sat 0.15 assists)"
+            )
+        elif ratio < _SATURATION_RATIO_LOW:
+            # Partial desaturation via colorequal (measured render
+            # calibration: sat_* 0.35 → render factor 0.53 of scene sat).
+            target = 1.0 - (1.0 - ratio) / _CE_DESAT_SCALE
+            target = max(0.05, min(1.0, round(target, 3)))
+            ce = _ensure("colorequal")
+            changed = []
+            for c in _CE_CHANNELS:
+                k = f"sat_{c}"
+                cur = float(ce.params.get(k, 1.0) or 1.0)
+                if cur > target:
+                    ce.params[k] = target
+                    changed.append(c)
+            if changed:
                 warnings.append(
                     f"FIDELITY saturation: refs {ref_sat:.2f} vs scene {scene_sat:.2f} "
-                    f"(ratio {ratio:.2f}) → filmicrgb.saturation {cur:.0f}→{target:.0f}"
+                    f"(ratio {ratio:.2f}) → colorequal sat_* → {target:.2f}"
                 )
         elif ratio > _SATURATION_RATIO_HIGH:
             cb = _ensure("colorbalancergb")
