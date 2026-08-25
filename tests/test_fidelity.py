@@ -265,46 +265,6 @@ class TestAdaptiveFidelity:
         )
         return base
 
-    def test_contrast_fit_flat_refs(self):
-        """Flat references (std 0.08) vs contrasty scene (std 0.20) →
-        filmic contrast pulled below 1.0."""
-        from tests.test_fidelity import _Lum
-
-        out, warns = auto_fit_signature(
-            _spec(),
-            self._profile_refs(contrast=0.08),
-            _Analysis(_Lum(mean=0.35, saturation_mean=0.29, std=0.20)),
-        )
-        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic.params["contrast"] < 1.0
-        assert any("FIDELITY contrast" in w for w in warns)
-
-    def test_contrast_fit_punchy_refs(self):
-        """Punchy references (std 0.32) vs flat scene (std 0.15) →
-        filmic contrast pushed above 1.2."""
-        from tests.test_fidelity import _Lum
-
-        out, warns = auto_fit_signature(
-            _spec(),
-            self._profile_refs(contrast=0.32),
-            _Analysis(_Lum(mean=0.35, saturation_mean=0.29)),
-        )
-        # scene std defaults to 0.114 in _Lum → ratio 2.8 → target ≈ 2.1 clamped 1.8
-        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic.params["contrast"] >= 1.5
-        assert any("FIDELITY contrast" in w for w in warns)
-
-    def test_contrast_fit_noop_when_close(self):
-        """ratio ≈ 1 → no contrast change."""
-        from tests.test_fidelity import _Lum
-
-        _out, warns = auto_fit_signature(
-            _spec(),
-            self._profile_refs(contrast=0.115),
-            _Analysis(_Lum(mean=0.35, saturation_mean=0.29)),
-        )
-        assert not any("FIDELITY contrast" in w for w in warns)
-
     def test_warmth_adaptive_factor_pure_grade(self):
         """Pure grade (secondary 20° from primary) → factor 0.30, cap 0.15:
         C=0.20 spec gets clamped to zone_sat×0.30."""

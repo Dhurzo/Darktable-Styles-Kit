@@ -69,6 +69,16 @@ def compute_reference_luminance(reference_paths) -> float | None:
     return sum(lums) / len(lums)
 
 
+# NOTE: there is deliberately NO contrast fit.  A first attempt
+# (filmic contrast ← (ref_std/scene_std)^0.7) calibrated against a
+# single preview photo and inflated the contrast for the whole set when
+# the preview happened to be flat (Moumarion: contrast 1.40→1.65 crushed
+# shadows and desaturated midtones — visually much worse despite the
+# average-std metric looking "closer").  The VLM sees the references
+# and picks the contrast; a numeric fit against one atypical frame does
+# more harm than good.
+
+
 def compute_reference_profile(reference_paths) -> dict:
     """Extended reference profile: contrast, dynamic range, saturation
     peaks and warmth — the *shape* of the look, not just its averages.
@@ -219,28 +229,6 @@ def auto_fit_signature(spec, reference_analysis: dict | None, analysis) -> tuple
                 f"FIDELITY tone: refs lum {ref_lum:.2f} vs scene {lum:.2f} "
                 f"(target {ev:+.2f} EV) → exposure.exposure {cur:+.2f}→{new:+.2f}"
             )
-
-    # ---- 2b. CONTRAST ---------------------------------------------------------
-    ref_contrast = reference_analysis.get("global_contrast")
-    scene_std = getattr(getattr(analysis, "luminance", None), "std", None)
-    if (
-        isinstance(ref_contrast, int | float)
-        and isinstance(scene_std, int | float)
-        and not isinstance(ref_contrast, bool)
-        and scene_std > 0.01
-    ):
-        cratio = float(ref_contrast) / float(scene_std)
-        if abs(cratio - 1.0) > 0.15:
-            filmic = _ensure("filmicrgb")
-            cur = float(filmic.params.get("contrast", 1.0) or 1.0)
-            target = max(0.8, min(1.8, round(cratio**0.7, 2)))
-            if abs(cur - target) > 0.15:
-                filmic.params["contrast"] = target
-                warnings.append(
-                    f"FIDELITY contrast: refs std {ref_contrast:.2f} vs scene "
-                    f"{scene_std:.2f} (ratio {cratio:.2f}) → filmicrgb.contrast "
-                    f"{cur:.2f}→{target:.2f}"
-                )
 
     # ---- 3. WARMTH ------------------------------------------------------------
     for zone in ("shadows", "midtones", "highlights"):
