@@ -89,7 +89,7 @@ class TestSaturationFit:
         )
         out, _ = auto_fit_signature(_spec(filmic), _ref_analysis(), _Analysis())
         filmic2 = next(p for p in out.plugins if p.operation == "filmicrgb")
-        assert filmic2.params["saturation"] == -65.0
+        assert filmic2.params["saturation"] == pytest.approx(-70.3, abs=0.5)
 
 
 class TestToneFit:
@@ -224,3 +224,12 @@ class TestWarmthCap:
         cb = next(p for p in out.plugins if p.operation == "colorbalancergb")
         assert cb.params["midtones_C"] == 0.05
         assert not any("warmth cap" in w for w in warns)
+
+
+class TestSaturationFitBN:
+    def test_bn_references_demand_full_desaturation(self):
+        """B/N refs (sat 0.0) vs colorful scene → filmicrgb.saturation=-100
+        (filmic sat is linear: -65 measured leaves 35% saturation)."""
+        out, _warns = auto_fit_signature(_spec(), _ref_analysis(global_saturation=0.0), _Analysis())
+        filmic = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert filmic.params["saturation"] == -100.0

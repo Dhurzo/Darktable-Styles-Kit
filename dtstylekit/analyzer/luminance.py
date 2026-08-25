@@ -12,7 +12,6 @@ returns a :class:`LuminanceStats` instance covering:
 
 from __future__ import annotations
 
-import colorsys
 from collections.abc import Iterable
 
 import numpy as np
@@ -78,17 +77,18 @@ def compute_luminance_stats(rgb_arrays: Iterable[float] | np.ndarray) -> Luminan
 
 
 def _mean_saturation(rgb: np.ndarray) -> float:
-    """Mean HSV saturation across all pixels (in [0, 1])."""
-    # colorsys works pixel-by-pixel; for very large arrays this would be slow,
-    # but analyzer is already operating on downsampled data, so it is fine.
-    flat = rgb.reshape(-1, 3)
-    total = 0.0
-    count = flat.shape[0]
-    for px in flat:
-        _, _, s = colorsys.rgb_to_hls(float(px[0]), float(px[1]), float(px[2]))
-        # saturation ``s`` is what we need (HSV-style saturation in [0, 1]).
-        total += s
-    return total / max(count, 1)
+    """Mean HSV saturation across all pixels (in [0, 1]).
+
+    HSV saturation is ``(max - min) / max`` — NOT the HLS variant
+    (``(max - min) / (2 - max - min)``), which inflates saturation on
+    bright low-contrast images (a pastel high-key frame measured 0.52
+    under HLS vs 0.15 true HSV, which then tripped the "colorful
+    references" anti-mute guard and blocked legitimate desaturation).
+    """
+    mx = rgb.max(axis=1)
+    mn = rgb.min(axis=1)
+    s = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
+    return float(s.mean())
 
 
 def _white_balance_ratio(mean_r: float, mean_b: float) -> float:

@@ -36,7 +36,9 @@ _CHROMA_SUBTLE = 0.05
 
 _SATURATION_RATIO_LOW = 0.65  # refs notably less saturated than the scene
 _SATURATION_RATIO_HIGH = 1.5  # refs notably more saturated
-_FILMIC_SAT_MIN = -65.0
+_FILMIC_SAT_MIN = (
+    -100.0
+)  # measured: filmic sat is linear — -65 leaves 35% saturation (B/N needs -100)
 _EV_TOLERANCE = 0.3  # don't touch exposure if within ±0.3 EV of target
 # A style is one exposure recipe for MANY photos: never demand a huge EV
 # jump from a single (possibly atypical) preview — the user fine-tunes
