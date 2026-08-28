@@ -239,6 +239,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
             registry=IOP_REGISTRY,
             model=args.model,
             references=[str(p) for p in references],  # str | Path union
+            temperature=args.temperature if args.temperature is not None else 0.4,
             refine_iterations=args.refine_iterations,
             refine_raw_path=args.refine_raw,
         )
@@ -273,12 +274,21 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 print(f"  - {w}", file=sys.stderr)
         return 1
 
-    # Generate .dtstyle + report
-    output_dir = Path(args.output) if args.output else Path("./generated_styles")
+    # Generate .dtstyle + report.  `-o` accepts either a directory (the
+    # historical behaviour, filename derived from the style name) or an
+    # explicit `.dtstyle` file path.  Report + explanation files follow the
+    # same stem.
+    if args.output and str(args.output).endswith(".dtstyle"):
+        dtstyle_path = Path(args.output).expanduser()
+        output_dir = dtstyle_path.parent
+        stem = dtstyle_path.stem
+    else:
+        output_dir = Path(args.output) if args.output else Path("./generated_styles")
+        stem = spec.style_name.replace(" ", "_")
+        dtstyle_path = output_dir / f"{stem}.dtstyle"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    dtstyle_path = output_dir / f"{spec.style_name.replace(' ', '_')}.dtstyle"
-    report_path = output_dir / f"{spec.style_name.replace(' ', '_')}.md"
+    report_path = output_dir / f"{stem}.md"
 
     try:
         generate_dtstyle(spec, selected_presets, dtstyle_path, analysis)
@@ -330,7 +340,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         from dtstylekit.analyzer.pipeline import analyze_reference_hues
         from dtstylekit.composer.explanation import generate_explanation
 
-        explanation_path = output_dir / f"{spec.style_name.replace(' ', '_')}_EXPLICACION.md"
+        explanation_path = output_dir / f"{stem}_EXPLICACION.md"
         try:
             reference_analysis = analyze_reference_hues(references)
             generate_explanation(
@@ -424,6 +434,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=("es", "en"),
         default="es",
         help="Language of the natural-language explanation document (default: es).",
+    )
+    gen.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="VLM sampling temperature (default: 0.4). Higher = more creative.",
     )
 
     # analyze subcommand (alias for generate)

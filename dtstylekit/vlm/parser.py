@@ -46,6 +46,20 @@ def parse_response(text: str) -> tuple[StyleSpec, str]:
     return spec, report
 
 
+def intended_adjustments(text: str) -> dict[str, dict]:
+    """Return the VLM's *intended* (pre-validation) adjustments.
+
+    Runs the same generic-term -> IOP/param normalisation the parser uses, so
+    the result is the vocabulary the validator expects.  Comparing this against
+    the *validated* spec lets the eval harness measure how much of the VLM's
+    intent survives parsing + validation + clamping (the "intent loss").
+    """
+    data = _extract_json(text)
+    if data is None:
+        return {}
+    return _normalize_adjustments(data.get("adjustments") or {})
+
+
 def _extract_json(text: str) -> dict | None:
     """Robustly extract a JSON object from a VLM response.
 

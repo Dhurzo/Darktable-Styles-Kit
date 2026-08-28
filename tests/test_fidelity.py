@@ -229,3 +229,74 @@ class TestReferenceProfile:
         assert "global_dynamic_range" in profile
         assert "global_saturation_p90" in profile
         assert "global_warmth_rb" in profile
+
+
+class TestGentleNudge:
+    """The gentle target-nudge corrects gross VLM mismatches WITHOUT
+    overriding creative intent."""
+
+    def test_nudges_desaturated_toward_vivid_ref(self):
+        """Colorful reference (0.30) but VLM set saturation=-60 → nudge up."""
+        filmic = Plugin(
+            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": -60.0}
+        )
+        out, warns = auto_fit_signature(
+            _spec(filmic), _ref_analysis(global_saturation=0.30), _Analysis()
+        )
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        # Closer to the vivid target (+5) than -60, but not a hard override.
+        assert f.params["saturation"] > -60.0
+        assert any("FIDELITY nudge" in w for w in warns)
+
+    def test_nudges_vivid_toward_muted_ref(self):
+        """Muted reference (0.05) but VLM set saturation=+60 → nudge down."""
+        filmic = Plugin(
+            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": 60.0}
+        )
+        out, warns = auto_fit_signature(
+            _spec(filmic), _ref_analysis(global_saturation=0.05), _Analysis()
+        )
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert f.params["saturation"] < 60.0
+        assert any("FIDELITY nudge" in w for w in warns)
+
+    def test_no_nudge_when_close_to_target(self):
+        """Natural reference (0.20) and mild saturation (-10) → leave alone."""
+        filmic = Plugin(
+            operation="filmicrgb", enabled=True, multi_name="", params={"saturation": -10.0}
+        )
+        out, warns = auto_fit_signature(
+            _spec(filmic), _ref_analysis(global_saturation=0.20), _Analysis()
+        )
+        f = next(p for p in out.plugins if p.operation == "filmicrgb")
+        assert f.params["saturation"] == -10.0
+        assert not any("FIDELITY nudge" in w for w in warns)
+
+    def test_chroma_nudged_toward_reference_saturation(self):
+        """VLM left chroma at 0 but reference zone is colorful → gentle chroma."""
+        cb = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"shadows_C": 0.0, "midtones_C": 0.0, "highlights_C": 0.0},
+        )
+        ref = _ref_analysis(shadows_sat=0.5)
+        out, warns = auto_fit_signature(_spec(cb), ref, _Analysis())
+        c = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert c.params["shadows_C"] > 0.0
+        assert any("FIDELITY nudge" in w and "shadows_C" in w for w in warns)
+
+    def test_warmth_nudges_hue_toward_reference_grade(self):
+        """Warm reference but VLM set a cool midtones hue → nudge warm."""
+        cb = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.05, "midtones_H": 200.0},
+        )
+        ref = _ref_analysis(global_warmth_rb=0.10)
+        out, warns = auto_fit_signature(_spec(cb), ref, _Analysis())
+        c = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        # 200° (cool) nudged halfway toward 45° (warm) ≈ 122.5°
+        assert 90.0 < c.params["midtones_H"] < 200.0
+        assert any("FIDELITY nudge" in w and "warm reference" in w for w in warns)

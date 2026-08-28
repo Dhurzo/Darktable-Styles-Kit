@@ -304,6 +304,52 @@ def test_fts5_returns_ranked_results(tmp_path: Path, preset_dir: Path) -> None:
         idx.close()
 
 
+def test_fts_indexes_description_and_iops(tmp_path: Path) -> None:
+    """Regression: keyword search must match the preset *description* and
+    *IOP names* (from ``iop_list``), not only the display name.
+
+    The FTS trigger and the bulk rebuild used to insert ``''`` for those
+    columns, so a query like "cinematic" (in the description) or
+    "colorbalancergb" (in the IOP list) could never match.
+
+    Uses synthetic presets so it runs without the 534-preset library.
+    """
+    plugins = [
+        PluginRef("filmicrgb", 1, "", 0, 9, 6, "AA==", "BB==", 13, 0),
+        PluginRef("colorbalancergb", 1, "", 0, 11, 5, "EE==", "FF==", 13, 0),
+    ]
+    preset = Preset(
+        name="examples_colors_sepia",
+        description="A faded warm cinematic look with filmic tone mapping",
+        iop_list="filmicrgb,0,colorbalancergb,1",
+        plugins=plugins,
+        file_path=tmp_path / "sepia.dtstyle",
+        xml_hash="0" * 64,
+    )
+    db_path = tmp_path / "idx.db"
+    idx = PresetIndexer(db_path)
+    idx.index_presets([preset])
+    idx.close()
+
+    searcher = PresetSearcher(db_path, None, exclude_categories=())
+    try:
+        # Match by a description term that is NOT in the display name.
+        by_desc = searcher.keyword_search("cinematic", 10)
+        assert by_desc, "keyword search should match description text"
+        assert any(r.preset.name == preset.name for r in by_desc)
+
+        # Match by an IOP name from iop_list (not in the display name).
+        by_op = searcher.keyword_search("colorbalancergb", 10)
+        assert by_op, "keyword search should match IOP names in iop_list"
+        assert any(r.preset.name == preset.name for r in by_op)
+
+        # Scores normalized to (0, 1).
+        for r in by_desc + by_op:
+            assert 0.0 < r.score <= 1.0
+    finally:
+        searcher.close()
+
+
 # -- Search ----------------------------------------------------------------
 
 

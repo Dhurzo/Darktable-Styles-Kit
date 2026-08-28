@@ -88,6 +88,27 @@ def add_preset_subcommands(subparsers: argparse._SubParsersAction) -> None:
         help="Hybrid search weight for semantic (0-1)",
     )
 
+    # List command (enumerate indexed presets)
+    list_parser = preset_subparsers.add_parser("list", help="List indexed presets")
+    list_parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=get_outputs_dir() / "presets.db",
+        help="SQLite database path",
+    )
+    list_parser.add_argument(
+        "--category",
+        type=str,
+        default=None,
+        help="Filter by category (e.g. 'film', 'camera')",
+    )
+    list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Maximum rows to print (0 = all)",
+    )
+
 
 def cmd_preset_index(args: argparse.Namespace) -> int:
     """Execute the 'preset index' command."""
@@ -188,6 +209,45 @@ def main_preset(args: argparse.Namespace) -> int:
         return cmd_preset_index(args)
     elif args.preset_command == "search":
         return cmd_preset_search(args)
+    elif args.preset_command == "list":
+        return cmd_preset_list(args)
     else:
         print(f"Unknown preset command: {args.preset_command}")
         return 1
+
+
+def cmd_preset_list(args: argparse.Namespace) -> int:
+    """Execute the 'preset list' command."""
+    db_path = args.db_path
+    if not db_path.exists():
+        print(
+            "ERROR: Preset index not built. Run `dtstylekit preset index` first.",
+            file=__import__("sys").stderr,
+        )
+        return 1
+
+    indexer = PresetIndexer(db_path)
+    conn = indexer.connect()
+    try:
+        sql = "SELECT display_name, category, name FROM presets"
+        params: list = []
+        if args.category:
+            sql += " WHERE category LIKE ?"
+            params.append(f"%{args.category}%")
+        sql += " ORDER BY display_name"
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        indexer.close()
+
+    if args.limit:
+        rows = rows[: args.limit]
+
+    if not rows:
+        print("No presets found.")
+        return 0
+
+    for display_name, category, name in rows:
+        label = display_name or name
+        print(f"[{category or '-'}] {label}")
+    print(f"\n{len(rows)} preset(s) listed.")
+    return 0

@@ -497,7 +497,7 @@ def build_prompt(
     )
 
     preset_summaries = []
-    for p in presets[:5]:
+    for p in presets[: 8 if reference_b64s else 5]:
         ops = [plg.operation for plg in p.plugins if plg.enabled]
         # The .dtstyle filename (e.g. "examples_colors_sepia.dtstyle").
         try:
@@ -544,16 +544,35 @@ def build_prompt(
         )
     # CRITICAL: Curve template names (cinematic_teal_orange, inverted_s_strong, etc.) are NOT preset filenames.
     # They are used ONLY in adjustments.tonecurve.curve_preset or adjustments.colorzones.curve_preset.
-    preset_note = (
-        "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
-        "Curve template names like 'cinematic_teal_orange', 'inverted_s_strong', 's_curve_mild', "
-        "'lift_shadows', 'muted_earth', 'cool_shadows_warm_highs', 'vintage_faded', 'skin_tone_protect' "
-        "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
-        "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
-        "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
-        "and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
-        "add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
-    )
+    if reference_b64s:
+        # Reference-driven generation: the attached references DEFINE the target
+        # look, so the VLM should COMPOSE FROM the closest matching candidate
+        # preset (which supplies the real baseline tone map + grade) and then
+        # refine it with adjustments. This engages the headline "compose from 534
+        # presets" feature instead of re-deriving the whole look from scratch.
+        preset_note = (
+            "\n[PRESET SELECTION RULE - REFERENCE LOOK] The attached reference images define the TARGET LOOK. "
+            "Among the CANDIDATE PRESETS listed above, you MUST SELECT the one that closest matches the reference "
+            "aesthetic (e.g. a warm monochrome reference -> choose the 'sepia' preset; a vivid saturated "
+            "reference -> choose the 'extreme saturation' preset) and put its EXACT filename in "
+            "selected_presets: [\"examples_colors_sepia.dtstyle\"]. Then apply the reference-derived adjustments ON TOP of "
+            "that preset's baseline (the preset supplies the tone map and base grade; your adjustments refine it). "
+            "Example: \"selected_presets\": [\"examples_colors_autumn.dtstyle\"]. "
+            "If NONE of the candidates resemble the reference, use selected_presets: []. "
+            "Curve template names (cinematic_teal_orange, s_curve_mild, muted_earth, vintage_faded, ...) are NOT "
+            "preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset / colorzones.curve_preset.\n"
+        )
+    else:
+        preset_note = (
+            "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
+            "Curve template names like 'cinematic_teal_orange', 'inverted_s_strong', 's_curve_mild', "
+            "'lift_shadows', 'muted_earth', 'cool_shadows_warm_highs', 'vintage_faded', 'skin_tone_protect' "
+            "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
+            "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
+            "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
+            "and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
+            "add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
+        )
     # PIPELINE RULE: This style will be applied to RAW files via darktable-cli.
     # darktable adds a DEFAULT filmicrgb instance to RAW files automatically.
     # DO NOT use sigmoid for tone mapping - it will stack with default filmicrgb and produce broken/dark images.
@@ -672,13 +691,15 @@ def build_prompt(
                 if gsat >= 0.25:
                     ref_instructions.append(
                         f"  -> References are COLORFUL (global HSV {gsat:.3f}): do NOT desaturate to "
-                        f"match the low per-zone deltas. Use filmicrgb.saturation in [0, +15] (or 0) "
-                        f"and colorbalancergb.vibrance +0.1..+0.3 to preserve the vivid look."
+                        f"match the low per-zone deltas. filmicrgb.saturation MUST be >= 0 "
+                        f"(use 0 or +5..+15) — NEVER negative. Use colorbalancergb.vibrance "
+                        f"+0.1..+0.3 to preserve the vivid look."
                     )
                 elif gsat >= 0.15:
                     ref_instructions.append(
-                        f"  -> References are moderately colorful (global HSV {gsat:.3f}): use "
-                        f"filmicrgb.saturation in [-10, +5] and vibrance 0..+0.15."
+                        f"  -> References are moderately colorful (global HSV {gsat:.3f}): "
+                        f"filmrgb.saturation MUST be >= 0 (use 0..+5, NEVER negative) and "
+                        f"vibrance 0..+0.15."
                     )
                 else:
                     ref_instructions.append(

@@ -211,6 +211,34 @@ def validate_style(
                         )
                     clamped_params[c_key] = 0.0
 
+            # ---- Hito 2.0: low-confidence reference -> keep zone neutral ----
+            # The prompt promises the VLM that a zone whose hue confidence is
+            # < 0.70 stays NEUTRAL (respect the target photo's original colors).
+            # The dynamic caps below (Hito 2.1) only relax at conf >= 0.85 and
+            # would otherwise permit up to 0.10 chroma on a wishy-washy
+            # reference — which on a dark target reads as a red/warm cast (the
+            # sepia failure). Enforce the promise: when the reference does not
+            # clearly call for a grade in a zone, force that zone's chroma to 0
+            # so the VLM cannot introduce a tint. Only applies to reference-based
+            # generation (reference_analysis present).
+            _NEUTRAL_CONF = 0.70
+            for _zone in ("shadows", "midtones", "highlights"):
+                _c_key = f"{_zone}_C"
+                if _c_key not in clamped_params:
+                    continue
+                _cz = float(clamped_params.get(_c_key) or 0.0)
+                if _cz <= 0.0:
+                    continue
+                _conf = float((reference_analysis or {}).get(f"{_zone}_hue_confidence") or 0.0)
+                if reference_analysis is not None and _conf < _NEUTRAL_CONF:
+                    if _c_key in plg.params:
+                        warnings.append(
+                            f"colorbalancergb.{_c_key}={_cz:.3f} on a low-confidence "
+                            f"reference (conf={_conf:.2f} < {_NEUTRAL_CONF}): would tint "
+                            f"a non-graded look — forced to 0.0 (respect target colors)"
+                        )
+                    clamped_params[_c_key] = 0.0
+
             # ---- Hito 2.1: dynamic chroma ceiling per confidence ------------
             # Default chroma caps are conservative (0.10/0.08/0.05). They only
             # relax to the historical 0.15/0.15/0.10 when the Python hue

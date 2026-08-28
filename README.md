@@ -254,6 +254,30 @@ Each run produces:
 - **Markdown report** — Explains preset selection, parameter choices, and expected visual effect
 - **`*_EXPLICACION.md` explanation document** — When `--references` are given, a natural-language narrative companion is auto-generated: it analyses the reference photographs (tonal key, contrast, saturation, white balance, per-zone hue grading) and explains in plain language how they are edited and why every module/parameter of the generated style was chosen. Language: `--lang es` (default) or `--lang en`.
 
+## Example results (before → after)
+
+Below is a real end-to-end run: a RAW file rendered through `darktable-cli`
+**without** any style (left) vs. the same RAW rendered with a style generated
+by `dtstylekit` from reference-look images via the VLM pipeline (right).
+
+| Before — no style | After — `Night_Market_Moody` (generated from references) |
+|---|---|
+| ![Before: RAW with no style applied](assets/result_before.jpg) | ![After: RAW with dtstylekit-generated Night_Market_Moody style](assets/result_after.jpg) |
+
+The generated style was produced with:
+
+```bash
+dtstylekit generate photo.jpg \
+  --references 'refs/*.jpg' \
+  --direction "night market moody" --lang es
+```
+
+The VLM selected presets from the indexed library, applied safe scalar
+adjustments on verified IOP structs, and the composer serialized a valid
+`.dtstyle` (here it swapped `filmicrgb` → `sigmoid` for the dark target to
+avoid crushing shadows). The rendered look matches the references' tonal key
+and color grading.
+
 ## Contributing / Release flow
 
 This repository is the **release channel** for dtstylekit. Day-to-day

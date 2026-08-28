@@ -234,6 +234,37 @@ def merge_presets(
 
     # Apply adjustments: for each operation, override or add
     for op, new_params in adjustments.items():
+        # On dark / display-referred targets, the scene-referred filmicrgb
+        # (whether it came from a selected preset or a VLM adjustment) crushes
+        # shadows.  Always substitute the safe display-referred sigmoid tone
+        # map so the style gets contrast without losing shadow detail.
+        if dark_image and op == "filmicrgb":
+            try:
+                sig_params = {"middle_grey_contrast": 2.0, "contrast_skewness": 0.0}
+                blob = pack_params("sigmoid", sig_params)
+                op_params_encoded = encode_xmp(blob)
+            except Exception as exc:
+                logger.warning(
+                    "Dark target filmicrgb skipped; sigmoid fallback failed: %s", exc
+                )
+                continue
+            merged[("sigmoid", "")] = ComposerPlugin(
+                operation="sigmoid",
+                enabled=True,
+                multi_name="",
+                multi_priority=_next_multi_priority(merged, "sigmoid"),
+                params=dict(sig_params),
+                op_params=op_params_encoded,
+                blendop_params="",
+                blendop_version=13,
+                module=IOP_REGISTRY["sigmoid"].version if "sigmoid" in IOP_REGISTRY else 0,
+            )
+            logger.info(
+                "Dark target filmicrgb replaced with safe sigmoid tone map "
+                "(middle_grey_contrast=2.0) instead of crushing shadows"
+            )
+            continue
+
         candidates = [plg for plg in merged.values() if plg.operation == op]
         # Pick the instance the adjustment should merge onto: prefer an
         # enabled unnamed instance, then the first *enabled* instance
@@ -252,12 +283,33 @@ def merge_presets(
         if pick is None:
             # Fresh instance path.  Never create a fresh filmicrgb on a
             # dark display-referred image: measured 19% -> 40% pixels
-            # below 10/255 (scene tone-mapper over display data).
+            # below 10/255 (scene tone-mapper over display data).  Substitute a
+            # display-referred sigmoid tone map (safe on display-referred data)
+            # so the style still gets contrast instead of crushing shadows.
             if dark_image and op == "filmicrgb":
-                logger.warning(
-                    "Adjustment for filmicrgb skipped: image is dark and "
-                    "no preset provides filmicrgb — a fresh instance would "
-                    "crush shadows (scene tone-mapper over display data)"
+                try:
+                    sig_params = {"middle_grey_contrast": 2.0, "contrast_skewness": 0.0}
+                    blob = pack_params("sigmoid", sig_params)
+                    op_params_encoded = encode_xmp(blob)
+                except Exception as exc:
+                    logger.warning(
+                        "Dark target filmicrgb skipped; sigmoid fallback also failed: %s", exc
+                    )
+                    continue
+                merged[("sigmoid", "")] = ComposerPlugin(
+                    operation="sigmoid",
+                    enabled=True,
+                    multi_name="",
+                    multi_priority=_next_multi_priority(merged, "sigmoid"),
+                    params=dict(sig_params),
+                    op_params=op_params_encoded,
+                    blendop_params="",
+                    blendop_version=13,
+                    module=IOP_REGISTRY["sigmoid"].version if "sigmoid" in IOP_REGISTRY else 0,
+                )
+                logger.info(
+                    "Dark target with no filmicrgb baseline: injected safe sigmoid "
+                    "tone map (middle_grey_contrast=2.0) instead of crushing shadows"
                 )
                 continue
             try:

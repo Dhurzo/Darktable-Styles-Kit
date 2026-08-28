@@ -446,6 +446,49 @@ class TestGenerateDtstyle:
         assert out.exists()
 
 
+class TestSerializerEmptyOpParams:
+    """Regression: empty op_params must never serialize to a valid-looking
+    but undecodable ``<op_params></op_params>`` blob."""
+
+    def test_encode_plugin_empty_op_params_packs_valid_blob(self) -> None:
+        from dtstylekit.codec.serializer import encode_plugin
+
+        # An empty op_params_override must NOT serialize to an empty
+        # (undecodable) blob — it falls back to a valid default packing.
+        out = encode_plugin({"operation": "filmicrgb", "op_params_override": ""})
+        assert out["op_params_encoded"]
+        assert out["op_params_encoded"] != ""
+
+    def test_encode_plugin_accepts_valid_override(self) -> None:
+        from dtstylekit.codec.serializer import encode_plugin
+
+        out = encode_plugin({"operation": "filmicrgb", "op_params_override": "AA=="})
+        assert out["op_params_encoded"] == "AA=="
+
+
+class TestGenerateSkipEmptyOpParams:
+    def test_skips_plugin_with_empty_op_params(self, tmp_path: Path) -> None:
+        spec = StyleSpec(style_name="skip_test", plugins=[])
+        # op_params_blob=b"" => PluginRef.op_params == "" (empty)
+        preset = make_mock_preset(
+            plugins=[make_plugin_ref(operation="vibrance", op_params_blob=b"")]
+        )
+        output = tmp_path / "skip.dtstyle"
+        generate_dtstyle(spec, [preset], output)
+        content = output.read_text()
+        assert "<op_params></op_params>" not in content
+        assert "vibrance" not in content
+
+    def test_keeps_plugin_with_valid_op_params(self, tmp_path: Path) -> None:
+        spec = StyleSpec(style_name="keep_test", plugins=[])
+        preset = _make_preset_with_real_blob(operation="vibrance", params={"amount": 50.0})
+        output = tmp_path / "keep.dtstyle"
+        generate_dtstyle(spec, [preset], output)
+        content = output.read_text()
+        assert "vibrance" in content
+        assert "<op_params></op_params>" not in content
+
+
 # ---------------------------------------------------------------------------
 # TestGenerateReport
 # ---------------------------------------------------------------------------

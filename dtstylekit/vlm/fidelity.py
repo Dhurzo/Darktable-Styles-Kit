@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from dtstylekit.vlm.models import StyleSpec
+from dtstylekit.vlm.models import Plugin, StyleSpec
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def auto_fit_signature(
     spec: StyleSpec,
     reference_analysis: dict | None,
-    _analysis,
+    _analysis: object,
 ) -> tuple[StyleSpec, list[str]]:
     """Minimal safety guards only — NO automatic aesthetic fits.
 
@@ -37,13 +37,13 @@ def auto_fit_signature(
     if not reference_analysis:
         return spec, warnings
 
-    def _plugin(op: str):
+    def _plugin(op: str) -> Plugin | None:
         for plg in spec.plugins:
             if plg.operation == op:
                 return plg
         return None
 
-    def _ensure(op: str):
+    def _ensure(op: str) -> Plugin:
         plg = _plugin(op)
         if plg is None:
             from dtstylekit.vlm.models import Plugin
@@ -99,6 +99,35 @@ def auto_fit_signature(
                     cb.params[h_key] = float(h_val % 360)
                     warnings.append(f"FIDELITY safety: {h_key} wrapped to [0, 360)")
 
+    # 2b. DARK-TARGET SAFETY.  A dark / display-referred target (mean
+    #     luminance < 0.3) must not be crushed by the preset's or the VLM's
+    #     shadow-darkening.  Clamp colour-balance lift (zone Y) and negative
+    #     exposure to >= 0 so shadows are never pushed below the base; the
+    #     colour *grade* (hue/chroma) is preserved.  This is what keeps
+    #     reference transfer onto dark photos from collapsing to near-black.
+    _tgt_lum = getattr(getattr(_analysis, "luminance", None), "mean", None)
+    if (
+        isinstance(_tgt_lum, int | float)
+        and not isinstance(_tgt_lum, bool)
+        and float(_tgt_lum) < 0.3
+    ):
+        if cb is None:
+            cb = _plugin("colorbalancergb")
+        if cb is not None:
+            for zone in ("shadows", "midtones", "highlights", "global"):
+                y_key = f"{zone}_Y"
+                y_val = cb.params.get(y_key)
+                if isinstance(y_val, int | float) and not isinstance(y_val, bool) and y_val < 0:
+                    cb.params[y_key] = 0.0
+                    warnings.append(
+                        f"FIDELITY safety: colorbalancergb.{y_key} clamped to 0 (dark target)"
+                    )
+        _exp = _plugin("exposure") or _ensure("exposure")
+        _ev = _exp.params.get("exposure")
+        if isinstance(_ev, int | float) and not isinstance(_ev, bool) and _ev < 0:
+            _exp.params["exposure"] = 0.0
+            warnings.append("FIDELITY safety: exposure floored at 0 EV (dark target)")
+
     # exposure: clamp to reasonable EV range
     exposure_plg = _plugin("exposure")
     if exposure_plg:
@@ -110,6 +139,37 @@ def auto_fit_signature(
             elif exp > 4:
                 exposure_plg.params["exposure"] = 4.0
                 warnings.append("FIDELITY safety: exposure clamped to 4 EV")
+
+    # 3. LUMINANCE MATCH (reference-driven only).  Reproducing a reference
+    #    look includes its overall brightness.  On a darker target the style
+    #    must lift exposure toward the reference luminance, otherwise the
+    #    result stays crushed/under-exposed and visually mismatched.  This is
+    #    a *reproduction* fit (the reference defines the target brightness),
+    #    not an aesthetic opinion, and only runs when references are supplied.
+    import math as _math
+
+    _ref_lum = reference_analysis.get("global_luminance")
+    _tgt_lum = getattr(getattr(_analysis, "luminance", None), "mean", None)
+    if (
+        isinstance(_ref_lum, int | float)
+        and not isinstance(_ref_lum, bool)
+        and float(_ref_lum) > 1e-3
+        and isinstance(_tgt_lum, int | float)
+        and not isinstance(_tgt_lum, bool)
+        and float(_tgt_lum) > 1e-3
+    ):
+        _target = min(float(_ref_lum), 0.5)
+        _ratio = _target / float(_tgt_lum)
+        _delta = max(-2.0, min(2.0, _math.log2(_ratio)))
+        _exp = _ensure("exposure")
+        _cur = float(_exp.params.get("exposure") or 0.0)
+        _new = max(-4.0, min(4.0, _cur + _delta))
+        if abs(_new - _cur) > 0.05:
+            _exp.params["exposure"] = _new
+            warnings.append(
+                f"FIDELITY luminance: exposure {_cur:+.2f}->{_new:+.2f} EV to "
+                f"match reference brightness (ref {_ref_lum:.2f} vs tgt {_tgt_lum:.2f})"
+            )
 
     # filmicrgb: basic sanity ranges
     filmic = _plugin("filmicrgb")
@@ -133,7 +193,7 @@ def auto_fit_signature(
     return spec, warnings
 
 
-def compute_reference_profile(reference_paths) -> dict:
+def compute_reference_profile(reference_paths: list) -> dict:
     """Extended reference profile: contrast, dynamic range, saturation
     peaks and warmth — the *shape* of the look, not just its averages.
 

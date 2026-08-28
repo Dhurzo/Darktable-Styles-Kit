@@ -545,3 +545,52 @@ class TestVolumeSaturationRule:
         assert min(abs(sh - 0), abs(sh - 360)) < 20.0
         assert result["shadows_hue_mode"] == "mono"
         assert result["shadows_hue_confidence"] > 0.0
+
+
+class TestReferenceSignature:
+    """compute_reference_signature extends analyze_reference_hues with richer
+    numeric targets (key, contrast, saturation, warmth, palette)."""
+
+    def test_returns_hue_keys_and_rich_signature(self, tmp_path: Path) -> None:
+        from dtstylekit.analyzer.pipeline import compute_reference_signature
+
+        p = _solid_color_image(tmp_path / "red.jpg", color=(200, 40, 40))
+        sig = compute_reference_signature([p])
+
+        # Hue/sat consensus keys are preserved
+        assert "shadows_hue" in sig
+        assert "midtones_hue" in sig
+        assert "highlights_hue" in sig
+        # Richer numeric targets are present
+        assert isinstance(sig.get("global_luminance"), float)
+        assert isinstance(sig.get("global_contrast"), float)
+        assert isinstance(sig.get("global_dynamic_range"), float)
+        assert isinstance(sig.get("global_saturation"), float)
+        assert isinstance(sig.get("global_warmth_rb"), float)
+        assert isinstance(sig.get("palette"), list)
+
+    def test_warm_reference_reports_positive_warmth(self, tmp_path: Path) -> None:
+        from dtstylekit.analyzer.pipeline import compute_reference_signature
+
+        p = _solid_color_image(tmp_path / "warm.jpg", color=(220, 120, 60))
+        sig = compute_reference_signature([p])
+        # Red > Blue → positive R−B warmth
+        assert sig["global_warmth_rb"] > 0.0
+
+    def test_cool_reference_reports_negative_warmth(self, tmp_path: Path) -> None:
+        from dtstylekit.analyzer.pipeline import compute_reference_signature
+
+        p = _solid_color_image(tmp_path / "cool.jpg", color=(60, 120, 220))
+        sig = compute_reference_signature([p])
+        assert sig["global_warmth_rb"] < 0.0
+
+    def test_dominant_hue_in_palette(self, tmp_path: Path) -> None:
+        from dtstylekit.analyzer.pipeline import compute_reference_signature
+
+        # Pure red → dominant hue near 0°/360°
+        p = _solid_color_image(tmp_path / "red2.jpg", color=(230, 30, 30))
+        sig = compute_reference_signature([p])
+        hues = [sw["hue"] for sw in sig["palette"]]
+        assert hues, "palette should report at least one dominant hue"
+        assert min(abs(hues[0] - 0), abs(hues[0] - 360)) < 40.0
+

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
+    from dtstylekit.eval.metrics import LookProfile
 
 # Import for runtime use
 from dtstylekit.analyzer.models import ImageAnalysis
@@ -225,11 +226,19 @@ def evaluate_metrics(
     metrics: RenderMetrics,
     target_analysis: ImageAnalysis,
     _tolerance: float = 0.15,  # reserved: evaluation strictness knob
+    reference_look: "LookProfile | None" = None,
 ) -> tuple[bool, list[str]]:
     """Evaluate render metrics against target analysis.
 
+    When ``reference_look`` (a :class:`~dtstylekit.eval.metrics.LookProfile`
+    extracted from the reference image) is supplied, the evaluation also scores
+    the *colour grade* the VLM was supposed to reproduce — hue / chroma /
+    warmth / contrast — and feeds those errors back as refinement guidance,
+    closing the look-fidelity loop (not just the safety checks).
+
     Returns (passed, feedback_list).
     """
+
     feedback = []
     passed = True
 
@@ -285,6 +294,36 @@ def evaluate_metrics(
         feedback.append(
             f"BLUE CAST: R/G={metrics.r_over_g:.2f} B>R. Check colorbalancergb.shadows_H≠220+, global_H≠210."
         )
+
+    # Look-fidelity loop: compare the rendered output's grade against the
+    # reference look the VLM was given.  We build the achieved profile from
+    # the already-computed render metrics (cheap; no re-read of the file).
+    if reference_look is not None:
+        from dtstylekit.eval.metrics import LookProfile
+
+        achieved = LookProfile(
+            r_over_g=metrics.r_over_g,
+            r_mean=metrics.r_mean,
+            g_mean=metrics.g_mean,
+            b_mean=metrics.b_mean,
+            mean_luminance=metrics.mean_luminance,
+            mean_saturation=metrics.mean_saturation,
+            shadows_pct=metrics.shadows_pct,
+            highlights_pct=metrics.highlights_pct,
+        )
+        from dtstylekit.eval.metrics import compare_looks
+
+        fid = compare_looks(reference_look, achieved)
+        if not fid.safety_ok:
+            passed = False
+        elif not fid.passed:
+            passed = False
+        if fid.notes:
+            feedback.extend(f"LOOK: {n}" for n in fid.notes)
+        # Strong grade errors always force another iteration even if safety
+        # happened to pass (a safe-but-wrong look is still wrong).
+        if fid.hue_score < 0.7 or fid.chroma_score < 0.7:
+            passed = False
 
     return passed, feedback
 
@@ -351,6 +390,7 @@ def iterative_refine(
     generate_func: Callable[[str, list[str]], StyleSpec],
     max_iterations: int = 3,
     work_dir: Path | None = None,
+    reference_look: "LookProfile | None" = None,
 ) -> RefinementResult:
     """Iterative refinement loop: generate → render → evaluate → adjust.
 
@@ -362,6 +402,10 @@ def iterative_refine(
         generate_func: Callable(direction, reference_b64s) -> StyleSpec
         max_iterations: Maximum refinement iterations
         work_dir: Optional work directory (created if None)
+        reference_look: Optional :class:`~dtstylekit.eval.metrics.LookProfile`
+            of the reference look. When omitted but ``reference_paths`` are
+            present, it is extracted automatically so the loop also corrects
+            *colour grade* errors, not only safety.
 
     Returns:
         RefinementResult with the refined StyleSpec plus metadata about
@@ -369,10 +413,19 @@ def iterative_refine(
     """
     import base64
 
+    from dtstylekit.eval.metrics import extract_look_profile
+
     if work_dir is None:
         work_dir = Path(tempfile.mkdtemp(prefix="dtstylekit_refine_"))
     else:
         work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build the reference look profile once (drives look-fidelity feedback).
+    if reference_look is None and reference_paths:
+        try:
+            reference_look = extract_look_profile(reference_paths[0])
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Could not build reference look profile: %s", exc)
 
     # Encode references once
     ref_b64s = [base64.b64encode(p.read_bytes()).decode("ascii") for p in reference_paths]
@@ -408,7 +461,9 @@ def iterative_refine(
 
         # Evaluate
         metrics = compute_render_metrics(rendered)
-        passed, feedback = evaluate_metrics(metrics, target_analysis)
+        passed, feedback = evaluate_metrics(
+            metrics, target_analysis, reference_look=reference_look
+        )
 
         logger.info(
             "Iteration %d: passed=%s, lum=%.3f, sat=%.3f, R/G=%.2f",

@@ -723,6 +723,44 @@ class TestPromptBuilder:
         messages = build_prompt(analysis, [], "neutral", iop_schema="### filmicrgb")
         assert "[EXPOSURE GUARD]" not in messages[1]["content"]
 
+    def test_reference_spec_block_present(self) -> None:
+        """A rich reference signature injects a numeric REFERENCE SPEC block
+        so the VLM gets concrete tonal/color targets."""
+        from dtstylekit.vlm.prompt_builder import build_prompt
+
+        analysis = self._make_analysis(mean=0.5)
+        ref = {
+            "shadows_hue": 200.0,
+            "midtones_hue": 200.0,
+            "highlights_hue": 200.0,
+            "shadows_sat": 0.3,
+            "midtones_sat": 0.3,
+            "highlights_sat": 0.3,
+            "global_luminance": 0.45,
+            "global_contrast": 0.18,
+            "global_dynamic_range": 0.6,
+            "global_saturation": 0.30,
+            "global_warmth_rb": -0.05,
+            "palette": [{"hue": 210.0, "weight": 0.6}],
+        }
+        messages = build_prompt(
+            analysis,
+            [],
+            "cinematic",
+            iop_schema="### filmicrgb",
+            reference_b64s=["AAAA"],
+            reference_analysis=ref,
+        )
+        content = messages[1]["content"]
+        assert "REFERENCE SPEC" in content
+        assert "LUMINANCE KEY" in content
+        assert "SATURATION" in content
+        assert "WARMTH" in content
+        assert "DOMINANT HUES" in content
+        # Numeric targets are rendered, not just prose.
+        assert "0.45" in content
+        assert "0.30" in content
+
 
 class TestPromptAntiTintRules:
     """Hito 3: prompt-level anti-tint instructions and dynamic chroma caps."""
@@ -1454,3 +1492,240 @@ class TestE2EValidatorGuardsWithVLMResponse:
         assert params["shadows_C"] == 0.10
         assert params["midtones_C"] == 0.08
         assert params["highlights_C"] == 0.05
+
+
+class TestClosedLoopRefinement:
+    """Approach C: compare a render against the reference set (no darktable
+    needed for these unit tests — we feed precomputed images)."""
+
+    def _img(self, tmp_path, name, color):
+        import numpy as np
+        from PIL import Image
+
+        arr = np.full((64, 64, 3), color, dtype=np.uint8)
+        p = tmp_path / name
+        Image.fromarray(arr).save(p)
+        return p
+
+    def test_identical_render_passes(self, tmp_path):
+        from dtstylekit.vlm.iterative_refiner import compare_to_references
+
+        ref = self._img(tmp_path, "ref.jpg", (180, 120, 90))
+        ren = self._img(tmp_path, "ren.jpg", (180, 120, 90))
+        passed, feedback = compare_to_references(ren, [ref], {"global_luminance": 0.5})
+        assert passed is True
+        assert feedback == []
+
+    def test_warm_render_fails_against_cool_reference(self, tmp_path):
+        from dtstylekit.vlm.iterative_refiner import compare_to_references
+
+        ref = self._img(tmp_path, "ref.jpg", (90, 120, 200))  # cool
+        ren = self._img(tmp_path, "ren.jpg", (200, 120, 90))  # warm
+        passed, feedback = compare_to_references(ren, [ref], {"global_luminance": 0.5})
+        assert passed is False
+        assert any("WARMTH" in f for f in feedback)
+
+    def test_luminance_mismatch_reported(self, tmp_path):
+        from dtstylekit.vlm.iterative_refiner import compare_to_references
+
+        ref = self._img(tmp_path, "ref.jpg", (40, 40, 40))  # dark
+        ren = self._img(tmp_path, "ren.jpg", (220, 220, 220))  # bright
+        passed, feedback = compare_to_references(ren, [ref], {"global_luminance": 0.5})
+        assert passed is False
+        assert any("LUMINANCE KEY" in f for f in feedback)
+
+    def test_iterative_refine_accepts_reference_analysis(self, tmp_path):
+        """max_iterations=0 returns immediately; just verifies the new
+        reference_analysis parameter is threaded through without error."""
+        from dtstylekit.vlm.iterative_refiner import RefinementResult, iterative_refine
+
+        calls = []
+
+        def _gen(direction, ref_b64s):
+            calls.append(direction)
+            return StyleSpec(
+                style_name="s",
+                style_description="",
+                rationale="",
+                plugins=[],
+            )
+
+        result = iterative_refine(
+            raw_path=tmp_path / "x.raw",
+            reference_paths=[],
+            direction="cinematic",
+            target_analysis=MagicMock(),
+            generate_func=_gen,
+            max_iterations=0,
+            reference_analysis={"global_luminance": 0.4},
+        )
+        assert isinstance(result, RefinementResult)
+        assert result.iterations_completed == 0
+        assert calls == ["cinematic"]
+
+    def test_build_refinement_prompt_darkens_when_render_too_bright(self):
+        """Regression: when the render is brighter/more saturated/warmer than
+        the reference, the corrective guidance must steer the VLM DOWN
+        (DECREASE exposure, REDUCE saturation, GRADE COOLER) — not only up."""
+        from dtstylekit.vlm.iterative_refiner import RenderMetrics, build_refinement_prompt
+
+        m = RenderMetrics(
+            mean_luminance=0.70,
+            std_luminance=0.30,
+            mean_saturation=0.31,
+            r_mean=0.55,
+            g_mean=0.46,
+            b_mean=0.44,
+            r_over_g=1.18,
+            shadows_pct=0.10,
+            highlights_pct=0.10,
+        )
+
+        ref = {
+            "global_luminance": 0.20,
+            "global_saturation": 0.07,
+            "global_warmth_rb": 0.01,
+        }
+        prompt = build_refinement_prompt(
+            "cinematic", ["LUMINANCE KEY: darken"], m, MagicMock(), ref
+        )
+        assert "DECREASE exposure.exposure" in prompt
+        assert "REDUCE filmicrgb.saturation" in prompt
+        assert "GRADE COOLER" in prompt
+
+    def test_nudge_darkens_desaturates_cools_when_render_too_bright(self):
+        """Code-level convergence assist: a render brighter/more saturated/
+        warmer than the reference must be steered DOWN deterministically."""
+        from dtstylekit.vlm.iterative_refiner import RenderMetrics, nudge_spec_toward_reference
+        from dtstylekit.vlm.models import Plugin, StyleSpec
+
+        spec = StyleSpec(
+            style_name="s",
+            plugins=[
+                Plugin(operation="exposure", enabled=True, params={"exposure": 0.0}),
+                Plugin(
+                    operation="colorbalancergb",
+                    enabled=True,
+                    params={"saturation_global": 0.5, "global_H": 0.0, "global_C": 0.0},
+                ),
+            ],
+        )
+        m = RenderMetrics(
+            mean_luminance=0.73,
+            std_luminance=0.30,
+            mean_saturation=0.28,
+            mean_hsv_saturation=0.28,
+            r_mean=0.55,
+            g_mean=0.46,
+            b_mean=0.44,
+            r_over_g=1.18,
+            shadows_pct=0.10,
+            highlights_pct=0.10,
+        )
+        ref = {"global_luminance": 0.20, "global_saturation": 0.07, "global_warmth_rb": 0.01}
+        nudged = nudge_spec_toward_reference(spec, m, ref)
+
+        exp = [p for p in nudged.plugins if p.operation == "exposure"][0]
+        assert exp.params["exposure"] < -1.0, "should darken (negative EV)"
+        cb = [p for p in nudged.plugins if p.operation == "colorbalancergb"][0]
+        assert cb.params["saturation_global"] < 0.5, "should desaturate"
+        # Hue rotation is intentionally avoided (it blows the render to a
+        # single channel); a strong warm cast is trimmed via global chroma.
+        assert "global_H" not in cb.params or cb.params.get("global_H") != 210.0
+
+    def test_nudge_does_not_mutate_input(self):
+        from dtstylekit.vlm.iterative_refiner import RenderMetrics, nudge_spec_toward_reference
+        from dtstylekit.vlm.models import Plugin, StyleSpec
+
+        spec = StyleSpec(
+            style_name="s",
+            plugins=[Plugin(operation="exposure", enabled=True, params={"exposure": 0.1})],
+        )
+        m = RenderMetrics(
+            mean_luminance=0.73,
+            std_luminance=0.3,
+            mean_saturation=0.2,
+            r_mean=0.5,
+            g_mean=0.5,
+            b_mean=0.5,
+            r_over_g=1.0,
+            shadows_pct=0.1,
+            highlights_pct=0.1,
+        )
+        ref = {"global_luminance": 0.20}
+        before = dict(spec.plugins[0].params)
+        nudge_spec_toward_reference(spec, m, ref)
+        assert spec.plugins[0].params == before, "input spec must be unchanged"
+
+    def test_nudge_adds_exposure_plugin_when_missing(self):
+        from dtstylekit.vlm.iterative_refiner import RenderMetrics, nudge_spec_toward_reference
+        from dtstylekit.vlm.models import Plugin, StyleSpec
+
+        spec = StyleSpec(style_name="s", plugins=[])
+        m = RenderMetrics(
+            mean_luminance=0.73,
+            std_luminance=0.3,
+            mean_saturation=0.2,
+            r_mean=0.5,
+            g_mean=0.5,
+            b_mean=0.5,
+            r_over_g=1.0,
+            shadows_pct=0.1,
+            highlights_pct=0.1,
+        )
+        ref = {"global_luminance": 0.20}
+        nudged = nudge_spec_toward_reference(spec, m, ref)
+        exps = [p for p in nudged.plugins if p.operation == "exposure"]
+        assert exps, "exposure plugin should be added"
+        assert exps[0].params["exposure"] < -1.0
+
+    def test_nudge_adds_colorbalancergb_and_desaturates(self):
+        """When the render is far more saturated than the reference (HSV
+        saturation), the nudge must add a colorbalancergb plugin and apply a
+        negative chroma to desaturate — even if the VLM omitted it."""
+        from dtstylekit.vlm.iterative_refiner import (
+            RenderMetrics,
+            _reference_distance,
+            nudge_spec_toward_reference,
+        )
+        from dtstylekit.vlm.models import Plugin, StyleSpec
+
+        spec = StyleSpec(style_name="s", plugins=[])
+        m = RenderMetrics(
+            mean_luminance=0.5,
+            std_luminance=0.2,
+            mean_saturation=0.4,
+            mean_hsv_saturation=0.6,  # much higher than the reference
+            r_mean=0.5,
+            g_mean=0.5,
+            b_mean=0.5,
+            r_over_g=1.0,
+            shadows_pct=0.1,
+            highlights_pct=0.1,
+        )
+        ref = {"global_luminance": 0.5, "global_saturation": 0.2, "global_warmth_rb": 0.0}
+        nudged = nudge_spec_toward_reference(spec, m, ref)
+        cb = [p for p in nudged.plugins if p.operation == "colorbalancergb"]
+        assert cb, "colorbalancergb plugin should be added to desaturate"
+        assert cb[0].params.get("chroma_global", 0.0) < 0.0, "should desaturate (negative chroma)"
+
+    def test_reference_distance_uses_hsv_saturation(self):
+        """Distance must track the exposure-invariant HSV saturation, not the
+        absolute (exposure-dependent) mean_saturation."""
+        from dtstylekit.vlm.iterative_refiner import RenderMetrics, _reference_distance
+
+        ref = {"global_luminance": 0.5, "global_saturation": 0.3, "global_warmth_rb": 0.0}
+        # Same absolute saturation but different HSV saturation.
+        a = RenderMetrics(
+            mean_luminance=0.5, std_luminance=0.2, mean_saturation=0.4,
+            mean_hsv_saturation=0.2, r_mean=0.5, g_mean=0.5, b_mean=0.5,
+            r_over_g=1.0, shadows_pct=0.1, highlights_pct=0.1,
+        )
+        b = RenderMetrics(
+            mean_luminance=0.5, std_luminance=0.2, mean_saturation=0.2,
+            mean_hsv_saturation=0.5, r_mean=0.5, g_mean=0.5, b_mean=0.5,
+            r_over_g=1.0, shadows_pct=0.1, highlights_pct=0.1,
+        )
+        # b is further from the reference's HSV saturation (0.5 vs 0.2 target).
+        assert _reference_distance(b, ref) > _reference_distance(a, ref)
+
