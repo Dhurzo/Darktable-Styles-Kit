@@ -30,16 +30,22 @@ image + optional references
 ## Package Boundaries
 
 - `dtstylekit/codec/`: XMP/blob codec, verified IOP registry, serialization.
+- `dtstylekit/curves/`: curve-template packing and inspection.
 - `dtstylekit/presets/`: preset parsing, indexing, embeddings, and search.
 - `dtstylekit/analyzer/`: image analysis: histogram, EXIF, luminance, saturation,
   scene classification, reference filtering, and reference signatures.
 - `dtstylekit/vlm/`: prompt building, model client, response parsing, style
   contracts, validation, fidelity, orchestration, and refinement.
 - `dtstylekit/composer/`: style assembly, reports, explanations, safety baking.
+- `dtstylekit/generation.py`: named generation stages (`GenerationService`),
+  request/result contracts, reference filtering, preset resolution, and
+  style-output checks.
 - `dtstylekit/render.py`: darktable rendering helpers, generated style path
   sanitization, and render metrics.
-- `dtstylekit/export/`: apply-style export and exposure normalization.
+- `dtstylekit/export.py`: apply-style export and exposure normalization.
 - `dtstylekit/eval/`: look-fidelity scoring and safety predicates.
+- `dtstylekit/images.py`, `dtstylekit/paths.py`: image handling and shared
+  path/output conventions.
 
 ## Registry Contract
 
