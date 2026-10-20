@@ -7,6 +7,7 @@ composition code can render without depending on the VLM layer.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +45,18 @@ class RenderMetrics:
     @property
     def is_blown(self) -> bool:
         return self.mean_luminance > 0.9 or self.highlights_pct > 0.5
+
+
+def _safe_style_name(name: str) -> str:
+    """Normalize a style name to a safe file/darktable identifier.
+
+    Darktable style names can contain spaces, but generated file paths must
+    never contain directory separators or shell-like control sequences coming
+    from user or VLM-provided text.
+    """
+    cleaned = re.sub(r"[^\w. -]+", "_", name)
+    cleaned = re.sub(r"\s+", "_", cleaned).strip("_-. ")
+    return cleaned or "style"
 
 
 def find_darktable_cli() -> str | None:
@@ -251,13 +264,14 @@ def render_with_style(
     # style import stack onto the previous history, which produced a
     # double-exposed render in the safety bake.
     run_dir, env = _prepare_run(work_dir)
-    out_path = run_dir / f"render_{style_name.replace(' ', '_')}.jpg"
+    safe_name = _safe_style_name(style_name)
+    out_path = run_dir / f"render_{safe_name}.jpg"
 
     try:
         _warm_up(Path(raw_path), run_dir, env, width)
 
         # Import style into library
-        _import_style_into_library(style_path, style_name, run_dir)
+        _import_style_into_library(style_path, safe_name, run_dir)
 
         # Render with style
         cmd = [
@@ -279,7 +293,7 @@ def render_with_style(
 
         if result.returncode == 0 and out_path.exists():
             # darktable-cli doesn't overwrite - find actual output
-            actual = list(run_dir.glob(f"render_{style_name.replace(' ', '_')}*.jpg"))
+            actual = list(run_dir.glob(f"render_{safe_name}*.jpg"))
             if actual:
                 return max(actual, key=lambda p: p.stat().st_mtime)
         logger.warning("Render failed: %s", result.stderr.decode() if result.stderr else "unknown")

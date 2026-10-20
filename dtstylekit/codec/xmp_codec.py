@@ -7,6 +7,8 @@ See format_analysis.md §3 and §9 for algorithm details.
 import base64
 import zlib
 
+_MAX_GZ_DECOMPRESS_ATTEMPTS = 16
+
 
 def encode_xmp(data: bytes, compress_threshold: int = 100) -> str:
     """Encode binary data to XMP string format.
@@ -62,12 +64,15 @@ def decode_xmp(s: str) -> bytes:
             compressed = base64.b64decode(b64_data)
         except Exception as e:
             raise ValueError(f"Invalid base64 data in: {s!r}") from e
-        buf_len = factor * len(compressed)
-        while True:
+        buf_len = max(factor, 1) * len(compressed)
+        last_error = None
+        for _attempt in range(_MAX_GZ_DECOMPRESS_ATTEMPTS):
             try:
                 return zlib.decompress(compressed, bufsize=buf_len)
-            except zlib.error:
+            except zlib.error as exc:
+                last_error = exc
                 buf_len *= 2
+        raise ValueError(f"Invalid compressed data in: {s!r}") from last_error
     else:
         try:
             return bytes.fromhex(s)

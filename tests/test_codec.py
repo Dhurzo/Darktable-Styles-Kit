@@ -244,6 +244,14 @@ class TestBlendopEdgeCases:
         patched = patch_blend_cst(DEFAULT_BLENDOP_DISPLAY, 0x7FFFFFFF)
         assert get_blend_cst(patched) == 0x7FFFFFFF
 
+    def test_decode_xmp_rejects_corrupt_gz(self):
+        """Invalid zlib payloads must fail instead of growing memory forever."""
+        import base64
+
+        encoded = "gz01" + base64.b64encode(b"not-valid-zlib-data").decode("ascii")
+        with pytest.raises(ValueError):
+            decode_xmp(encoded)
+
     def test_roundtrip_patched(self):
         """Patched blendops should still round-trip through encode/decode."""
         patched = patch_opacity(DEFAULT_BLENDOP_DISPLAY, 50.0)
