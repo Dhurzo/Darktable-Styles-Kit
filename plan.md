@@ -32,9 +32,11 @@ This project pivots from "LLM generates binary blobs" to "VLM selects/composes v
 **VLM Runtime**: Ollama (local) — default `gemma3:27b`; also `llava:7b`, `gemma3:4b`, `llama3.2-vision:11b` (override with `--model`)
 **Database**: SQLite (preset index + semantic embeddings)
 **Key Libraries**: Pillow, numpy, exifread, ollama (Python client), sqlite3, xml.etree, struct, zlib, base64, sentence-transformers (for embeddings)
+**Architecture**: see `docs/architecture.md`
+
 **Folder Structure**:
 - `dtstylekit/` — package root
-- `dtstylekit/codec/` — XMP codec, blendop, IOP registry
+- `dtstylekit/codec/` — XMP codec, blendop, split IOP registry (types/verified/simple/refinement/curves)
 - `dtstylekit/presets/` — preset parser, indexer, semantic search
 - `dtstylekit/analyzer/` — image analysis (histogram, EXIF, scene detection)
 - `dtstylekit/vlm/` — prompt builder, VLM client, response parser
@@ -42,6 +44,7 @@ This project pivots from "LLM generates binary blobs" to "VLM selects/composes v
 - `dtstylekit/curves/` — curve templates + pack/unpack for curve-based IOPs (added post-plan)
 - `dtstylekit/paths.py` — portable project-root path resolution (added post-plan)
 - `dtstylekit/cli.py` — entry point (generate/analyze, preset, vlm, curves subcommands)
+- `docs/architecture.md` — current architecture notes
 - `tests/` — round-trip tests with real darktable
 - `data/presets/` — symlink to `../../data/styles/` (534 .dtstyle files)
 
