@@ -18,6 +18,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from dtstylekit.color import circular_diff as _circular_diff
+from dtstylekit.color import circular_mean as _circular_mean
+
 from .exif import extract_exif
 from .histogram import compute_histogram
 from .luminance import compute_luminance_stats
@@ -145,35 +148,6 @@ def _failed_analysis(source: Path, errors: list[str]) -> ImageAnalysis:
     analysis.format = source.suffix.lstrip(".").upper() if source.suffix else ""
     analysis.errors = list(errors)
     return analysis
-
-
-def _circular_mean(hues_deg: list[float], weights: list[float] | None = None) -> float:
-    """Circular mean of hue angles in degrees (handles 350°+10°→0° wraparound).
-
-    Returns a hue in [0, 360). If `weights` given, weighted circular mean.
-    Empty input → 0.0.
-    """
-    import numpy as np
-
-    if not hues_deg:
-        return 0.0
-    rad = np.deg2rad(np.asarray(hues_deg, dtype=np.float32))
-    if weights is None:
-        s = float(np.sin(rad).sum())
-        c = float(np.cos(rad).sum())
-    else:
-        w: np.ndarray = np.asarray(weights, dtype=np.float32)
-        s = float((np.sin(rad) * w).sum())
-        c = float((np.cos(rad) * w).sum())
-    if abs(s) < 1e-9 and abs(c) < 1e-9:
-        return 0.0
-    return float(np.rad2deg(np.arctan2(s, c)) % 360.0)
-
-
-def _circular_diff(a: float, b: float) -> float:
-    """Shortest circular distance between two hue angles in degrees."""
-    d = abs(a - b) % 360.0
-    return min(d, 360.0 - d)
 
 
 def _consensus_vote(

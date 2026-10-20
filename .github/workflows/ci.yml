@@ -61,8 +61,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,test]"
 
-      - name: Type check (best-effort, informational)
-        # The codebase has pre-existing typing debt; this job is
-        # informational and never blocks merges.
-        continue-on-error: true
+      - name: Type check (mypy)
         run: mypy dtstylekit --follow-imports=skip --ignore-missing-imports

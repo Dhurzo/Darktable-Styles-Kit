@@ -17,16 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
-
-
-def _circ_dist(a: float, b: float) -> float:
-    """Smallest angular distance between two hues in degrees, [0, 180]."""
-    d = abs(float(a) - float(b)) % 360.0
-    return min(d, 360.0 - d)
+from dtstylekit.color import circular_diff as _circ_dist
 
 
 @dataclass
@@ -90,8 +82,8 @@ def extract_look_profile(image_path: str | Path) -> LookProfile:
     render metrics (``compute_render_metrics``).
     """
     from dtstylekit.analyzer.pipeline import analyze_reference_hues
+    from dtstylekit.render import compute_render_metrics
     from dtstylekit.vlm.fidelity import compute_reference_profile
-    from dtstylekit.vlm.iterative_refiner import compute_render_metrics
 
     p = Path(image_path)
     ref = analyze_reference_hues([p]) or {}

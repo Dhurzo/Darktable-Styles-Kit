@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from dtstylekit.codec.iop_registry import pack_params, unpack_params
 from dtstylekit.codec.serializer import encode_plugin
 from dtstylekit.codec.xmp_codec import decode_xmp, encode_xmp
-from dtstylekit.vlm.iterative_refiner import compute_render_metrics, render_with_style
+from dtstylekit.render import compute_render_metrics, render_with_style
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.reference_filter import ReferenceFilterResult

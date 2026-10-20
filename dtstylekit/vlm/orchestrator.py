@@ -6,7 +6,6 @@ Orchestrates: image analysis → preset search → prompt build → VLM call
 
 from __future__ import annotations
 
-import base64
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +20,8 @@ from dtstylekit.analyzer.reference_filter import (
     ReferenceFilterResult,
     filter_references,
 )
+from dtstylekit.composer.safety import safety_bake
+from dtstylekit.images import encode_base64
 
 from .client import VLMClient
 from .iterative_refiner import iterative_refine
@@ -37,29 +38,6 @@ if TYPE_CHECKING:
     from .models import StyleSpec
 
 logger = logging.getLogger(__name__)
-
-
-def _as_float(value: object, default: float | None = None) -> float | None:
-    """Narrow an arbitrary analysis value to float without bool leakage."""
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return float(value)
-    return default
-
-
-def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 88) -> str:
-    """Encode image as base64 JPEG, downscaled to max_dim."""
-    import io
-
-    from PIL import Image
-
-    img = Image.open(image_path)
-    if img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGB")  # type: ignore[assignment]
-    if max(img.size) > max_dim:
-        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=quality)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def generate_style_spec(
@@ -142,7 +120,7 @@ def generate_style_spec(
         reference_warnings.extend(filter_result.warnings)
         for ref in filter_result.kept:
             try:
-                reference_b64s.append(_encode_resized(ref))
+                reference_b64s.append(encode_base64(ref))
                 reference_paths.append(ref)
                 logger.info("Attaching reference image: %s", ref)
             except Exception as e:
@@ -244,7 +222,7 @@ def generate_style_spec(
 
     # 4. Optionally encode image for VLM vision
     try:
-        image_b64 = _encode_resized(image_path)
+        image_b64 = encode_base64(image_path)
     except Exception as e:
         logger.warning("Could not encode image: %s", e)
         image_b64 = None
@@ -297,6 +275,39 @@ def generate_style_spec(
             target_analysis=analysis,
         )
         return validated, report, warns
+
+    def _bake(spec: StyleSpec) -> StyleSpec:
+        """Resolve selected presets and apply the clipping-only bake."""
+        import tempfile
+
+        from dtstylekit.presets.resolver import PresetResolver
+
+        selected: list[Preset] = []
+        names = list(spec.selected_preset_names or [])
+        if names:
+            bake_warnings: list[str] = []
+            try:
+                with PresetResolver() as resolver:
+                    selected = resolver.load_many(names, bake_warnings)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.warning("Could not resolve presets for safety bake: %s", exc)
+            for warning in bake_warnings:
+                if warning not in warnings:
+                    warnings.append(warning)
+            known = {Path(preset.file_path) for preset in selected}
+            selected.extend(
+                preset for preset in presets if Path(preset.file_path) not in known
+            )
+        try:
+            return safety_bake(
+                spec,
+                selected,
+                bake_path or image_path,
+                Path(tempfile.mkdtemp(prefix="dtstylekit_bake_")),
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Safety bake failed (kept un-baked spec): %s", exc)
+            return spec
 
     raw_capture: list[str] = []
     validated_spec, report, warnings = _call(temperature)
@@ -375,18 +386,7 @@ def generate_style_spec(
     # brighter photos.  ``dtstylekit apply`` normalizes brightness per image.
     # Runs after validation + auto-fit so the saved style is clipping-safe.
     if presets is not None:
-        try:
-            import tempfile
-
-            _bake_dir = Path(tempfile.mkdtemp(prefix="dtstylekit_bake_"))
-            validated_spec = _safety_bake(
-                validated_spec,
-                presets,
-                bake_path or image_path,
-                _bake_dir,
-            )
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("Safety bake failed (kept un-baked spec): %s", exc)
+        validated_spec = _bake(validated_spec)
 
     # 7. Report + warnings for the CLI
     if reference_warnings:
@@ -419,17 +419,7 @@ def generate_style_spec(
             # directly, so keep its highlights safe.  It never lifts exposure
             # to a reference target (that is apply's job).
             if presets is not None:
-                try:
-                    import tempfile
-
-                    refine_spec = _safety_bake(
-                        refine_spec,
-                        presets,
-                        bake_path or image_path,
-                        Path(tempfile.mkdtemp(prefix="dtstylekit_bake_")),
-                    )
-                except Exception as exc:  # pragma: no cover — defensive
-                    logger.warning("Refinement safety bake failed: %s", exc)
+                refine_spec = _bake(refine_spec)
             return refine_spec
 
         # Run iterative refinement
@@ -471,74 +461,8 @@ def _safety_bake(
     target_path: str | Path,
     work_dir: str | Path,
 ) -> StyleSpec:
-    """Prevent clipped highlights without baking target brightness.
-
-    A ``.dtstyle`` is a reusable look, not an exposure correction for one
-    photo.  Earlier versions forced the target's mean luminance toward the
-    reference and serialized the resulting +EV (e.g. +2.54 EV for a dark
-    frame); applying that style to a brighter photo blew its highlights.
-    Reference brightness is now normalized per image by ``dtstylekit apply``.
-
-    This check only lowers exposure when the freshly generated style clips
-    highlights on the bake target.  It never lifts exposure to match a
-    reference, so the saved style stays exposure-neutral.
-    """
-    import math
-
-    from dtstylekit.composer.generator import generate_dtstyle
-    from dtstylekit.vlm.iterative_refiner import compute_render_metrics, render_with_style
-    from dtstylekit.vlm.models import Plugin
-
-    selected = [
-        p
-        for p in presets
-        if getattr(getattr(p, "file_path", None), "name", "") in (spec.selected_preset_names or [])
-    ]
-
-    target = Path(target_path)
-    work = Path(work_dir)
-    tmp = work / "_bake.dtstyle"
-    max_clip = 0.01
-    for attempt in range(4):
-        generate_dtstyle(spec, selected, tmp, None)
-        ach = render_with_style(target, tmp, "bake", work)
-        if ach is None:
-            break
-        m = compute_render_metrics(ach)
-        if m.clipped_pct <= max_clip:
-            if attempt:
-                logger.info(
-                    "Safety bake: highlights safe after %d nudge(s) "
-                    "(clipped=%.1f%%, lum=%.3f)",
-                    attempt,
-                    m.clipped_pct * 100.0,
-                    m.mean_luminance,
-                )
-            break
-        exp = next((p for p in spec.plugins if p.operation == "exposure"), None)
-        if exp is None:
-            exp = Plugin(operation="exposure", enabled=True, params={"exposure": 0.0})
-            spec.plugins.append(exp)
-        cur = float(exp.params.get("exposure") or 0.0)
-        # Clipping is a highlight problem: reduce exposure.  Do not lift a
-        # dark render here; that is the exporter's job (and target-specific).
-        step = min(1.5, max(0.25, math.log2(max(m.clipped_pct / max_clip, 1.0001))))
-        new = max(-6.0, min(6.0, cur - step))
-        logger.info(
-            "Safety bake: clipped=%.1f%% -> exposure %+.2f -> %+.2f EV",
-            m.clipped_pct * 100.0,
-            cur,
-            new,
-        )
-        if abs(new - cur) < 0.02:
-            break
-        exp.params["exposure"] = new
-    else:
-        logger.warning(
-            "Safety bake: highlights still clipped after 4 attempts; "
-            "the exporter will clamp exposure per image"
-        )
-    return spec
+    """Compatibility wrapper for :func:`dtstylekit.composer.safety.safety_bake`."""
+    return safety_bake(spec, presets, target_path, work_dir)
 
 
 def _reference_query(reference_analysis: dict) -> str:

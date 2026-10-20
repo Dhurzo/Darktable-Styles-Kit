@@ -158,9 +158,17 @@ def measure_intent_loss(
 
 def _resolve_presets(spec: StyleSpec, warnings: list[str]) -> list:
     """Resolve the spec's selected presets to full Preset objects."""
-    from dtstylekit.cli import _load_selected_presets
+    from dtstylekit.presets.resolver import PresetResolver
 
-    return _load_selected_presets(spec, warnings)
+    names = list(spec.selected_preset_names or [])
+    if not names:
+        warnings.append(
+            "VLM returned no `selected_presets`; the composer will emit a "
+            "style that contains only the scalar adjustments (no baseline)."
+        )
+        return []
+    with PresetResolver() as resolver:
+        return resolver.load_many(names, warnings)
 
 
 def _check_valid(style_path: Path) -> bool:
@@ -194,7 +202,7 @@ def run_eval_case(
     )
     from dtstylekit.composer.generator import generate_dtstyle
     from dtstylekit.eval.metrics import compare_looks, extract_look_profile
-    from dtstylekit.vlm.iterative_refiner import render_with_style
+    from dtstylekit.render import render_with_style
     from dtstylekit.vlm.orchestrator import generate_style_spec
 
     out_dir = Path(out_dir)

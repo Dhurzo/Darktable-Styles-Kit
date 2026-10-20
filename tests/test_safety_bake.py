@@ -39,11 +39,11 @@ class TestSafetyBake:
         with (
             patch("dtstylekit.composer.generator.generate_dtstyle"),
             patch(
-                "dtstylekit.vlm.iterative_refiner.render_with_style",
+                "dtstylekit.render.render_with_style",
                 return_value=tmp_path / "r.jpg",
             ),
             patch(
-                "dtstylekit.vlm.iterative_refiner.compute_render_metrics",
+                "dtstylekit.render.compute_render_metrics",
                 return_value=_metrics(lum=0.03, clipped=0.0),
             ),
         ):
@@ -59,11 +59,11 @@ class TestSafetyBake:
         with (
             patch("dtstylekit.composer.generator.generate_dtstyle"),
             patch(
-                "dtstylekit.vlm.iterative_refiner.render_with_style",
+                "dtstylekit.render.render_with_style",
                 return_value=tmp_path / "r.jpg",
             ),
             patch(
-                "dtstylekit.vlm.iterative_refiner.compute_render_metrics",
+                "dtstylekit.render.compute_render_metrics",
                 side_effect=metrics,
             ),
         ):

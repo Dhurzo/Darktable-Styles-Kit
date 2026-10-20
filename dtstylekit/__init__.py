@@ -6,6 +6,6 @@ scalar adjustments on verified IOP structs, and output valid .dtstyle files
 with explanatory markdown reports.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __author__ = "dtstylekit contributors"
 __all__ = ["__version__"]

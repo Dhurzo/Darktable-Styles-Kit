@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dtstylekit.color import circular_diff as _circ_diff
+from dtstylekit.color import circular_mean as _circ_mean
+
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
     from dtstylekit.presets.models import Preset
@@ -717,10 +720,6 @@ def build_prompt(
             hues_trio = (sh, mh, hh)
             if all(m == "mono" for m in modes) and all(h is not None for h in hues_trio):
 
-                def _circ_diff(a: float, b: float) -> float:
-                    d = abs(a - b) % 360
-                    return min(d, 360 - d)
-
                 pair_close = (
                     _circ_diff(hues_trio[0], hues_trio[1]) < 15  # type: ignore[arg-type]
                     and _circ_diff(hues_trio[1], hues_trio[2]) < 15  # type: ignore[arg-type]
@@ -746,17 +745,6 @@ def build_prompt(
                 and all(h is not None for h in hues_trio)
                 and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))
             ):
-
-                def _circ_diff(a: float, b: float) -> float:
-                    d = abs(a - b) % 360
-                    return min(d, 360 - d)
-
-                def _circ_mean(hs: list[float]) -> float:
-                    import math
-
-                    s = sum(math.sin(math.radians(h)) for h in hs)
-                    c = sum(math.cos(math.radians(h)) for h in hs)
-                    return math.degrees(math.atan2(s, c)) % 360
 
                 g_mean = _circ_mean(list(hues_trio))  # type: ignore[arg-type]
                 # Warm: red/orange/yellow/pink band (0°–90° and 315°–360°).

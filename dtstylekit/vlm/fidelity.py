@@ -230,10 +230,6 @@ def auto_fit_signature(
             target_hue = 45.0 if float(warmth) > 0 else 220.0
             label = "warm" if float(warmth) > 0 else "cool"
 
-            def _circ_diff(a: float, b: float) -> float:
-                d = abs(a - b) % 360.0
-                return min(d, 360.0 - d)
-
             for zone in ("shadows", "midtones", "highlights"):
                 h_val = cb.params.get(f"{zone}_H")
                 c_val = cb.params.get(f"{zone}_C")

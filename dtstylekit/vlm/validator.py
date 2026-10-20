@@ -13,27 +13,12 @@ from __future__ import annotations
 
 import logging
 
+from dtstylekit.color import circular_diff as _circular_diff
+from dtstylekit.color import circular_mean as _circular_mean
+
 from .models import Plugin, StyleSpec
 
 logger = logging.getLogger(__name__)
-
-
-def _circular_mean(hues_deg: list[float]) -> float:
-    """Circular mean of hue angles in degrees (handles wraparound).
-
-    Unweighted; used by the Hito 6D dominance exception to compare the
-    VLM's uniform hue against the reference's coherent grade.
-    """
-    import numpy as np
-
-    if not hues_deg:
-        return 0.0
-    rad = np.deg2rad(np.asarray(hues_deg, dtype=np.float32))
-    s = float(np.sin(rad).sum())
-    c = float(np.cos(rad).sum())
-    if abs(s) < 1e-9 and abs(c) < 1e-9:
-        return 0.0
-    return float(np.rad2deg(np.arctan2(s, c)) % 360.0)
 
 
 # String-valued virtual fields that must be handled separately from
@@ -380,11 +365,6 @@ def validate_style(
             hues = [float(clamped_params.get(f"{z}_H") or 0.0) for z in _zones]
             chroms = [float(clamped_params.get(f"{z}_C") or 0.0) for z in _zones]
             # Circular pairwise distance
-
-            def _circular_diff(a: float, b: float) -> float:
-                d = abs(a - b) % 360.0
-                return min(d, 360.0 - d)
-
             same_hue = (
                 _circular_diff(hues[0], hues[1]) < 15.0
                 and _circular_diff(hues[1], hues[2]) < 15.0

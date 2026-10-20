@@ -30,6 +30,8 @@ from typing import Literal, cast
 import numpy as np
 from PIL import Image
 
+from dtstylekit.color import circular_diff as _circular_difference
+
 from .noise import estimate_noise
 from .pipeline import analyze_reference_hues
 
@@ -716,11 +718,6 @@ def _zone_saturation_distance(a: ReferenceFeatures, b: ReferenceFeatures) -> flo
             for zone in _ZONES
         ]
     )
-
-
-def _circular_difference(a: float, b: float) -> float:
-    d = abs(float(a) - float(b)) % 360.0
-    return min(d, 360.0 - d)
 
 
 def _rms(values: Sequence[float]) -> float:

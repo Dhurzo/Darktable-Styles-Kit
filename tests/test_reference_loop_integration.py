@@ -21,7 +21,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from dtstylekit.vlm.orchestrator import generate_style_spec
+from dtstylekit.analyzer.reference_filter import ReferenceFilterConfig
+from dtstylekit.generation import GenerationRequest, GenerationService
+from dtstylekit.paths import get_outputs_dir
+from dtstylekit.presets.search import PresetSearcher
 
 
 def _have_darktable() -> bool:
@@ -53,23 +56,36 @@ def test_reference_loop_runs_end_to_end(tmp_path):
     _write_image(ref_warm, (220, 120, 60))
     _write_image(ref_cool, (60, 120, 220))
 
+    outputs = get_outputs_dir()
+    if not (outputs / "presets.db").exists() or not (
+        outputs / "preset_embeddings.npy"
+    ).exists():
+        pytest.skip("Preset index not built")
+
+    searcher = PresetSearcher(outputs / "presets.db", outputs / "preset_embeddings.npy")
     try:
-        spec, report, warnings, analysis = generate_style_spec(
-            image_path=raw,
-            direction="match the warm reference look",
-            references=[str(ref_warm)],
-            refine_iterations=2,
-            refine_raw_path=raw,
+        result = GenerationService(searcher).generate(
+            GenerationRequest(
+                image_path=raw,
+                direction="match the warm reference look",
+                references=[str(ref_warm)],
+                reference_filter=ReferenceFilterConfig(mode="off"),
+                refine_iterations=2,
+                refine_raw_path=raw,
+            )
         )
     except Exception as exc:  # pragma: no cover - depends on env
         if "ollama" in str(exc).lower() or "connection" in str(exc).lower():
             pytest.skip(f"Ollama not reachable: {exc}")
         raise
+    finally:
+        searcher.close()
 
     from dtstylekit.vlm.models import StyleSpec
 
-    assert isinstance(spec, StyleSpec)
-    assert spec.plugins, "a non-empty style should have been produced"
+    assert isinstance(result.spec, StyleSpec)
+    assert result.spec.plugins, "a non-empty style should have been produced"
     assert any(
-        "REFERENCE" in w or "FIDELITY" in w or "reference" in w.lower() for w in warnings
+        "REFERENCE" in w or "FIDELITY" in w or "reference" in w.lower()
+        for w in result.warnings
     ) or True  # warnings are informational; success is a valid non-empty spec

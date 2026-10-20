@@ -15,13 +15,13 @@ Based on format_analysis.md §2 and §10, and blob_size_calibration.md §1.
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from dtstylekit.codec.iop_registry import IOP_REGISTRY, verify_size
 from dtstylekit.codec.xmp_codec import decode_xmp
+from dtstylekit.render import find_darktable_cli
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,6 @@ class DtstyleValidationError(Exception):
     def __init__(self, msg: str, *, errors: list[str] | None = None) -> None:
         self.errors = errors or []
         super().__init__(msg)
-
-
-def find_darktable_cli() -> str | None:
-    """Locate darktable-cli executable."""
-    return shutil.which("darktable-cli")
 
 
 def validate_xml_structure(dtstyle_path: Path) -> list[str]:

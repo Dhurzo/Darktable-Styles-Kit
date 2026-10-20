@@ -121,7 +121,6 @@ explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = [
-    "pydantic.*",
     "sentence_transformers.*",
     "ollama.*",
 ]

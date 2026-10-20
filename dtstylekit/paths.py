@@ -9,7 +9,9 @@ decouples dtstylekit from the layout of the surrounding darktable checkout
 
 from __future__ import annotations
 
+import glob
 import os
+from collections.abc import Iterable
 from pathlib import Path
 
 # dtstylekit/paths.py -> parent is the project root (dtstylekit/..).
@@ -51,3 +53,28 @@ def get_generated_dir() -> Path:
     if env:
         return Path(env)
     return PROJECT_ROOT / "generated_styles"
+
+
+def expand_paths(
+    patterns: Iterable[str | Path],
+    *,
+    recursive: bool = True,
+    require_file: bool = True,
+) -> list[Path]:
+    """Expand user paths and glob patterns, optionally keeping only files.
+
+    ``glob`` does not expand ``~`` itself, so expansion happens before
+    pattern matching.  Literal paths are returned as-is (then filtered by
+    ``require_file``); this keeps error messages useful for typos.
+    """
+    expanded: list[Path] = []
+    for raw in patterns:
+        path = Path(raw).expanduser()
+        text = str(path)
+        if any(char in text for char in "*?["):
+            expanded.extend(Path(match) for match in sorted(glob.glob(text, recursive=recursive)))
+        else:
+            expanded.append(path)
+    if require_file:
+        return [path for path in expanded if path.is_file()]
+    return expanded
