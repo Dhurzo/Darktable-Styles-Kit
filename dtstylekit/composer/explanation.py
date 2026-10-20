@@ -11,11 +11,13 @@ Languages: ``es`` (Spanish, default) and ``en`` (English).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from dtstylekit.analyzer.models import ImageAnalysis
-from dtstylekit.vlm.models import StyleSpec
+from dtstylekit.vlm.models import Plugin, StyleSpec
 
 # ---------------------------------------------------------------------------
 # Small interpretation helpers
@@ -190,6 +192,25 @@ _TEXT: dict[str, dict[str, str | list[str]]] = {
         "exp_finish_soft": "un acabado suave y cinematográfico, tipo película",
         "exp_finish_punchy": "más contraste y presencia",
         "exp_finish_balanced": "un acabado equilibrado",
+        # --- Pedagogical report (4-section format) ---
+        "ped_s1_title": "## 1. Resumen del perfil e identidad visual",
+        "s1_mood": "**Estética**: {desc} El look de las referencias es de clave {clave}, con contraste {contrast}, balance de blancos {wb} y saturación {sat}; dominan las {dom}.",
+        "s1_mood_noref": "**Estética**: {desc} El estilo se deriva de la imagen objetivo y la dirección indicada (no se proporcionaron referencias).",
+        "s1_presets": "**Presets base**: {presets}",
+        "ped_s2_title": "## 2. Desglose de parámetros y configuración técnica",
+        "ped_s2_header": "| Parámetro | Valor | Función visual |",
+        "ped_s2_sep": "|-----------|-------|----------------|",
+        "ped_s3_title": "## 3. Justificación pedagógica (el porqué de cada ajuste)",
+        "ped_s3_intro": "Cada parámetro se elige por una razón concreta de causa y efecto: ajustamos un valor porque produce un efecto visual concreto e intencionado.",
+        "ped_s3_rationale": "**Razonamiento del modelo**: {rationale}",
+        "ped_s4_title": "## 4. Guía de creación manual (paso a paso)",
+        "ped_s4_intro": "Para recrear este estilo a mano en cualquier editor (darktable, Lightroom, Capture One, etc.):",
+        "ped_s4_apply": "**Cómo aplicar el .dtstyle generado**: impórtalo en darktable (Módulos → Estilos → Importar) o desde la línea de comandos con `darktable-cli imagen.ARW salida.jpg --style \"{name}\"`.",
+        "ped_mistakes_title": "### Errores comunes que evitar",
+        "ped_mistake1": "- **Aplastar las sombras a negro puro**: pierdes la textura de la noche y la imagen parece 'muerta'. Mantén el punto negro ligeramente por encima de cero.",
+        "ped_mistake2": "- **Calentar todo (incluidas las sombras)**: produce un tinte sepia uniforme en vez del efecto 'luz cálida en la oscuridad'. El calor vive solo en las altas luces.",
+        "ped_mistake3": "- **Sobresaturar**: el look es 'moody', no 'vívido'. La saturación excesiva vuelve el resplandor caricaturesco; la contención es la clave.",
+        "no_relevant": "*(sin cambios relevantes respecto al valor por defecto)*",
     },
     "en": {
         "title": "Style explanation: {name}",
@@ -300,6 +321,25 @@ _TEXT: dict[str, dict[str, str | list[str]]] = {
         "exp_finish_soft": "a soft, cinematic, film-like finish",
         "exp_finish_punchy": "more contrast and presence",
         "exp_finish_balanced": "a balanced finish",
+        # --- Pedagogical report (4-section format) ---
+        "ped_s1_title": "## 1. Profile Summary & Visual Identity",
+        "s1_mood": "**Aesthetic**: {desc} The reference look is {clave} key, with {contrast} contrast, {wb} white balance and {sat} saturation; {dom} dominate.",
+        "s1_mood_noref": "**Aesthetic**: {desc} The style is derived from the target image and the given direction (no references provided).",
+        "s1_presets": "**Base presets**: {presets}",
+        "ped_s2_title": "## 2. Parameter Breakdown & Technical Configuration",
+        "ped_s2_header": "| Parameter | Value | Visual Function |",
+        "ped_s2_sep": "|-----------|-------|----------------|",
+        "ped_s3_title": "## 3. Pedagogical Justification (why each adjustment)",
+        "ped_s3_intro": "Each parameter is chosen for a concrete cause-and-effect reason: we set a value because it produces a specific, intended visual effect.",
+        "ped_s3_rationale": "**Model rationale**: {rationale}",
+        "ped_s4_title": "## 4. Manual Creation Guide (step by step)",
+        "ped_s4_intro": "To recreate this style by hand in any editor (darktable, Lightroom, Capture One, etc.):",
+        "ped_s4_apply": "**How to apply the generated .dtstyle**: import it into darktable (Modules → Styles → Import) or from the command line with `darktable-cli image.ARW output.jpg --style \"{name}\"`.",
+        "ped_mistakes_title": "### Common mistakes to avoid",
+        "ped_mistake1": "- **Crushing shadows to pure black**: you lose the night texture and the image looks 'dead'. Keep the black point slightly above zero.",
+        "ped_mistake2": "- **Warming everything (shadows included)**: produces a uniform sepia cast instead of the 'warm light in darkness' effect. Warmth lives in the highlights only.",
+        "ped_mistake3": "- **Oversaturating**: the look is 'moody', not 'vivid'. Too much saturation makes the glow cartoonish; restraint is the whole point.",
+        "no_relevant": "*(no relevant changes from default)*",
     },
 }
 
@@ -540,6 +580,42 @@ def _explain_curve(_lang: str, _operation: str, params: dict) -> list[str]:
     return out
 
 
+def _explain_sigmoid(lang: str, params: dict) -> list[str]:
+    out: list[str] = []
+    if "middle_grey_contrast" in params:
+        v = float(params["middle_grey_contrast"])
+        if lang == "en":
+            out.append(
+                f"**middle_grey_contrast = {v:.1f}**: concentrates contrast around the midtones, "
+                "giving the image punch without flattening the shadows."
+            )
+        else:
+            out.append(
+                f"**middle_grey_contrast = {v:.1f}**: concentra el contraste en los medios tonos, "
+                "dando presencia sin aplastar las sombras."
+            )
+    if "display_black_target" in params:
+        v = float(params["display_black_target"])
+        if lang == "en":
+            out.append(
+                f"**display_black_target = {v:.3f}**: keeps shadows deep but not crushed to pure black "
+                "(a hair above zero preserves night texture)."
+            )
+        else:
+            out.append(
+                f"**display_black_target = {v:.3f}**: mantiene las sombras profundas pero sin aplastarlas "
+                "a negro puro (un poco por encima de cero conserva la textura de la noche)."
+            )
+    if "hue_preservation" in params:
+        v = float(params["hue_preservation"])
+        if v >= 99:
+            if lang == "en":
+                out.append("**hue_preservation = 100%**: keeps colours stable while tones are remapped.")
+            else:
+                out.append("**hue_preservation = 100%**: mantiene los colores estables mientras se remapean los tonos.")
+    return out
+
+
 def _explain_temperature(lang: str, params: dict) -> list[str]:
     """temperature replaces the camera WB — explain the intentional coeffs."""
     out: list[str] = []
@@ -657,6 +733,109 @@ def _explain_colorharmonizer(lang: str, params: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Pedagogical-format helpers
+# ---------------------------------------------------------------------------
+
+# Matches strings produced by the _explain_* helpers, e.g.
+# "**contrast = 2.0**: raises the tone-mapping contrast ..."  ->  (param, value, fn)
+_ROW_RE = re.compile(r"\*\*(.+?)\s*=\s*(.+?)\*\*\s*:\s*(.*)")
+
+
+def _plugin_explains(lang: str, plg: Plugin, reference_analysis: dict | None) -> list[str]:
+    """Return the human-readable explanation strings for one plugin."""
+    op = plg.operation
+    if op == "filmicrgb":
+        return _explain_filmic(lang, plg.params)
+    if op == "sigmoid":
+        return _explain_sigmoid(lang, plg.params)
+    if op == "exposure":
+        return _explain_exposure(lang, plg.params)
+    if op == "colorbalancergb":
+        return _explain_colorbalance(lang, plg.params, reference_analysis)
+    if op == "temperature":
+        return _explain_temperature(lang, plg.params)
+    if op == "basicadj":
+        return _explain_basicadj(lang, plg.params)
+    if op == "toneequal":
+        return _explain_toneequal(lang, plg.params)
+    if op == "colorequal":
+        return _explain_colorequal(lang, plg.params)
+    if op == "colorharmonizer":
+        return _explain_colorharmonizer(lang, plg.params)
+    if op in ("tonecurve", "rgbcurve", "colorzones"):
+        return _explain_curve(lang, op, plg.params)
+    return [f"**{k} = {v}**" for k, v in plg.params.items() if v not in (0, 0.0)]
+
+
+# Fallback: "**Highlights** (H=33, C=0.09): the orange hue ..."  ->  (param, "", fn)
+_ROW_RE2 = re.compile(r"\*\*(.+?)\*\*\s*(.*?):\s*(.*)")
+
+
+def _to_row(s: str) -> tuple[str, str, str] | None:
+    """Best-effort parse of an explain string into a (param, value, function) tuple."""
+    m = _ROW_RE.match(s)
+    if m:
+        return (m.group(1).strip(), m.group(2).strip(), m.group(3).strip())
+    m = _ROW_RE2.match(s)
+    if m:
+        # group(2) is the parenthetical suffix "(H=.., C=..)" — fold it into the name.
+        param = (m.group(1).strip() + " " + m.group(2).strip()).strip()
+        return (param, "", m.group(3).strip())
+    return None
+
+
+def _manual_steps(lang: str, spec: StyleSpec) -> list[str]:
+    """Build a step-by-step manual recreation guide from the active modules."""
+    steps: list[str] = []
+    pb = {plg.operation: plg.params for plg in spec.plugins if plg.enabled}
+    i = 1
+    if "exposure" in pb:
+        ev = float(pb["exposure"].get("exposure") or 0.0)
+        if lang == "en":
+            steps.append(f"{i}. Set the base **exposure** to {ev:+.2f} EV and turn on highlight protection so bright lights glow instead of clipping.")
+        else:
+            steps.append(f"{i}. Define la **exposición** base a {ev:+.2f} EV y activa la protección de altas luces para que las luces brillen en vez de recortarse.")
+        i += 1
+    if "sigmoid" in pb or "filmicrgb" in pb:
+        tm = pb.get("sigmoid") or pb.get("filmicrgb") or {}
+        c = tm.get("middle_grey_contrast") or tm.get("contrast")
+        c = float(c) if c is not None else 1.0
+        if lang == "en":
+            steps.append(f"{i}. **Tone-map** for contrast (filmic/sigmoid style) at ≈ {c:.1f} contrast, keeping the black point just above zero (deep, but not crushed).")
+        else:
+            steps.append(f"{i}. **Mapea el tono** para dar contraste (estilo filmic/sigmoid) con ≈ {c:.1f} de contraste, manteniendo el punto negro ligeramente por encima de cero (profundo, pero sin aplastar).")
+        i += 1
+    if "colorbalancergb" in pb:
+        cbr = pb["colorbalancergb"]
+        h = float(cbr.get("highlights_H") or 0.0)
+        if h:
+            if lang == "en":
+                steps.append(f"{i}. **Grade colour by zone**: warm only the highlights toward ≈ {h:.0f}°; keep shadows and midtones neutral.")
+            else:
+                steps.append(f"{i}. **Etalona el color por zona**: calienta solo las altas luces hacia ≈ {h:.0f}°; mantén sombras y medios neutrales.")
+        else:
+            if lang == "en":
+                steps.append(f"{i}. **Colour-grade** with the colorbalancergb chroma/contrast, keeping shadows neutral.")
+            else:
+                steps.append(f"{i}. **Etalona** con el croma/contraste de colorbalancergb, manteniendo las sombras neutrales.")
+        i += 1
+    if "basicadj" in pb:
+        if lang == "en":
+            steps.append(f"{i}. Apply the **basicadj** scalars (exposure / contrast / saturation) before tone mapping.")
+        else:
+            steps.append(f"{i}. Aplica los escalares de **basicadj** (exposición / contraste / saturación) antes del mapeo tonal.")
+        i += 1
+    vib = float(pb.get("colorbalancergb", {}).get("vibrance") or pb.get("basicadj", {}).get("vibrance") or 0.0)
+    if vib:
+        if lang == "en":
+            steps.append(f"{i}. Add a gentle **vibrance** (+{vib:.2f}) — not raw saturation — to revive muted colours without going cartoonish.")
+        else:
+            steps.append(f"{i}. Añade una **vibrancia** suave (+{vib:.2f}), no saturación cruda, para rescatar colores apagados sin parecer caricaturesco.")
+        i += 1
+    return steps
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -687,220 +866,110 @@ def generate_explanation(
     """
     if lang not in _TEXT:
         lang = "es"
-    L = _TEXT[lang]
+    # ``_TEXT`` also carries a couple of unused list-valued entries; every
+    # key read below is a string, so narrow the mapping here.
+    L = cast(dict[str, str], _TEXT[lang])
 
     lines: list[str] = []
     lines.append(L["title"].format(name=spec.style_name or "Untitled"))  # type: ignore[union-attr]
     lines.append("")
     lines.append(L["auto"].format(date=datetime.now().strftime("%Y-%m-%d %H:%M")))  # type: ignore[union-attr]
     lines.append("")
-    if spec.style_description:
-        lines.append(L["desc"].format(desc=spec.style_description))  # type: ignore[union-attr]
-    else:
-        lines.append(L["no_desc"])  # type: ignore[arg-type]
-    lines.append("")
 
-    # -- 1. Reference analysis -------------------------------------------
-    lines.append(L["s1_title"])  # type: ignore[arg-type]
+    # -- 1. Profile Summary & Visual Identity -----------------------------
+    lines.append(L["ped_s1_title"])
     lines.append("")
     ref_stats = _analyze_reference_stats([Path(p) for p in (reference_paths or [])])
-
     if ref_stats:
-        lines.append(L["s1_intro"].format(n=len(ref_stats)))  # type: ignore[union-attr]
-        lines.append("")
-        lines.append(L["s1_table_header"])  # type: ignore[arg-type]
-        lines.append(L["s1_table_sep"])  # type: ignore[arg-type]
-        for s in ref_stats:
-            t = s["tonal"]
-            lines.append(
-                f"| {s['name']} | {s['mean']:.2f} | {s['std']:.2f} | {s['sat']:.2f} "
-                f"| {t[0]:.0%} | {t[1]:.0%} | {t[2]:.0%} | {s['wb']:.2f} |"
-            )
-        lines.append("")
-        lines.append(L["s1_synth"])  # type: ignore[arg-type]
-        lines.append("")
         means = [s["mean"] for s in ref_stats]
         stds = [s["std"] for s in ref_stats]
         sats = [s["sat"] for s in ref_stats]
         wbs = [s["wb"] for s in ref_stats]
-        lines.append(
-            L["s1_tonal"].format(  # type: ignore[union-attr]
-                clave=_CLAVE_WORD[lang][_clave(sum(means) / len(means))],
-                lo=min(means),
-                hi=max(means),
-                contrast=_CONTRAST_WORD[lang][_contrast_band(sum(stds) / len(stds))],
-            )
-        )
-        lines.append(
-            L["s1_color"].format(  # type: ignore[union-attr]
-                wb=_WB_WORD[lang][_wb_band(sum(wbs) / len(wbs))],
-                wblo=min(wbs),
-                wbhi=max(wbs),
-                sat=_SAT_WORD[lang][_sat_band(sum(sats) / len(sats))],
-                satlo=min(sats),
-                sathi=max(sats),
-            )
-        )
-        # Dominant tonal zone
-        avg_tonal = [sum(s["tonal"][i] for s in ref_stats) / len(ref_stats) for i in range(3)]
+        avg_tonal = [
+            sum(s["tonal"][i] for s in ref_stats) / len(ref_stats) for i in range(3)
+        ]
         dom_idx = max(range(3), key=lambda i: avg_tonal[i])
         dom_word = (
-            ("sombras" if dom_idx == 0 else "medios" if dom_idx == 1 else "altas")
-            if lang == "es"
-            else ("shadows" if dom_idx == 0 else "midtones" if dom_idx == 1 else "highlights")
+            ("shadows" if dom_idx == 0 else "midtones" if dom_idx == 1 else "highlights")
+            if lang == "en"
+            else ("sombras" if dom_idx == 0 else "medios" if dom_idx == 1 else "altas")
         )
-        lines.append(L["s1_dist"].format(dom=dom_word))  # type: ignore[union-attr]
-    else:
-        lines.append(L["s1_no_refs"])  # type: ignore[arg-type]
-    lines.append("")
-
-    # -- 2. How the references are graded ---------------------------------
-    lines.append(L["s2_title"])  # type: ignore[arg-type]
-    lines.append("")
-    lines.append(L["s2_intro"])  # type: ignore[arg-type]
-    lines.append("")
-    for zone in ("shadows", "midtones", "highlights"):
-        lines.append(L[f"s2_{zone}"])  # type: ignore[arg-type]
-        lines.append("")
-        lines.append(_zone_line(lang, zone, reference_analysis))
-        lines.append("")
-    lines.append(L["s2_interp"])  # type: ignore[arg-type]
-    lines.append("")
-    if reference_analysis:
-        modes = [
-            reference_analysis.get(f"{z}_hue_mode") for z in ("shadows", "midtones", "highlights")
-        ]
-        if all(m == "mono" for m in modes):
-            hue = reference_analysis.get("shadows_hue") or 0.0
-            lines.append(L["s2_interp_mono"].format(color=_color(lang, hue)))  # type: ignore[union-attr]
-        elif "bi" in modes:
-            z = "shadows" if modes[0] == "bi" else "midtones" if modes[1] == "bi" else "highlights"
-            p = float(reference_analysis.get(f"{z}_hue") or 0.0)
-            s_sec = float(reference_analysis.get(f"{z}_hue_secondary") or 0.0)
-            lines.append(L["s2_interp_bi"].format(c1=_color(lang, p), c2=_color(lang, s_sec)))  # type: ignore[union-attr]
-        else:
-            lines.append(L["s2_interp_neutral"])  # type: ignore[arg-type]
-    else:
-        lines.append(L["s2_interp_neutral"])  # type: ignore[arg-type]
-    lines.append("")
-
-    # -- 3. Why the preset was generated this way --------------------------
-    lines.append(L["s3_title"])  # type: ignore[arg-type]
-    lines.append("")
-    lines.append(L["s3_intro"])  # type: ignore[arg-type]
-    lines.append("")
-
-    for plg in spec.plugins:
-        if not plg.enabled:
-            continue
-        lines.append(L["s3_modules"].format(op=plg.operation))  # type: ignore[union-attr]
-        lines.append("")
-        if plg.operation == "filmicrgb":
-            explains = _explain_filmic(lang, plg.params)
-        elif plg.operation == "exposure":
-            explains = _explain_exposure(lang, plg.params)
-        elif plg.operation == "colorbalancergb":
-            explains = _explain_colorbalance(lang, plg.params, reference_analysis)
-        elif plg.operation == "temperature":
-            explains = _explain_temperature(lang, plg.params)
-        elif plg.operation == "basicadj":
-            explains = _explain_basicadj(lang, plg.params)
-        elif plg.operation == "toneequal":
-            explains = _explain_toneequal(lang, plg.params)
-        elif plg.operation == "colorequal":
-            explains = _explain_colorequal(lang, plg.params)
-        elif plg.operation == "colorharmonizer":
-            explains = _explain_colorharmonizer(lang, plg.params)
-        elif plg.operation in ("tonecurve", "rgbcurve", "colorzones"):
-            explains = _explain_curve(lang, plg.operation, plg.params)
-        else:
-            explains = [f"**{k} = {v}**" for k, v in plg.params.items() if v not in (0, 0.0)]
-        if explains:
-            lines.extend(explains)
-        else:
-            lines.append(
-                "*(sin cambios relevantes respecto al valor por defecto)*"
-                if lang == "es"
-                else "*(no relevant changes from default)*"
+        mood = L["s1_mood"].replace("{desc}", spec.style_description or L["no_desc"])
+        lines.append(
+            mood.format(
+                clave=_CLAVE_WORD[lang][_clave(sum(means) / len(means))],
+                contrast=_CONTRAST_WORD[lang][_contrast_band(sum(stds) / len(stds))],
+                wb=_WB_WORD[lang][_wb_band(sum(wbs) / len(wbs))],
+                sat=_SAT_WORD[lang][_sat_band(sum(sats) / len(sats))],
+                dom=dom_word,
             )
-        lines.append("")
-
-    lines.append(L["s3_presets"])  # type: ignore[arg-type]
+        )
+    else:
+        lines.append(
+            L["s1_mood_noref"].replace("{desc}", spec.style_description or L["no_desc"])
+        )
     lines.append("")
     if presets:
-        lines.append(L["s3_presets_list"].format(n=len(presets)))  # type: ignore[union-attr]
+        labels = []
         for p in presets:
             try:
                 label = p.file_path.name if p.file_path else ""
             except AttributeError:
                 label = ""
-            lines.append(f"- **{label or p.name}**")
-        lines.append("")
-    else:
-        lines.append(L["s3_presets_none"])  # type: ignore[arg-type]
+            labels.append(label or p.name)
+        lines.append(L["s1_presets"].format(presets=", ".join(labels)))
         lines.append("")
 
-    lines.append(L["s3_guards"])  # type: ignore[arg-type]
+    # -- 2. Parameter Breakdown (table) ------------------------------------
+    lines.append(L["ped_s2_title"])
     lines.append("")
-    lines.extend(L["s3_guards_body"])
+    lines.append(L["ped_s2_header"])
+    lines.append(L["ped_s2_sep"])
+    for plg in spec.plugins:
+        if not plg.enabled:
+            continue
+        for s in _plugin_explains(lang, plg, reference_analysis):
+            row = _to_row(s)
+            if row:
+                lines.append(f"| {row[0]} | {row[1]} | {row[2]} |")
     lines.append("")
 
+    # -- 3. Pedagogical Justification --------------------------------------
+    lines.append(L["ped_s3_title"])
+    lines.append("")
+    lines.append(L["ped_s3_intro"])
+    lines.append("")
+    for plg in spec.plugins:
+        if not plg.enabled:
+            continue
+        lines.append(f"**{plg.operation}**")
+        explains = _plugin_explains(lang, plg, reference_analysis)
+        if explains:
+            for s in explains:
+                lines.append(f"- {s}")
+        else:
+            lines.append(f"- {L['no_relevant']}")
+    lines.append("")
     rationale = getattr(spec, "rationale", "") or ""
     if rationale:
-        lines.append(L["s3_rationale"])  # type: ignore[arg-type]
-        lines.append("")
-        lines.append(L["s3_rationale_body"].format(rationale=rationale))  # type: ignore[union-attr]
+        lines.append(L["ped_s3_rationale"].replace("{rationale}", rationale))
         lines.append("")
 
-    # -- 4. Expected result ------------------------------------------------
-    lines.append(L["s4_title"])  # type: ignore[arg-type]
+    # -- 4. Manual Creation Guide ------------------------------------------
+    lines.append(L["ped_s4_title"])
     lines.append("")
-    # Synthesise the expected effect from the active modules
-    params_by_op = {plg.operation: plg.params for plg in spec.plugins if plg.enabled}
-    filmic = params_by_op.get("filmicrgb", {})
-    exposure = params_by_op.get("exposure", {})
-    cbr = params_by_op.get("colorbalancergb", {})
-    ev = float(exposure.get("exposure") or 0.0)
-    filmic_sat = float(filmic.get("saturation") or 0.0)
-    has_zone_chroma = any(
-        float(cbr.get(f"{z}_C") or 0.0) > 0.001 for z in ("shadows", "midtones", "highlights")
-    )
-    if ev > 0.05:
-        exp_tonal = L["exp_tonal_bright"]
-    elif ev < -0.05:
-        exp_tonal = L["exp_tonal_dark"]
-    else:
-        exp_tonal = L["exp_tonal_same"]
-    if filmic_sat < -0.5 or float(cbr.get("chroma_global") or 0.0) < -0.01:
-        exp_color = L["exp_color_desat"]
-    elif filmic_sat > 0.5 or float(cbr.get("vibrance") or 0.0) > 0.1 or has_zone_chroma:
-        exp_color = L["exp_color_sat"]
-    else:
-        exp_color = L["exp_color_neutral"]
-    filmic_contrast = float(filmic.get("contrast") or 1.0)
-    if filmic_contrast > 1.1:
-        exp_finish = L["exp_finish_punchy"] if filmic_contrast >= 1.6 else L["exp_finish_soft"]
-    elif filmic_contrast < 0.9:
-        exp_finish = L["exp_finish_soft"]
-    else:
-        exp_finish = L["exp_finish_balanced"]
-    lines.append(
-        (L["s4_expected"] if isinstance(L["s4_expected"], str) else L["s4_expected"][0]).format(
-            exp_tonal=exp_tonal, exp_color=exp_color, exp_finish=exp_finish
-        )
-    )  # type: ignore[union-attr]
+    lines.append(L["ped_s4_intro"])
     lines.append("")
-
-    # -- 5. How to use it ---------------------------------------------------
-    lines.append(L["s5_title"])  # type: ignore[arg-type]
+    for step in _manual_steps(lang, spec):
+        lines.append(step)
     lines.append("")
-    lines.extend(line.format(name=spec.style_name) for line in L["s5_body"])
+    lines.append(L["ped_mistakes_title"])
     lines.append("")
-
-    # -- 6. Limitations ------------------------------------------------------
-    lines.append(L["s6_title"])  # type: ignore[arg-type]
+    lines.append(L["ped_mistake1"])
+    lines.append(L["ped_mistake2"])
+    lines.append(L["ped_mistake3"])
     lines.append("")
-    lines.append(L["s6_body"])  # type: ignore[arg-type]
+    lines.append(L["ped_s4_apply"].replace("{name}", spec.style_name or "style"))
     lines.append("")
 
     output_path = Path(output_path)

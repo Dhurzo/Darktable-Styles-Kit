@@ -48,10 +48,18 @@ def generate_dtstyle(
     # curve templates subsystem) working even though they cannot be
     # re-packed by ``pack_params`` without a ``curve_preset``.
     xml_plugins: list[dict] = []
-    for i, plg in enumerate(plugins):
+    for plg in plugins:
+        if not plg.op_params:
+            # Preset plugin whose blob could not be decoded: emitting it
+            # with an empty ``<op_params>`` would create an undecodable
+            # style entry, so drop the entry instead.
+            logger.warning(
+                "Skipping %s from preset: empty op_params blob", plg.operation
+            )
+            continue
         xml_plugins.append(
             {
-                "num": i,
+                "num": len(xml_plugins),
                 "module": plg.module,
                 "operation": plg.operation,
                 "op_params_override": plg.op_params,

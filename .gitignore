@@ -79,3 +79,6 @@ work/
 # Local test photos (photographers' images are never redistributed)
 test_data/*
 !test_data/README.md
+
+# Internal documentation (local only)
+glm5Generated/

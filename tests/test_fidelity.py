@@ -286,6 +286,26 @@ class TestGentleNudge:
         assert c.params["shadows_C"] > 0.0
         assert any("FIDELITY nudge" in w and "shadows_C" in w for w in warns)
 
+    def test_chroma_not_nudged_for_neutral_zone(self):
+        """A neutral zone (no declared grade) must stay neutral even if a
+        leftover saturation estimate exceeds the threshold; fidelity runs
+        after the validator and previously re-tinted midtones at hue 0."""
+        cb = Plugin(
+            operation="colorbalancergb",
+            enabled=True,
+            multi_name="",
+            params={"midtones_C": 0.0},
+        )
+        ref = _ref_analysis(
+            midtones_sat=0.5,
+            midtones_hue_mode="neutral",
+            midtones_hue_confidence=0.0,
+        )
+        out, warns = auto_fit_signature(_spec(cb), ref, _Analysis())
+        c = next(p for p in out.plugins if p.operation == "colorbalancergb")
+        assert c.params["midtones_C"] == 0.0
+        assert not any("FIDELITY nudge" in w and "midtones_C" in w for w in warns)
+
     def test_warmth_nudges_hue_toward_reference_grade(self):
         """Warm reference but VLM set a cool midtones hue → nudge warm."""
         cb = Plugin(

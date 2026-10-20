@@ -147,14 +147,23 @@ export DTSTYLEKIT_PRESETS_DIR=/path/to/darktable/data/styles
 # Analyze an image and generate a style (uses default model: gemma3:27b)
 dtstylekit generate path/to/photo.jpg -o my_style.dtstyle
 
+# RAW input is supported: a JPEG preview is rendered automatically for the
+# VLM, while the style is tested against the RAW itself
+dtstylekit generate path/to/photo.ARW -o my_style.dtstyle
+
+# Apply the style to a whole set: exposure is normalized per image to the
+# references (or --target-luminance) and highlights are kept below --max-clip
+dtstylekit apply my_style.dtstyle 'photos/*.ARW' \
+    --references 'refs/*.jpeg' -o outputs/
+
 # Use a different VLM model
 dtstylekit generate path/to/photo.jpg --model llama3.2-vision:11b -o my_style.dtstyle
 
 # List available presets
-dtstylekit presets list
+dtstylekit preset list
 
 # Search presets semantically
-dtstylekit presets search "warm cinematic look"
+dtstylekit preset search "warm cinematic look"
 
 # Generate a curve-based preset adjustment (e.g. tone curve, rgb curve, color zones)
 dtstylekit curves --help
@@ -162,6 +171,10 @@ dtstylekit curves --help
 # Generate with reference-look images + a Spanish explanation document
 dtstylekit generate photo.jpg --references 'refs/*.jpg' --direction "cinematic warm portrait" --lang es
 ```
+
+Styles are exposure-neutral: `generate` saves the look, and `apply` computes
+an exposure offset for each photo. This keeps a style generated from one
+frame from blowing out brighter frames in the same set.
 
 > **Model customization:** The `--model` flag accepts any vision model available in Ollama. The default is `gemma3:27b` (good balance of quality and VRAM). Other good options: `llama3.2-vision:11b` (best for photos, ~8 GB VRAM), `gemma3:4b` (lightweight, ~4 GB), `llava:7b` (classic, ~6 GB).
 

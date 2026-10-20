@@ -829,17 +829,7 @@ _VERIFIED_IOPS = {
                 for i in range(4)
                 if not (c == "red" and i == 0 or c == "green" and i == 1 or c == "blue" and i == 2)
             },
-            **{
-                n: 0
-                for n in (
-                    "normalize_R",
-                    "normalize_G",
-                    "normalize_B",
-                    "normalize_sat",
-                    "normalize_light",
-                    "normalize_grey",
-                )
-            },
+            **dict.fromkeys(("normalize_R", "normalize_G", "normalize_B", "normalize_sat", "normalize_light", "normalize_grey"), 0),
             "illuminant": 2,  # DT_ILLUMINANT_D (illuminants.h:30)
             "illum_fluo": 2,  # DT_ILLUMINANT_FLUO_F3 (illuminants.h:47)
             "illum_led": 4,  # DT_ILLUMINANT_LED_B5 (illuminants.h:67)
@@ -857,17 +847,7 @@ _VERIFIED_IOPS = {
                 for c in ("red", "green", "blue", "saturation", "lightness", "grey")
                 for i in range(4)
             },
-            **{
-                n: (0, 1)
-                for n in (
-                    "normalize_R",
-                    "normalize_G",
-                    "normalize_B",
-                    "normalize_sat",
-                    "normalize_light",
-                    "normalize_grey",
-                )
-            },
+            **dict.fromkeys(("normalize_R", "normalize_G", "normalize_B", "normalize_sat", "normalize_light", "normalize_grey"), (0, 1)),
             "illuminant": (0, 10),
             "illum_fluo": (0, 12),
             "illum_led": (0, 12),

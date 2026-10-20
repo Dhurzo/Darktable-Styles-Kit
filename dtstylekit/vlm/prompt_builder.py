@@ -71,15 +71,14 @@ STEP 3 - MAP TO MODULES WITH STRONG VALUES (use FULL ranges, not timid defaults)
   ├─────────────────────────────────────────────────────────────────────────┤
   │ EXPOSURE / TONE MAPPING (scene-referred, applied FIRST)               │
   ├─────────────────────────────────────────────────────────────────────────┤
-  │ exposure.exposure:             EV shift (-4 to +4)                    │
-  │   -> Dark image (mean<0.25) needing lift    -> +0.5 to +1.5             │
-  │   -> Bright image (mean>0.7) needing pull   -> -0.5 to -1.0             │
-  │   -> Well-exposed (0.3–0.7)                 -> -0.3 to +0.3             │
-  │ exposure.black:                -1.0=lift blacks -> +1.0=crush blacks   │
-  │   -> Moody/cinematic (subtle)               -> +0.05 to +0.15           │
-  │   -> Lifted blacks for faded/vintage look   -> -0.2 to -0.05            │
-  │   -> Preserve shadow detail (default)       -> -0.05 to 0.0             │
-  │   -> NEVER use black > 0.2 (destroys shadow detail)                    │
+  │ exposure.exposure:             small creative EV shift (-1.0 to +1.0)  │
+  │   -> Exposure is NOT the brightness matcher: the exporter normalizes   │
+  │      reference brightness per image. Keep it small and creative.       │
+  │ exposure.black:                scene-linear black level (default 0.0)  │
+  │   -> 0.0 for almost every look                                         │
+  │   -> Subtle crush at most +0.005; above +0.01 crushes shadow detail    │
+  │   -> For lifted/faded blacks use colorbalancergb or a tone curve,      │
+  │      not negative black                                                │
   ├─────────────────────────────────────────────────────────────────────────┤
   │ COLOR GRADING (scene-referred) - MATCH THE REFERENCE HUES            │
   ├─────────────────────────────────────────────────────────────────────────┤
@@ -201,16 +200,16 @@ STEP 3 - MAP TO MODULES WITH STRONG VALUES (use FULL ranges, not timid defaults)
   ├─────────────────────────────────────────────────────────────────────────┤
   │ CURVE-BASED (Lab) - use NAMED TEMPLATES only                          │
   ├─────────────────────────────────────────────────────────────────────────┤
-  │ tonecurve.curve_preset:          "inverted_s_strong" = crushed shadows│
-  │                                    "s_curve_mild" = gentle contrast   │
-  │                                    "lift_shadows" = shadow detail     │
-  │                                    "crush_highlights" = highlight rolloff│
-  │ colorzones.curve_preset:         "muted_earth"                        │
-  │                                    "cool_shadows_warm_highs"          │
-  │                                    "vintage_faded"                    │
-  │                                    "skin_tone_protect"                │
-  │ rgbcurve.curve_preset:           "inverted_s_strong" for crushed look │
-  │                                    "s_curve_mild" for gentle pop      │
+  │ tonecurve.curve_preset:          "s_soft"/"s_strong" gentle/punchy    │
+  │                                    "inverted_s_strong" crushed shadows│
+  │                                    "lift_subtle"/"lift_medium" detail │
+  │                                    "crush_subtle"/"crush_strong" fade │
+  │ colorzones.curve_preset:         "sepia_warm"/"sepia_cool"            │
+  │                                    "shadow_cool"/"shadow_warm"        │
+  │                                    "matte_film"/"bleach_bypass"       │
+  │                                    "identity" = no colour-zone curve  │
+  │ rgbcurve.curve_preset:           "s_strong" for gentle pop           │
+  │                                    "inverted_s_strong" for crush      │
   ├─────────────────────────────────────────────────────────────────────────┤
   │ SIGMOID - ONLY for JPEGs / display-referred (NO default filmicrgb)    │
   ├─────────────────────────────────────────────────────────────────────────┤
@@ -303,7 +302,7 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
    • LOOK at the reference images FIRST - before choosing ANY parameter
    • Derive the target style EXCLUSIVELY from them: tonal character, color grade (hue in shadows/midtones/highlights, saturation), mood, texture
    • COPY the actual hues you see in the references for shadows_H, midtones_H, highlights_H - DO NOT use any fixed ranges from this prompt
-   • The LAST attached image is the photo the style will be applied to. Design the style so the target photo ends up matching the reference look.
+   • The LAST attached image is the photo the style will be applied to. Design the LOOK (color, contrast, tone shape); the exporter normalizes reference brightness per image, so do not use exposure to match absolute luminance.
 2. If NO candidate preset matches the target look -> "selected_presets": []
 3. Use MODERATE values - defaults (0, 1.0, 1.5) mean "no change"; extreme values break portability
 4. RAW pipeline: USE filmicrgb (replaces default), AVOID sigmoid (stacks with default filmicrgb)
@@ -314,7 +313,7 @@ CRITICAL RULES - VIOLATION = BROKEN STYLE
 9. highlights_Y MUST be >= 0 unless the reference shows dimmed highlights, NEVER negative by default
 10. global_C is an ADDITIVE color offset: global_C>0 with global_H=0 (hue 0°=red) tints the WHOLE image red. Use global_C=0.0 (neutral) or pair it with a deliberate hue (45=warm, 200=cool) at small chroma (≤0.15). Grade with shadows_H/midtones_H/highlights_H
 11. shadows_Y range: -0.15 to -0.3 for moody shadows, NEVER < -0.3 (crushes detail); use positive only if reference shows lifted shadows
-12. exposure.black range: 0.0 to 0.15, NEVER > 0.2 (destroys shadow detail)
+12. exposure.black is a SCENE-LINEAR level: keep it at 0.0, or at most +0.005 for a subtle black crush. NEVER use values >= 0.01 (they crush shadows and force huge exposure compensation); use colorbalancergb/tone curves for lifted blacks.
 13. filmicrgb: contrast=1.0-1.8 (moderate), latitude=2-4, saturation=-30..+30, balance=-3 to +3 (NEVER ≤ -10: darkens whole image)
 14. PRESERVE SHADOW DETAIL: If image analysis shows shadows_pct < 10%, keep shadows_Y > -0.2 and filmic balance >= -3
 15. AVOID GLOBAL DARKENING: global_Y should be 0.0 to -0.03 unless the target is explicitly dark
@@ -423,8 +422,8 @@ def build_prompt(
             f"• Do NOT create a NEW filmicrgb instance from scratch - it re-maps "
             f"display-referred data through the scene tone-mapper and crushes shadows. "
             f"• For contrast use SIGMOID (scene-referred, safe) with middle_grey_contrast 1.1–4.0. "
-            f"• exposure.black MUST be >= 0.0 (do NOT lift shadows with negative black). "
-            f"• If lifting needed: exposure.exposure +0.3..+1.5. "
+            f"• exposure.black MUST stay 0.0 (or at most +0.005); do NOT lift shadows with negative black. "
+            f"• Prefer colorbalancergb/tone curves for shadow lifting; keep exposure.exposure within -0.5..+0.5. "
             f"• colorbalancergb: shadows_Y -0.3..0 for moody shadows (NEVER < -0.3). "
             f"• NEVER dehaze/defog, NEVER negative shadows_Y/shadhi.shadows.\n"
         )
@@ -542,7 +541,7 @@ def build_prompt(
             f"DO NOT select any of them - use selected_presets: [] and create the look "
             f"entirely via `adjustments` targeting the available IOPs.\n"
         )
-    # CRITICAL: Curve template names (cinematic_teal_orange, inverted_s_strong, etc.) are NOT preset filenames.
+    # CRITICAL: Curve template names (s_strong, inverted_s_strong, sepia_warm, etc.) are NOT preset filenames.
     # They are used ONLY in adjustments.tonecurve.curve_preset or adjustments.colorzones.curve_preset.
     if reference_b64s:
         # Reference-driven generation: the attached references DEFINE the target
@@ -559,14 +558,14 @@ def build_prompt(
             "that preset's baseline (the preset supplies the tone map and base grade; your adjustments refine it). "
             "Example: \"selected_presets\": [\"examples_colors_autumn.dtstyle\"]. "
             "If NONE of the candidates resemble the reference, use selected_presets: []. "
-            "Curve template names (cinematic_teal_orange, s_curve_mild, muted_earth, vintage_faded, ...) are NOT "
+            "Curve template names (s_strong, inverted_s_strong, sepia_warm, matte_film, ...) are NOT "
             "preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset / colorzones.curve_preset.\n"
         )
     else:
         preset_note = (
             "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
-            "Curve template names like 'cinematic_teal_orange', 'inverted_s_strong', 's_curve_mild', "
-            "'lift_shadows', 'muted_earth', 'cool_shadows_warm_highs', 'vintage_faded', 'skin_tone_protect' "
+            "Curve template names like 's_strong', 'inverted_s_strong', 'lift_medium', "
+            "'sepia_warm', 'shadow_cool', 'matte_film', 'bleach_bypass' "
             "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
             "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
             "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
@@ -585,7 +584,7 @@ def build_prompt(
         "• USE filmicrgb for tone mapping: contrast=1.4–1.7 (moderate cinematic), latitude=2–4, saturation=-15 to -35, balance=-3 to +3 (NEVER ≤ -10). "
         "• This filmicrgb will REPLACE the default, not stack. "
         "• Use colorbalancergb for color grading (shadows/midtones/highlights split - MATCH reference hues). "
-        "• Use tonecurve.curve_preset='s_curve_mild' and colorzones.curve_preset='identity' for curves."
+        "• Use tonecurve.curve_preset='s_soft' (or 's_strong') and colorzones.curve_preset='identity' for curves."
     )
 
     if reference_b64s:
@@ -691,14 +690,14 @@ def build_prompt(
                 if gsat >= 0.25:
                     ref_instructions.append(
                         f"  -> References are COLORFUL (global HSV {gsat:.3f}): do NOT desaturate to "
-                        f"match the low per-zone deltas. filmicrgb.saturation MUST be >= 0 "
+                        f"match the low per-zone deltas. Keep filmicrgb.saturation in [0, +15] "
                         f"(use 0 or +5..+15) — NEVER negative. Use colorbalancergb.vibrance "
                         f"+0.1..+0.3 to preserve the vivid look."
                     )
                 elif gsat >= 0.15:
                     ref_instructions.append(
                         f"  -> References are moderately colorful (global HSV {gsat:.3f}): "
-                        f"filmrgb.saturation MUST be >= 0 (use 0..+5, NEVER negative) and "
+                        f"filmicrgb.saturation MUST be >= 0 (use 0..+5, NEVER negative) and "
                         f"vibrance 0..+0.15."
                     )
                 else:
@@ -792,6 +791,7 @@ def build_prompt(
 
         reference_note = (
             f"{ref_hues}"
+            f"{_reference_spec_block(reference_analysis)}"
             f"\n================================================================\n"
             f"CRITICAL: USE PRE-COMPUTED HUES WHERE CONFIDENT >=0.7 - NEUTRAL (0°) WHERE NOT\n"
             f"===============================================================\n\n"
@@ -885,6 +885,55 @@ def _is_global_grade(reference_analysis: dict | None) -> bool:
     return all((reference_analysis.get(f"{z}_hue_mode") or "") == "global" for z in _SOFT_CAPS)
 
 
+def _reference_spec_block(reference_analysis: dict | None) -> str:
+    """Numeric reference signature: luminance, contrast, saturation, warmth.
+
+    Complements the per-zone hue block with the measured *global* shape of
+    the look.  Values are targets, not commands: the VLM still chooses the
+    creative parameters, but it cannot claim the references are dark/muted
+    when the numbers say otherwise.
+    """
+    if not reference_analysis:
+        return ""
+
+    def _f(key: str, default: float = 0.0) -> float:
+        value = reference_analysis.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+        return default
+
+    lines = ["\n[REFERENCE SPEC — measured from the reference images]"]
+    lines.append(
+        f"  LUMINANCE KEY: mean={_f('global_luminance'):.3f}, "
+        f"contrast={_f('global_contrast'):.3f}, "
+        f"dynamic_range={_f('global_dynamic_range'):.3f}"
+    )
+    lines.append(
+        f"  SATURATION: mean={_f('global_saturation'):.3f} (HSV), "
+        f"p90={_f('global_saturation_p90'):.3f}"
+    )
+    lines.append(
+        f"  WARMTH: R-B mean={_f('global_warmth_rb'):+.3f} "
+        f"({'warm' if _f('global_warmth_rb') > 0 else 'cool' if _f('global_warmth_rb') < 0 else 'neutral'} cast)"
+    )
+    palette = reference_analysis.get("palette")
+    if isinstance(palette, list) and palette:
+        entries = []
+        for item in palette[:3]:
+            if not isinstance(item, dict):
+                continue
+            hue = item.get("hue")
+            weight = item.get("weight")
+            if isinstance(hue, int | float) and isinstance(weight, int | float):
+                entries.append(f"{float(hue):.0f}° ({float(weight):.0%})")
+        if entries:
+            lines.append(f"  DOMINANT HUES: {', '.join(entries)}")
+    lines.append(
+        "  Use these as measured targets; do not invent a darker/more saturated/warmer look."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _chroma_caps_block(reference_analysis: dict | None) -> str:
     """Build the dynamic chroma caps instructions for the prompt.
 
@@ -915,6 +964,7 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
     def _zone_cap(zone: str) -> float:
         conf = float(reference_analysis.get(f"{zone}_hue_confidence", 0) or 0)
         sat = float(reference_analysis.get(f"{zone}_sat", 0) or 0)
+        mode = reference_analysis.get(f"{zone}_hue_mode")
         if _is_global_grade(reference_analysis):
             # Hito 6F: uniform grade → subtle cap, scaled by half the
             # measured zone saturation (mirrors the validator).
@@ -925,6 +975,10 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
         if conf >= _HIGH_CONF_THRESHOLD:
             cap = _HIGH_CAPS[zone]
         elif conf >= _NEUTRAL_CONF_THRESHOLD:
+            cap = _SOFT_CAPS[zone]
+        elif mode in ("mono", "bi", "global"):
+            # Explicit mode = intentional grade; low confidence is expected
+            # for a monochrome/bi-modal reference and must not erase it.
             cap = _SOFT_CAPS[zone]
         else:
             return 0.0  # neutral: below threshold
@@ -941,10 +995,16 @@ def _chroma_caps_block(reference_analysis: dict | None) -> str:
                 f"(min({_GLOBAL_CAPS[zone]:.2f}, sat*0.25={sat * 0.25:.2f}))"
             )
         conf = float(reference_analysis.get(f"{zone}_hue_confidence", 0) or 0)
+        mode = reference_analysis.get(f"{zone}_hue_mode")
         if conf >= _HIGH_CONF_THRESHOLD:
             return f"high-confidence (conf={conf:.2f} >= 0.85) -> cap = {_HIGH_CAPS[zone]:.2f}"
         if conf >= _NEUTRAL_CONF_THRESHOLD:
             return f"medium-confidence (conf={conf:.2f}) -> soft cap = {_SOFT_CAPS[zone]:.2f}"
+        if mode in ("mono", "bi", "global"):
+            return (
+                f"intentional {mode} grade (conf={conf:.2f}) -> soft cap = "
+                f"{_SOFT_CAPS[zone]:.2f}"
+            )
         return f"low-confidence (conf={conf:.2f} < 0.70) -> NEUTRAL (cap = 0)"
 
     sc = _zone_cap("shadows")

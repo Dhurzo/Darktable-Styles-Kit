@@ -630,3 +630,158 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
         "midtones_hue_mode": mtc["mode"],
         "highlights_hue_mode": hic["mode"],
     }
+
+
+def compute_reference_globals(reference_paths: list[Path]) -> dict:
+    """Compute global numeric statistics for a set of reference images.
+
+    Single pass over the references returning the shape of the look:
+    mean luminance, contrast (luminance std), dynamic range (p95-p5),
+    mean/90th-percentile HSV saturation, red-minus-blue warmth and a
+    saturation-weighted hue palette.
+
+    These values are informational targets for the prompt and the
+    closed-loop evaluator; they do not drive blanket automatic fits.
+    Invalid/unreadable images are skipped.
+    """
+    lums: list[float] = []
+    stds: list[float] = []
+    drs: list[float] = []
+    sats: list[float] = []
+    sats_p90: list[float] = []
+    warmth: list[float] = []
+    palette_w: np.ndarray = np.zeros(12, dtype=np.float64)
+    palette_sin: np.ndarray = np.zeros(12, dtype=np.float64)
+    palette_cos: np.ndarray = np.zeros(12, dtype=np.float64)
+
+    for ref in reference_paths:
+        try:
+            arr = np.asarray(Image.open(ref).convert("RGB"), dtype=np.float32) / 255.0
+        except Exception:
+            continue
+        if arr.size == 0:
+            continue
+
+        lum = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+        lums.append(float(lum.mean()))
+        stds.append(float(lum.std()))
+        drs.append(float(np.percentile(lum, 95) - np.percentile(lum, 5)))
+
+        mx = arr.max(axis=-1)
+        mn = arr.min(axis=-1)
+        delta = mx - mn
+        hsv = np.where(mx > 0, delta / np.maximum(mx, 1e-9), 0.0)
+        sats.append(float(hsv.mean()))
+        sats_p90.append(float(np.percentile(hsv, 90)))
+        warmth.append(float((arr[..., 0] - arr[..., 2]).mean()))
+
+        mask = delta > 0.05
+        if not np.any(mask):
+            continue
+        r = arr[..., 0][mask]
+        g = arr[..., 1][mask]
+        b = arr[..., 2][mask]
+        max_c = np.maximum(np.maximum(r, g), b)
+        min_c = np.minimum(np.minimum(r, g), b)
+        delta_c = max_c - min_c
+        valid = delta_c > 0.01
+        if not np.any(valid):
+            continue
+        r, g, b = r[valid], g[valid], b[valid]
+        delta_c = delta_c[valid]
+        max_c = max_c[valid]
+
+        hue = np.zeros_like(r)
+        r_idx = max_c == r
+        g_idx = (max_c == g) & ~r_idx
+        b_idx = ~(r_idx | g_idx)
+        hue[r_idx] = (60.0 * ((g[r_idx] - b[r_idx]) / delta_c[r_idx]) + 360.0) % 360.0
+        hue[g_idx] = (60.0 * ((b[g_idx] - r[g_idx]) / delta_c[g_idx]) + 120.0) % 360.0
+        hue[b_idx] = (60.0 * ((r[b_idx] - g[b_idx]) / delta_c[b_idx]) + 240.0) % 360.0
+
+        weights = delta_c.astype(np.float64) ** 2
+        bins = (hue // 30.0).astype(np.int64) % 12
+        rad = np.deg2rad(hue)
+        palette_w += np.bincount(bins, weights=weights, minlength=12)
+        palette_sin += np.bincount(bins, weights=weights * np.sin(rad), minlength=12)
+        palette_cos += np.bincount(bins, weights=weights * np.cos(rad), minlength=12)
+
+    out: dict = {
+        "global_luminance": 0.0,
+        "global_contrast": 0.0,
+        "global_dynamic_range": 0.0,
+        "global_saturation": 0.0,
+        "global_saturation_p90": 0.0,
+        "global_warmth_rb": 0.0,
+        "palette": [],
+    }
+    if lums:
+        out["global_luminance"] = sum(lums) / len(lums)
+        out["global_contrast"] = sum(stds) / len(stds)
+        out["global_dynamic_range"] = sum(drs) / len(drs)
+        out["global_saturation"] = sum(sats) / len(sats)
+        out["global_saturation_p90"] = sum(sats_p90) / len(sats_p90)
+        out["global_warmth_rb"] = sum(warmth) / len(warmth)
+
+    total = float(palette_w.sum())
+    if total > 0:
+        out["palette"] = _palette_from_bins(
+            palette_w, palette_sin, palette_cos, total
+        )
+    return out
+
+
+def _palette_from_bins(
+    weights: np.ndarray,
+    sin_sum: np.ndarray,
+    cos_sum: np.ndarray,
+    total: float,
+    top_n: int = 3,
+) -> list[dict]:
+    """Merge adjacent hue bins into the dominant palette entries."""
+    used: np.ndarray = np.zeros(12, dtype=bool)
+    palette: list[dict] = []
+    for idx in np.argsort(weights)[::-1]:
+        idx = int(idx)
+        if used[idx] or weights[idx] <= 0:
+            continue
+        peak = float(weights[idx])
+        members = [idx]
+        used[idx] = True
+        left = (idx - 1) % 12
+        while not used[left] and weights[left] >= peak * 0.15:
+            members.append(left)
+            used[left] = True
+            left = (left - 1) % 12
+        right = (idx + 1) % 12
+        while not used[right] and weights[right] >= peak * 0.15:
+            members.append(right)
+            used[right] = True
+            right = (right + 1) % 12
+        w_sum = float(sum(weights[m] for m in members))
+        s_sum = float(sum(sin_sum[m] for m in members))
+        c_sum = float(sum(cos_sum[m] for m in members))
+        hue = float(np.rad2deg(np.arctan2(s_sum, c_sum)) % 360.0)
+        palette.append({"hue": hue, "weight": w_sum / total})
+        if len(palette) >= top_n:
+            break
+    return palette
+
+
+def compute_reference_signature(reference_paths: list[Path]) -> dict:
+    """Full reference signature: per-zone hues + global shape + palette.
+
+    Combines :func:`analyze_reference_hues` (per-zone graded hues with
+    confidence/mode) with :func:`compute_reference_globals` (luminance,
+    contrast, dynamic range, HSV saturation, warmth, dominant palette).
+    This is the single reference-analysis contract consumed by the prompt,
+    the validator and the closed-loop refiner.
+    """
+    signature = compute_reference_globals(reference_paths)
+    if not reference_paths:
+        return signature
+    try:
+        signature.update(analyze_reference_hues(reference_paths))
+    except Exception:
+        pass
+    return signature

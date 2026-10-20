@@ -12,27 +12,33 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dtstylekit.analyzer.pipeline import analyze_reference_hues
+from dtstylekit.analyzer.pipeline import (
+    analyze_reference_hues,
+    compute_reference_signature,
+)
 
 from .client import VLMClient
 from .iterative_refiner import iterative_refine
 from .parser import parse_response
 from .prompt_builder import build_prompt
 from .schema_renderer import render_iop_schema
-
-if TYPE_CHECKING:
-    from dtstylekit.analyzer.models import ImageAnalysis
-    from dtstylekit.presets.search import PresetSearcher
-    from dtstylekit.vlm.models import StyleSpec
 from .validator import validate_style
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
     from dtstylekit.presets.models import Preset
+    from dtstylekit.presets.search import PresetSearcher
 
     from .models import StyleSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _as_float(value: object, default: float | None = None) -> float | None:
+    """Narrow an arbitrary analysis value to float without bool leakage."""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return default
 
 
 def _encode_resized(image_path: str | Path, max_dim: int = 768, quality: int = 88) -> str:
@@ -62,6 +68,7 @@ def generate_style_spec(
     references: list[str | Path] | None = None,
     refine_iterations: int = 0,  # 0 = no iterative refinement
     refine_raw_path: str | Path | None = None,  # RAW file for test renders
+    bake_path: str | Path | None = None,  # image used for safety-bake renders
     capture_raw: bool = False,  # if True, also return the raw VLM text (5-tuple)
     reference_preset: str | None = None,  # ground-truth baseline preset filename
 ) -> tuple[StyleSpec, str, list[str], ImageAnalysis]:
@@ -84,6 +91,8 @@ def generate_style_spec(
             the VLM with visual feedback from the previous render.
         refine_raw_path: RAW file path for test renders during refinement.
             Required if ``refine_iterations > 0``.
+        bake_path: Image used for safety-bake renders. Defaults to
+            ``image_path``; pass the RAW when ``image_path`` is a preview.
 
     Returns:
         (validated_spec, vlm_report, warnings, image_analysis) tuple.
@@ -98,8 +107,6 @@ def generate_style_spec(
     #     direction string) and (b) feed the prompt.  Computed once here and
     #     reused below (no double analysis).
     reference_analysis: dict | None = None
-    from pathlib import Path  # local import: a later block also imports Path
-
     reference_paths: list[Path] = []
     reference_b64s: list[str] = []
     if references:
@@ -107,41 +114,31 @@ def generate_style_spec(
             try:
                 reference_b64s.append(_encode_resized(ref))
                 reference_paths.append(Path(ref))
+                logger.info("Attaching reference image: %s", ref)
             except Exception as e:
                 logger.warning("Could not encode reference image %s: %s", ref, e)
         if reference_paths:
-            logger.info("Analyzing reference hues with Python (early)...")
+            logger.info("Analyzing reference signature with Python...")
             try:
-                reference_analysis = analyze_reference_hues(reference_paths)
+                reference_analysis = compute_reference_signature(reference_paths)
             except Exception as exc:
-                logger.warning("Reference hue analysis failed: %s", exc)
-            try:
-                from dtstylekit.analyzer.pipeline import analyze_image as _analyze_ref
-
-                _sats, _lums = [], []
-                for ref in reference_paths:
-                    try:
-                        _a = _analyze_ref(ref)
-                        _s = getattr(getattr(_a, "luminance", None), "saturation_mean", None)
-                        if isinstance(_s, int | float) and not isinstance(_s, bool):
-                            _sats.append(float(_s))
-                        _m = getattr(getattr(_a, "luminance", None), "mean", None)
-                        if isinstance(_m, int | float) and not isinstance(_m, bool):
-                            _lums.append(float(_m))
-                    except Exception:
-                        continue
-                if _sats:
-                    reference_analysis["global_saturation"] = sum(_sats) / len(_sats)
-                if _lums:
-                    reference_analysis["global_luminance"] = sum(_lums) / len(_lums)
-            except Exception as exc:  # pragma: no cover — defensive
-                logger.warning("Could not compute reference global saturation: %s", exc)
-            try:
-                from dtstylekit.vlm.fidelity import compute_reference_profile
-
-                reference_analysis.update(compute_reference_profile(reference_paths))
-            except Exception as exc:  # pragma: no cover — defensive
-                logger.warning("Could not compute reference profile: %s", exc)
+                logger.warning(
+                    "Reference signature analysis failed (%s); falling back to hues", exc
+                )
+                try:
+                    reference_analysis = analyze_reference_hues(reference_paths)
+                except Exception as hue_exc:
+                    logger.warning("Reference hue analysis failed: %s", hue_exc)
+            if reference_analysis:
+                logger.info(
+                    "Reference signature: luminance=%.3f saturation=%.3f "
+                    "warmth=%+.3f contrast=%.3f DR=%.3f",
+                    reference_analysis.get("global_luminance", 0.0),
+                    reference_analysis.get("global_saturation", 0.0),
+                    reference_analysis.get("global_warmth_rb", 0.0),
+                    reference_analysis.get("global_contrast", 0.0),
+                    reference_analysis.get("global_dynamic_range", 0.0),
+                )
 
     # 2. Search presets.  When references are supplied, build the query from
     #    the *reference* look (so search returns the creative presets that
@@ -175,8 +172,6 @@ def generate_style_spec(
                 getattr(r.preset, "display_name", None) or r.preset.name,
             )
             continue
-        from pathlib import Path
-
         from dtstylekit.presets.parser import parse_preset
 
         full = parse_preset(Path(file_path))
@@ -224,97 +219,6 @@ def generate_style_spec(
         logger.warning("Could not encode image: %s", e)
         image_b64 = None
 
-    # 4b. Optionally encode reference-look images (they define the target
-    # aesthetic; e.g. samples of a photographer's style).
-    reference_b64s: list[str] = []
-    reference_paths: list[Path] = []
-    for ref in references or []:
-        try:
-            reference_b64s.append(_encode_resized(ref))
-            reference_paths.append(Path(ref))
-            logger.info("Attaching reference image: %s", ref)
-        except Exception as e:
-            logger.warning("Could not encode reference image %s: %s", ref, e)
-
-    # 4c. Analyze reference hues with Python (avoids VLM visual confusion).
-    # Skipped when the early reference analysis (step 1b) already succeeded.
-    if reference_paths and reference_analysis is None:
-        logger.info("Analyzing reference hues with Python...")
-        reference_analysis = analyze_reference_hues(reference_paths)
-        logger.info(
-            "Reference hues: shadows_H=%.1f (conf=%.2f), midtones_H=%.1f (conf=%.2f), highlights_H=%.1f (conf=%.2f), "
-            "shadows_S=%.3f, midtones_S=%.3f, highlights_S=%.3f",
-            reference_analysis.get("shadows_hue", 0) or 0,
-            reference_analysis.get("shadows_hue_confidence", 0),
-            reference_analysis.get("midtones_hue", 0) or 0,
-            reference_analysis.get("midtones_hue_confidence", 0),
-            reference_analysis.get("highlights_hue", 0) or 0,
-            reference_analysis.get("highlights_hue_confidence", 0),
-            reference_analysis.get("shadows_sat", 0),
-            reference_analysis.get("midtones_sat", 0),
-            reference_analysis.get("highlights_sat", 0),
-        )
-
-        # 4c-bis. Global HSV saturation of the references (mean of
-        # luminance.saturation_mean per reference).  The per-zone *_sat
-        # values from analyze_reference_hues use ABSOLUTE RGB deltas
-        # averaged over ALL pixels of the zone — on low-key references
-        # (most pixels in shadows) they systematically under-report how
-        # colorful the photos actually are (Alen Palander: zones
-        # 0.04–0.08 vs HSV mean ~0.30).  The VLM used the depressed
-        # number to justify filmicrgb.saturation=-20 and skipped
-        # vibrance entirely, producing muted outputs.  Feed the true
-        # global HSV saturation into the prompt so saturation decisions
-        # are based on real data.
-        try:
-            from dtstylekit.analyzer.pipeline import analyze_image as _analyze_ref
-
-            _sats: list[float] = []
-            _lums: list[float] = []
-            for ref in reference_paths:
-                try:
-                    _a = _analyze_ref(ref)
-                    _s = getattr(getattr(_a, "luminance", None), "saturation_mean", None)
-                    if isinstance(_s, int | float) and not isinstance(_s, bool):
-                        _sats.append(float(_s))
-                    _m = getattr(getattr(_a, "luminance", None), "mean", None)
-                    if isinstance(_m, int | float) and not isinstance(_m, bool):
-                        _lums.append(float(_m))
-                except Exception:
-                    continue
-            if _sats:
-                reference_analysis["global_saturation"] = sum(_sats) / len(_sats)
-                logger.info(
-                    "Reference global HSV saturation: %.3f (%d refs)",
-                    reference_analysis["global_saturation"],
-                    len(_sats),
-                )
-            if _lums:
-                reference_analysis["global_luminance"] = sum(_lums) / len(_lums)
-                logger.info(
-                    "Reference global luminance: %.3f (%d refs)",
-                    reference_analysis["global_luminance"],
-                    len(_lums),
-                )
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("Could not compute reference global saturation: %s", exc)
-
-        # 4c-ter. Extended reference profile (contrast, dynamic range,
-        # saturation peaks, warmth) — feeds the adaptive fidelity ranges.
-        try:
-            from dtstylekit.vlm.fidelity import compute_reference_profile
-
-            reference_analysis.update(compute_reference_profile(reference_paths))
-            logger.info(
-                "Reference profile: contrast=%.3f DR=%.3f sat_p90=%.3f warmth=%+.3f",
-                reference_analysis.get("global_contrast", 0),
-                reference_analysis.get("global_dynamic_range", 0),
-                reference_analysis.get("global_saturation_p90", 0),
-                reference_analysis.get("global_warmth_rb", 0),
-            )
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("Could not compute reference profile: %s", exc)
-
     # 5. Build prompt
     messages = build_prompt(
         analysis,
@@ -338,9 +242,11 @@ def generate_style_spec(
     # so a slow machine never trips the 5-minute default from older code.
     client = VLMClient(timeout=3600.0, max_retries=1)
 
-    def _call(temperature: float) -> tuple[StyleSpec, str, list[str]]:
+    def _call(
+        temperature: float, msgs: list[dict] | None = None
+    ) -> tuple[StyleSpec, str, list[str]]:
         response_text = client.generate(
-            messages,
+            msgs or messages,
             model=model,
             temperature=temperature,
             max_tokens=3000,
@@ -433,12 +339,11 @@ def generate_style_spec(
         warnings.extend(fit_warnings)
 
     # 6d. SAFETY BAKE (deterministic, no VLM).  Assemble the final style and
-    # render it on the target; if the result is crushed / under-exposed (or
-    # far below the reference brightness), nudge exposure until it is safe.
-    # This guarantees reference transfer onto dark photos does not collapse to
-    # near-black — the single biggest source of uneven results — without
-    # re-prompting the VLM.  Runs after validation + auto-fit so the baked
-    # exposure is what gets serialized.
+    # render it on the target; if it clips highlights, lower exposure.  It
+    # deliberately does NOT lift dark renders to the reference brightness:
+    # that would serialize a target-specific exposure into the style and blow
+    # brighter photos.  ``dtstylekit apply`` normalizes brightness per image.
+    # Runs after validation + auto-fit so the saved style is clipping-safe.
     if presets is not None:
         try:
             import tempfile
@@ -447,8 +352,7 @@ def generate_style_spec(
             validated_spec = _safety_bake(
                 validated_spec,
                 presets,
-                image_path,
-                reference_analysis,
+                bake_path or image_path,
                 _bake_dir,
             )
         except Exception as exc:  # pragma: no cover — defensive
@@ -463,29 +367,38 @@ def generate_style_spec(
     if refine_iterations > 0 and refine_raw_path:
         logger.info("Starting iterative refinement (%d iterations)...", refine_iterations)
 
-        # Build a generate function that the refiner can call
+        # Build a generate function that the refiner can call.  The refined
+        # direction must actually reach the VLM, so rebuild the messages for
+        # every iteration instead of reusing the original prompt.
         def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]) -> StyleSpec:
-            build_prompt(
+            refine_messages = build_prompt(
                 analysis,
                 presets,
                 refine_direction,
                 schema,
                 image_b64,
                 reference_b64s=ref_b64s or None,
+                reference_analysis=reference_analysis,
             )
-            refine_spec, _, refine_warns = _call(temperature)
+            refine_spec, _, refine_warns = _call(temperature, refine_messages)
             # Merge warnings
             warnings.extend(refine_warns)
-            return refine_spec
-
-        # Encode references for refiner
-        ref_b64s = reference_b64s if reference_b64s else []
-        for ref in references or []:
-            if ref not in list(references or []):  # avoid double-encoding
+            # Check clipping before returning: the refiner renders this spec
+            # directly, so keep its highlights safe.  It never lifts exposure
+            # to a reference target (that is apply's job).
+            if presets is not None:
                 try:
-                    ref_b64s.append(_encode_resized(ref))
-                except Exception:
-                    pass
+                    import tempfile
+
+                    refine_spec = _safety_bake(
+                        refine_spec,
+                        presets,
+                        bake_path or image_path,
+                        Path(tempfile.mkdtemp(prefix="dtstylekit_bake_")),
+                    )
+                except Exception as exc:  # pragma: no cover — defensive
+                    logger.warning("Refinement safety bake failed: %s", exc)
+            return refine_spec
 
         # Run iterative refinement
         try:
@@ -496,6 +409,7 @@ def generate_style_spec(
                 target_analysis=analysis,
                 generate_func=_generate_for_refiner,
                 max_iterations=refine_iterations,
+                reference_analysis=reference_analysis,
             )
             validated_spec = refine_result.spec
             if refine_result.passed:
@@ -523,88 +437,75 @@ def _safety_bake(
     spec: StyleSpec,
     presets: list,
     target_path: str | Path,
-    reference_analysis: dict | None,
     work_dir: str | Path,
 ) -> StyleSpec:
-    """Deterministically ensure the assembled style is not crushed.
+    """Prevent clipped highlights without baking target brightness.
 
-    Renders the style on the *target* image and, while the result is crushed
-    (or well below the reference brightness), lifts exposure (re-packing the
-    ``exposure`` IOP) and re-renders.  Purely numerical — no VLM call.
+    A ``.dtstyle`` is a reusable look, not an exposure correction for one
+    photo.  Earlier versions forced the target's mean luminance toward the
+    reference and serialized the resulting +EV (e.g. +2.54 EV for a dark
+    frame); applying that style to a brighter photo blew its highlights.
+    Reference brightness is now normalized per image by ``dtstylekit apply``.
+
+    This check only lowers exposure when the freshly generated style clips
+    highlights on the bake target.  It never lifts exposure to match a
+    reference, so the saved style stays exposure-neutral.
     """
     import math
 
-    from dtstylekit.codec.iop_registry import pack_params
-    from dtstylekit.codec.xmp_codec import encode_xmp
     from dtstylekit.composer.generator import generate_dtstyle
-    from dtstylekit.composer.merger import ComposerPlugin
     from dtstylekit.vlm.iterative_refiner import compute_render_metrics, render_with_style
+    from dtstylekit.vlm.models import Plugin
 
-    # Selected baseline presets (those the spec references).
     selected = [
         p
         for p in presets
         if getattr(getattr(p, "file_path", None), "name", "") in (spec.selected_preset_names or [])
     ]
 
-    ref_lum = reference_analysis.get("global_luminance") if reference_analysis else None
-    if isinstance(ref_lum, int | float) and not isinstance(ref_lum, bool) and float(ref_lum) > 0.05:
-        target_safe = max(0.18, min(0.5, float(ref_lum) * 0.9))
-    else:
-        target_safe = 0.20
-
-    tmp = Path(work_dir) / "_bake.dtstyle"
-    for attempt in range(6):
+    target = Path(target_path)
+    work = Path(work_dir)
+    tmp = work / "_bake.dtstyle"
+    max_clip = 0.01
+    for attempt in range(4):
         generate_dtstyle(spec, selected, tmp, None)
-        ach = render_with_style(target_path, tmp, "bake", work_dir)
+        ach = render_with_style(target, tmp, "bake", work)
         if ach is None:
             break
         m = compute_render_metrics(ach)
-        lum = m.mean_luminance
-        crushed = lum < 0.12
-        too_dark = bool(ref_lum) and lum < float(ref_lum) * 0.6
-        if not crushed and not too_dark:
+        if m.clipped_pct <= max_clip:
             if attempt:
-                logger.info("Safety bake: style safe after %d nudge(s) (lum=%.3f)", attempt, lum)
+                logger.info(
+                    "Safety bake: highlights safe after %d nudge(s) "
+                    "(clipped=%.1f%%, lum=%.3f)",
+                    attempt,
+                    m.clipped_pct * 100.0,
+                    m.mean_luminance,
+                )
             break
-        needed = max(target_safe, float(ref_lum) * 0.9 if ref_lum else 0.20)
-        delta = max(-1.5, min(1.5, math.log2(needed / max(lum, 1e-3))))
         exp = next((p for p in spec.plugins if p.operation == "exposure"), None)
         if exp is None:
-            blob = pack_params("exposure", {"exposure": 0.0})
-            exp = ComposerPlugin(
-                operation="exposure",
-                enabled=True,
-                multi_name="",
-                multi_priority=0,
-                params={"exposure": 0.0},
-                op_params=encode_xmp(blob),
-                blendop_params="",
-                blendop_version=13,
-                module=0,
-            )
+            exp = Plugin(operation="exposure", enabled=True, params={"exposure": 0.0})
             spec.plugins.append(exp)
         cur = float(exp.params.get("exposure") or 0.0)
-        new = max(-4.0, min(4.0, cur + delta))
+        # Clipping is a highlight problem: reduce exposure.  Do not lift a
+        # dark render here; that is the exporter's job (and target-specific).
+        step = min(1.5, max(0.25, math.log2(max(m.clipped_pct / max_clip, 1.0001))))
+        new = max(-6.0, min(6.0, cur - step))
+        logger.info(
+            "Safety bake: clipped=%.1f%% -> exposure %+.2f -> %+.2f EV",
+            m.clipped_pct * 100.0,
+            cur,
+            new,
+        )
         if abs(new - cur) < 0.02:
-            # Exposure already maxed; try softening the sigmoid contrast instead.
-            sig = next((p for p in spec.plugins if p.operation == "sigmoid"), None)
-            if sig is not None:
-                c = float(sig.params.get("middle_grey_contrast", 2.0))
-                sig.params["middle_grey_contrast"] = max(0.8, c - 0.3)
-                try:
-                    sig.op_params = encode_xmp(
-                        pack_params("sigmoid", {"middle_grey_contrast": sig.params["middle_grey_contrast"], "contrast_skewness": 0.0})
-                    )
-                except Exception:
-                    pass
-                logger.info("Safety bake: softened sigmoid contrast to %.2f", sig.params["middle_grey_contrast"])
-                continue
             break
-        blob = pack_params("exposure", {"exposure": new})
         exp.params["exposure"] = new
-        exp.op_params = encode_xmp(blob)
-        logger.info("Safety bake: exposure %+.2f -> %+.2f EV (lum=%.3f)", cur, new, lum)
+    else:
+        logger.warning(
+            "Safety bake: highlights still clipped after 4 attempts; "
+            "the exporter will clamp exposure per image"
+        )
     return spec
 
 

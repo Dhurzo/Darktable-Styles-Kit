@@ -45,9 +45,11 @@ def encode_plugin(plugin_dict: dict) -> dict:
     reg = get_registry(operation)
     blendop_cst = reg.blendop_cst if reg else 4
 
-    # Pack op_params — caller may have already encoded them.
+    # Pack op_params — caller may have already encoded them.  An empty
+    # override is treated as absent: writing ``<op_params></op_params>``
+    # produces a valid-looking style darktable cannot decode.
     op_params_override = plugin_dict.get("op_params_override")
-    if op_params_override is not None:
+    if op_params_override:
         op_params_encoded = op_params_override
     elif reg:
         op_params_bytes = pack_params(operation, params)

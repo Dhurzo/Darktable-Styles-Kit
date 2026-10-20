@@ -54,25 +54,34 @@ CREATE VIRTUAL TABLE IF NOT EXISTS presets_fts USING fts5(
     tokenize='porter unicode61'
 );
 
--- Trigger to keep FTS in sync with presets table
-CREATE TRIGGER IF NOT EXISTS presets_fts_insert AFTER INSERT ON presets BEGIN
-    INSERT INTO presets_fts(rowid, name, description, iops)
-    VALUES (new.id, new.display_name, '', '');
-END;
-
-CREATE TRIGGER IF NOT EXISTS presets_fts_delete AFTER DELETE ON presets BEGIN
-    DELETE FROM presets_fts WHERE rowid = old.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS presets_fts_update AFTER UPDATE ON presets BEGIN
-    DELETE FROM presets_fts WHERE rowid = old.id;
-    INSERT INTO presets_fts(rowid, name, description, iops)
-    VALUES (new.id, new.display_name, '', '');
-END;
-
 -- Indexes for faster plugin lookups
 CREATE INDEX IF NOT EXISTS idx_preset_plugins_preset_id ON preset_plugins(preset_id);
 CREATE INDEX IF NOT EXISTS idx_preset_plugins_operation ON preset_plugins(operation);
+"""
+
+# Recreated on every initialization (DROP + CREATE) so databases built by
+# older versions pick up the corrected FTS payload.  ``search_text`` already
+# contains the display name, cleaned description and enabled operations;
+# ``iop_list`` is indexed as well for direct operation lookups.
+FTS_TRIGGERS_SQL = """
+DROP TRIGGER IF EXISTS presets_fts_insert;
+DROP TRIGGER IF EXISTS presets_fts_delete;
+DROP TRIGGER IF EXISTS presets_fts_update;
+
+CREATE TRIGGER presets_fts_insert AFTER INSERT ON presets BEGIN
+    INSERT INTO presets_fts(rowid, name, description, iops)
+    VALUES (new.id, new.display_name, new.search_text, new.iop_list);
+END;
+
+CREATE TRIGGER presets_fts_delete AFTER DELETE ON presets BEGIN
+    DELETE FROM presets_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER presets_fts_update AFTER UPDATE ON presets BEGIN
+    DELETE FROM presets_fts WHERE rowid = old.id;
+    INSERT INTO presets_fts(rowid, name, description, iops)
+    VALUES (new.id, new.display_name, new.search_text, new.iop_list);
+END;
 """
 
 
@@ -97,6 +106,7 @@ class PresetIndexer:
         conn = self.connect()
         conn.executescript(SCHEMA_SQL)
         self._migrate_schema(conn)
+        conn.executescript(FTS_TRIGGERS_SQL)
         conn.commit()
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
@@ -215,16 +225,15 @@ class PresetIndexer:
 
             count += 1
 
-        # Rebuild FTS table after all presets and plugins are inserted
-        # (triggers fire before plugins are inserted, so iops would be NULL).
-        # Index display_name as the FTS "name" column, the cleaned
-        # description as "description", and enabled operations as "iops"
-        # — this is what makes "sepia" / "faded" / "warm autumn colours"
-        # searchable.
+        # Rebuild the FTS table as a consistency pass (the triggers also
+        # keep it in sync incrementally).  Index display_name as the FTS
+        # "name" column, the cleaned description as "description", and
+        # enabled operations as "iops" — this is what makes "sepia" /
+        # "faded" / "warm autumn colours" searchable.
         conn.execute("DELETE FROM presets_fts")
         conn.execute("""
             INSERT INTO presets_fts (rowid, name, description, iops)
-            SELECT p.id, p.display_name, '', ''
+            SELECT p.id, p.display_name, p.search_text, p.iop_list
             FROM presets p
         """)
 

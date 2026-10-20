@@ -2,6 +2,7 @@
 
 Subcommands:
   generate      - end-to-end: image -> analyze -> VLM -> style + report
+  apply         - apply a style to images with per-image exposure normalization
   preset index  - build/rebuild the preset index
   preset search - search the preset library
   vlm generate  - generate a style spec via VLM (without final assembly)
@@ -10,8 +11,10 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import glob
 import logging
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -188,6 +191,39 @@ def _search_preset_dirs(name: str) -> Path | None:
     return None
 
 
+_RAW_EXTS = {
+    ".3fr", ".ari", ".arw", ".bay", ".cr2", ".cr3", ".crw", ".dcr", ".dng",
+    ".erf", ".fff", ".iiq", ".k25", ".kdc", ".mef", ".mos", ".mrw", ".nef",
+    ".nrw", ".orf", ".pef", ".raf", ".raw", ".rw2", ".rwl", ".sr2", ".srf",
+    ".srw", ".x3f",
+}
+
+
+def _is_raw(path: Path) -> bool:
+    return path.suffix.lower() in _RAW_EXTS
+
+
+def _prepare_target(image: Path, refine_raw: str | None) -> tuple[Path, Path | None, Path | None]:
+    """Return (image for analysis/VLM, bake image, refine RAW).
+
+    RAW files are not readable by Pillow, so render a JPEG preview for the
+    analyzer and VLM while keeping the RAW for style renders.  Passing a
+    preview to the safety bake while the final style is applied to the RAW
+    made the bake meaningless (0.248 on the JPEG vs 0.080 on the RAW).
+    """
+    raw = Path(refine_raw).expanduser() if refine_raw else None
+    if _is_raw(image):
+        from dtstylekit.vlm.iterative_refiner import render_preview
+
+        preview = render_preview(
+            image, Path(tempfile.mkdtemp(prefix="dtstylekit_preview_"))
+        )
+        if preview is None:
+            raise RuntimeError(f"Could not render a preview from RAW: {image}")
+        return preview, (raw or image), (raw or image)
+    return image, (raw or image), raw
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     """End-to-end generation."""
     from dtstylekit.analyzer.pipeline import analyze_image
@@ -231,8 +267,11 @@ def cmd_generate(args: argparse.Namespace) -> int:
         logger.warning("No reference image files matched: %s", args.references)
 
     try:
+        image_path, bake_path, refine_raw = _prepare_target(
+            Path(args.image).expanduser(), args.refine_raw
+        )
         spec, vlm_report, vlm_warnings, analysis = generate_style_spec(
-            image_path=args.image,
+            image_path=image_path,
             direction=args.direction,
             searcher=searcher,
             analyzer=analyze_image,
@@ -241,7 +280,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
             references=[str(p) for p in references],  # str | Path union
             temperature=args.temperature if args.temperature is not None else 0.4,
             refine_iterations=args.refine_iterations,
-            refine_raw_path=args.refine_raw,
+            refine_raw_path=refine_raw,
+            bake_path=bake_path,
         )
     except Exception as exc:
         logger.error("Style spec generation failed: %s", exc)
@@ -368,6 +408,68 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apply(args: argparse.Namespace) -> int:
+    """Apply a style to images with per-image exposure normalization."""
+    from dtstylekit.export import (
+        DEFAULT_TARGET_LUMINANCE,
+        apply_style_to_images,
+        reference_target_luminance,
+    )
+
+    image_args = list(args.images)
+    image_paths: list[Path] = []
+    for pattern in image_args:
+        matches = sorted(glob.glob(str(Path(pattern).expanduser())))
+        if matches:
+            image_paths.extend(Path(m) for m in matches)
+        else:
+            image_paths.append(Path(pattern).expanduser())
+    if not image_paths:
+        logger.error("No images matched: %s", image_args)
+        return 1
+
+    if args.target_luminance is not None:
+        target = args.target_luminance
+    elif args.references:
+        refs: list[Path] = []
+        for pattern in args.references:
+            expanded = sorted(glob.glob(str(Path(pattern).expanduser())))
+            refs.extend(Path(m).expanduser() for m in expanded)
+        if not refs:
+            logger.error("No reference images matched: %s", args.references)
+            return 1
+        target = reference_target_luminance(refs)
+        logger.info("Reference luminance: %.3f", target)
+    else:
+        target = DEFAULT_TARGET_LUMINANCE
+        logger.warning(
+            "No --references or --target-luminance supplied; using %.2f",
+            target,
+        )
+
+    try:
+        results = apply_style_to_images(
+            args.style,
+            image_paths,
+            args.output,
+            target_luminance=target,
+            max_clip=args.max_clip,
+            preview_width=args.preview_width,
+            final_width=args.width,
+        )
+    except Exception as exc:
+        logger.error("Apply failed: %s", exc)
+        return 1
+
+    print(f"✓ Exported {len(results)} image(s) to {Path(args.output).expanduser()}")
+    for result in results:
+        print(
+            f"  {result.output_path.name}  EV {result.exposure_ev:+.2f}  "
+            f"lum={result.mean_luminance:.3f}  clipped={result.clipped_pct:.1%}"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     # Configure logging for *every* entry point (installed ``dtstylekit``
@@ -478,6 +580,54 @@ def main(argv: list[str] | None = None) -> int:
         help="Language of the natural-language explanation document (default: es).",
     )
 
+    # apply subcommand
+    app = subparsers.add_parser(
+        "apply",
+        help="Apply a style to images with per-image exposure normalization",
+    )
+    app.add_argument("style", help="Path to the .dtstyle file")
+    app.add_argument(
+        "images",
+        nargs="+",
+        help="Images or glob patterns (RAW/JPEG), e.g. 'photos/*.ARW'",
+    )
+    app.add_argument(
+        "--output",
+        "-o",
+        default="outputs",
+        help="Output directory (default: ./outputs)",
+    )
+    app.add_argument(
+        "--references",
+        nargs="+",
+        default=None,
+        help="Reference look images used to derive the target luminance",
+    )
+    app.add_argument(
+        "--target-luminance",
+        type=float,
+        default=None,
+        help="Override the target mean luminance (0-1)",
+    )
+    app.add_argument(
+        "--max-clip",
+        type=float,
+        default=0.01,
+        help="Maximum fraction of pixels above 0.98 luminance (default: 0.01)",
+    )
+    app.add_argument(
+        "--preview-width",
+        type=int,
+        default=1200,
+        help="Width used while iterating exposure (default: 1200)",
+    )
+    app.add_argument(
+        "--width",
+        type=int,
+        default=None,
+        help="Final export width (default: full resolution)",
+    )
+
     # preset subcommand
     add_preset_subcommands(subparsers)
 
@@ -491,6 +641,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("generate", "analyze"):
         return cmd_generate(args)
+    elif args.command == "apply":
+        return cmd_apply(args)
     elif args.command == "preset":
         from dtstylekit.presets.cli import main_preset
 

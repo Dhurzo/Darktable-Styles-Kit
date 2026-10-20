@@ -593,4 +593,3 @@ class TestReferenceSignature:
         hues = [sw["hue"] for sw in sig["palette"]]
         assert hues, "palette should report at least one dominant hue"
         assert min(abs(hues[0] - 0), abs(hues[0] - 360)) < 40.0
-

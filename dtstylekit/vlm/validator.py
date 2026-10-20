@@ -76,6 +76,29 @@ def validate_style(
     # without the curve subsystem.
     curve_template_names: set[str] | None = None
 
+    # Curve template names are not preset filenames.  The VLM occasionally
+    # puts one in selected_presets (e.g. "s_strong"); drop it here instead of
+    # failing the preset lookup later.
+    try:
+        from dtstylekit.curves.templates import list_templates
+
+        curve_template_names = {t.name for t in list_templates()}
+    except Exception:  # pragma: no cover - curve subsystem unavailable
+        pass
+    selected_presets = list(spec.selected_preset_names)
+    if curve_template_names:
+        kept = []
+        for name in selected_presets:
+            bare = name.rsplit(".", 1)[0] if name.endswith(".dtstyle") else name
+            if bare in curve_template_names:
+                warnings.append(
+                    f"selected_presets: '{name}' is a curve template, not a preset "
+                    f"file — ignored (use adjustments.*.curve_preset instead)"
+                )
+            else:
+                kept.append(name)
+        selected_presets = kept
+
     for plg in spec.plugins:
         if plg.operation not in registry:
             warnings.append(f"Unknown IOP '{plg.operation}' — skipped")
@@ -183,16 +206,29 @@ def validate_style(
                 return abs(float(h or 0.0)) < 1e-3 or float(h or 0.0) > 359.999
 
             # Global additive offset (most dangerous - tints EVERY pixel).
+            # With a reference, the grade must come from the tonal zones:
+            # even a "subtle" global_C=0.05 measured R/G=2.94 on a real
+            # target (the whole frame turned red).  Zone chroma follows the
+            # reference hue/saturation; the additive offset does not.
             gc = float(clamped_params.get("global_C") or 0.0)
             gh = float(clamped_params.get("global_H") or 0.0)
-            if gc > 0.0 and _neutral_hue(gh):
-                if "global_C" in plg.params:
-                    warnings.append(
-                        "colorbalancergb.global_C>0 with global_H≈0 tints the "
-                        "whole image RED (additive offset, hue 0°=red) — "
-                        "global_C forced to 0.0"
-                    )
-                clamped_params["global_C"] = 0.0
+            if gc > 0.0:
+                if reference_analysis is not None:
+                    if "global_C" in plg.params:
+                        warnings.append(
+                            "colorbalancergb.global_C>0 tints EVERY pixel "
+                            "(additive offset) — forced to 0.0; reference "
+                            "grades belong in the tonal zones"
+                        )
+                    clamped_params["global_C"] = 0.0
+                elif _neutral_hue(gh):
+                    if "global_C" in plg.params:
+                        warnings.append(
+                            "colorbalancergb.global_C>0 with global_H≈0 tints the "
+                            "whole image RED (additive offset, hue 0°=red) — "
+                            "global_C forced to 0.0"
+                        )
+                    clamped_params["global_C"] = 0.0
             # Shadows / midtones / highlights: neutral hue + chroma = tint.
             for zone in ("shadows", "midtones", "highlights"):
                 c_key = f"{zone}_C"
@@ -230,6 +266,12 @@ def validate_style(
                 if _cz <= 0.0:
                     continue
                 _conf = float((reference_analysis or {}).get(f"{_zone}_hue_confidence") or 0.0)
+                _mode = (reference_analysis or {}).get(f"{_zone}_hue_mode")
+                # A declared mono/bi/global mode is an intentional grade, not
+                # noise: low confidence must not erase it.  Global grades are
+                # still constrained by the subtle global cap below.
+                if _mode in ("mono", "bi", "global"):
+                    continue
                 if reference_analysis is not None and _conf < _NEUTRAL_CONF:
                     if _c_key in plg.params:
                         warnings.append(
@@ -287,6 +329,13 @@ def validate_style(
                         clamped_params[c_key] = cap
                     continue
                 cap = _zone_caps_highconf[zone] if conf >= 0.85 else default_cap
+                # Never exceed the zone's own measured saturation: a grading
+                # tint must stay below the reference colorfulness.  Without
+                # this, a faint teal shadow (sat=0.035) was allowed C=0.10
+                # and dominated the render.
+                sat = float((reference_analysis or {}).get(f"{zone}_sat") or 0.0)
+                if sat > 0.0:
+                    cap = min(cap, sat)
                 if cz > cap:
                     if c_key in plg.params:
                         warnings.append(
@@ -460,6 +509,29 @@ def validate_style(
                     "kept (darktable applies late D65 correction)"
                 )
 
+        # ---- exposure.black safety ----
+        # ``black`` is a scene-linear black-level subtraction.  Small display
+        # black points look harmless but are huge here: +0.07 measured as
+        # roughly -2.5 EV in the shadows, forcing the exposure bake to add
+        # +2.5 EV and blow highlights on brighter photos.  Keep it at a
+        # subtle level so styles stay portable.
+        if plg.operation == "exposure":
+            black = float(clamped_params.get("black") or 0.0)
+            _BLACK_LIMIT = 0.005
+            if black > _BLACK_LIMIT:
+                clamped_params["black"] = _BLACK_LIMIT
+                warnings.append(
+                    f"exposure.black={black:+.3f} is a scene-linear black level "
+                    f"(not a display point); clamped to +{_BLACK_LIMIT:.3f} to "
+                    f"avoid crushing shadows"
+                )
+            elif black < -_BLACK_LIMIT:
+                clamped_params["black"] = -_BLACK_LIMIT
+                warnings.append(
+                    f"exposure.black={black:+.3f} lifts scene-linear blacks too "
+                    f"strongly; clamped to -{_BLACK_LIMIT:.3f}"
+                )
+
         validated_plugins.append(
             Plugin(
                 operation=plg.operation,
@@ -476,7 +548,7 @@ def validate_style(
         rationale=spec.rationale,
         iop_list=spec.iop_list,
         plugins=validated_plugins,
-        selected_preset_names=list(spec.selected_preset_names),
+        selected_preset_names=selected_presets,
     )
     return validated, warnings
 

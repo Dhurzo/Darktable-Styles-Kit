@@ -68,6 +68,17 @@ class TestValidateStyle:
         assert len(validated.plugins) == 1
         assert validated.plugins[0].params["amount"] == 50.0
 
+    def test_curve_template_in_selected_presets_is_dropped(self) -> None:
+        """A curve template name is not a preset filename."""
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[Plugin(operation="tonecurve", params={"curve_preset": "s_strong"})],
+            selected_preset_names=["s_strong", "examples_colors_sepia.dtstyle"],
+        )
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert validated.selected_preset_names == ["examples_colors_sepia.dtstyle"]
+        assert any("curve template" in w for w in warnings)
+
     def test_clamps_out_of_range(self) -> None:
         spec = StyleSpec(
             style_name="test",
@@ -79,6 +90,25 @@ class TestValidateStyle:
         # vibrance range is 0..100, so 999 should be clamped to 100
         assert validated.plugins[0].params["amount"] == 100.0
         assert any("out of range" in w for w in warnings)
+
+    def test_exposure_black_clamped_to_scene_linear_safety(self) -> None:
+        """black=0.07 is a huge scene-linear shadow crush, not a display point.
+
+        It forces the exposure bake to compensate by multiple EV and blows
+        highlights on brighter photos; the validator must keep it subtle.
+        """
+        spec = StyleSpec(
+            style_name="test",
+            plugins=[
+                Plugin(
+                    operation="exposure",
+                    params={"exposure": 0.5, "black": 0.07},
+                ),
+            ],
+        )
+        validated, warnings = validate_style(spec, IOP_REGISTRY)
+        assert validated.plugins[0].params["black"] == pytest.approx(0.005)
+        assert any("scene-linear black level" in w for w in warnings)
 
     def test_merges_defaults(self) -> None:
         spec = StyleSpec(
@@ -267,6 +297,45 @@ class TestValidateAntiTintGuards:
         # 0.15 > default cap 0.10 → clamped down
         assert validated.plugins[0].params["shadows_C"] == 0.10
         assert any("dynamic cap" in w for w in warnings)
+
+    def test_zone_cap_scaled_by_measured_saturation(self) -> None:
+        """A faint reference zone cannot receive a strong tint.
+
+        Real case: shadows_sat=0.035 (faint teal) but the VLM emitted
+        shadows_C=0.10; that dominated the render. The cap must not exceed
+        the measured zone saturation.
+        """
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[self._colorbalance_plugin(shadows_C=0.10, shadows_H=186.0)],
+        )
+        ref = {
+            "shadows_hue_confidence": 0.55,
+            "shadows_hue_mode": "bi",
+            "shadows_hue": 186.0,
+            "shadows_sat": 0.035,
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        assert validated.plugins[0].params["shadows_C"] == 0.035
+        assert any("dynamic cap" in w for w in warnings)
+
+    def test_global_chroma_forced_zero_with_reference(self) -> None:
+        """global_C is an additive whole-frame offset; with a reference the
+        grade must come from the tonal zones. global_C=0.05/H45 measured
+        R/G=2.94 on a real target, so it is always zeroed."""
+        spec = StyleSpec(
+            style_name="t",
+            plugins=[self._colorbalance_plugin(global_C=0.05, global_H=45.0)],
+        )
+        ref = {
+            "shadows_hue_mode": "bi",
+            "midtones_hue_mode": "neutral",
+            "highlights_hue_mode": "mono",
+            "global_warmth_rb": 0.007,
+        }
+        validated, warnings = validate_style(spec, IOP_REGISTRY, reference_analysis=ref)
+        assert validated.plugins[0].params["global_C"] == 0.0
+        assert any("EVERY pixel" in w for w in warnings)
 
     # ---- 2.2: midtones protection on likely-portrait target -------------
     def test_midtones_chroma_protected_on_skin_tone_target(self) -> None:
@@ -1479,19 +1548,17 @@ class TestE2EValidatorGuardsWithVLMResponse:
         assert "SET midtones_C = 0.000" in block
         assert "SET highlights_C = 0.000" in block
 
-        # Validator: the VLM tries chroma 0.20 everywhere with non-neutral
-        # hue → 2.1 default caps clamp each *_C to the soft ceiling (0.10 /
-        # 0.08 / 0.05), and 2.3 sees "all chroma > 0.05" → halves them.
+        # Validator: the VLM tries chroma 0.20 everywhere on a neutral,
+        # low-confidence reference.  The Hito 2.0 guard forces every zone to
+        # 0.0, matching the prompt's SET *_C = 0.000 above.  This is exactly
+        # the prompt↔validator coherence the test exists to protect.
         vlm = self._AGGRESSIVE_SLOT.format(shc=0.20, mc=0.20, hc=0.20)
         spec, _ = self._parse_and_validate(vlm, ref)
-        # With ref_conf < 0.7, the default caps clamp 0.20 → 0.10/0.08/0.05.
-        # highlights cap 0.05 is NOT > 0.05 strict, so 2.3 does not fire on
-        # the strict gate and values keep the default-cap clamps.
         cb = next(p for p in spec.plugins if p.operation == "colorbalancergb")
         params = cb.params
-        assert params["shadows_C"] == 0.10
-        assert params["midtones_C"] == 0.08
-        assert params["highlights_C"] == 0.05
+        assert params["shadows_C"] == 0.0
+        assert params["midtones_C"] == 0.0
+        assert params["highlights_C"] == 0.0
 
 
 class TestClosedLoopRefinement:
@@ -1541,7 +1608,7 @@ class TestClosedLoopRefinement:
 
         calls = []
 
-        def _gen(direction, ref_b64s):
+        def _gen(direction, _ref_b64s):
             calls.append(direction)
             return StyleSpec(
                 style_name="s",
@@ -1659,7 +1726,7 @@ class TestClosedLoopRefinement:
 
     def test_nudge_adds_exposure_plugin_when_missing(self):
         from dtstylekit.vlm.iterative_refiner import RenderMetrics, nudge_spec_toward_reference
-        from dtstylekit.vlm.models import Plugin, StyleSpec
+        from dtstylekit.vlm.models import StyleSpec
 
         spec = StyleSpec(style_name="s", plugins=[])
         m = RenderMetrics(
@@ -1685,10 +1752,9 @@ class TestClosedLoopRefinement:
         negative chroma to desaturate — even if the VLM omitted it."""
         from dtstylekit.vlm.iterative_refiner import (
             RenderMetrics,
-            _reference_distance,
             nudge_spec_toward_reference,
         )
-        from dtstylekit.vlm.models import Plugin, StyleSpec
+        from dtstylekit.vlm.models import StyleSpec
 
         spec = StyleSpec(style_name="s", plugins=[])
         m = RenderMetrics(
@@ -1728,4 +1794,3 @@ class TestClosedLoopRefinement:
         )
         # b is further from the reference's HSV saturation (0.5 vs 0.2 target).
         assert _reference_distance(b, ref) > _reference_distance(a, ref)
-

@@ -1,9 +1,12 @@
-"""Minimal safety guards only — NO automatic aesthetic fits.
+"""Safety guards plus bounded reference nudges.
 
 The VLM sees the reference images and chooses all creative parameters.
-This function ONLY clamps impossible/unsafe values that would crash
-darktable or produce visibly broken output. No automatic aesthetic
-adjustments — the VLM sees the references and makes the creative calls.
+This module clamps impossible/unsafe values that would crash darktable or
+produce visibly broken output, and applies a *gentle* nudge only when the
+spec contradicts the reference on a gross scale (for example a strongly
+negative filmic saturation on vividly colorful references).  There is no
+blanket tone or saturation fit: a single preview frame is not a reliable
+target for exposure/contrast.
 
 Runs after ``validate_style`` whenever ``reference_analysis`` is available;
 without references it is a no-op.
@@ -12,6 +15,7 @@ without references it is a no-op.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from dtstylekit.vlm.models import Plugin, StyleSpec
 
@@ -23,12 +27,14 @@ def auto_fit_signature(
     reference_analysis: dict | None,
     _analysis: object,
 ) -> tuple[StyleSpec, list[str]]:
-    """Minimal safety guards only — NO automatic aesthetic fits.
+    """Clamp unsafe values and gently nudge gross reference contradictions.
 
     The VLM sees the reference images and chooses all creative parameters.
-    This function ONLY clamps impossible/unsafe values that would crash
-    darktable or produce visibly broken output. No automatic aesthetic
-    adjustments — the VLM sees the references and makes the creative calls.
+    This function clamps impossible/unsafe values that would crash darktable
+    or produce visibly broken output.  Gross contradictions (a spec that is
+    the opposite of the measured reference) are moved halfway toward a
+    reference-derived target; subtle differences are left untouched so
+    creative intent is preserved.
 
     Runs after ``validate_style`` whenever ``reference_analysis`` is available;
     without references it is a no-op.
@@ -46,8 +52,6 @@ def auto_fit_signature(
     def _ensure(op: str) -> Plugin:
         plg = _plugin(op)
         if plg is None:
-            from dtstylekit.vlm.models import Plugin
-
             plg = Plugin(operation=op, enabled=True, multi_name="", params={})
             spec.plugins.append(plg)
         return plg
@@ -66,14 +70,17 @@ def auto_fit_signature(
     # 2. ABSOLUTE SAFETY GUARDS ONLY (no aesthetic adjustments)
     # filmicrgb: clamp saturation to valid range [-100, 100]
     filmic = _plugin("filmicrgb")
+    filmic_sat_clamped = False
     if filmic:
         sat = filmic.params.get("saturation")
         if isinstance(sat, int | float) and not isinstance(sat, bool):
             if sat < -100:
                 filmic.params["saturation"] = -100.0
+                filmic_sat_clamped = True
                 warnings.append("FIDELITY safety: filmicrgb.saturation clamped to -100")
             elif sat > 100:
                 filmic.params["saturation"] = 100.0
+                filmic_sat_clamped = True
                 warnings.append("FIDELITY safety: filmicrgb.saturation clamped to 100")
 
     # colorbalancergb: clamp chroma to [0, 1] and hue to [0, 360)
@@ -140,37 +147,6 @@ def auto_fit_signature(
                 exposure_plg.params["exposure"] = 4.0
                 warnings.append("FIDELITY safety: exposure clamped to 4 EV")
 
-    # 3. LUMINANCE MATCH (reference-driven only).  Reproducing a reference
-    #    look includes its overall brightness.  On a darker target the style
-    #    must lift exposure toward the reference luminance, otherwise the
-    #    result stays crushed/under-exposed and visually mismatched.  This is
-    #    a *reproduction* fit (the reference defines the target brightness),
-    #    not an aesthetic opinion, and only runs when references are supplied.
-    import math as _math
-
-    _ref_lum = reference_analysis.get("global_luminance")
-    _tgt_lum = getattr(getattr(_analysis, "luminance", None), "mean", None)
-    if (
-        isinstance(_ref_lum, int | float)
-        and not isinstance(_ref_lum, bool)
-        and float(_ref_lum) > 1e-3
-        and isinstance(_tgt_lum, int | float)
-        and not isinstance(_tgt_lum, bool)
-        and float(_tgt_lum) > 1e-3
-    ):
-        _target = min(float(_ref_lum), 0.5)
-        _ratio = _target / float(_tgt_lum)
-        _delta = max(-2.0, min(2.0, _math.log2(_ratio)))
-        _exp = _ensure("exposure")
-        _cur = float(_exp.params.get("exposure") or 0.0)
-        _new = max(-4.0, min(4.0, _cur + _delta))
-        if abs(_new - _cur) > 0.05:
-            _exp.params["exposure"] = _new
-            warnings.append(
-                f"FIDELITY luminance: exposure {_cur:+.2f}->{_new:+.2f} EV to "
-                f"match reference brightness (ref {_ref_lum:.2f} vs tgt {_tgt_lum:.2f})"
-            )
-
     # filmicrgb: basic sanity ranges
     filmic = _plugin("filmicrgb")
     if filmic:
@@ -188,6 +164,93 @@ def auto_fit_signature(
                     filmic.params[param] = hi
                     warnings.append(f"FIDELITY safety: filmicrgb.{param} clamped to {hi}")
 
+    # 3. GENTLE TARGET NUDGES.  Only gross contradictions are corrected, and
+    #    only halfway toward the reference target: the VLM keeps creative
+    #    control, while obvious mismatches (e.g. saturation -60 on vivid
+    #    references) converge in one pass without another VLM call.
+    gsat = reference_analysis.get("global_saturation")
+    if (
+        isinstance(gsat, int | float)
+        and not isinstance(gsat, bool)
+        and filmic is not None
+        and not filmic_sat_clamped
+        and isinstance(filmic.params.get("saturation"), int | float)
+        and not isinstance(filmic.params.get("saturation"), bool)
+    ):
+        current = float(filmic.params["saturation"])
+        target = max(-20.0, min(15.0, (float(gsat) - 0.20) * 100.0))
+        # Nudge only when the sign contradicts the reference and the gap is
+        # large; a mild same-side deviation is intentional.
+        if current * target < 0 and abs(current - target) > 30.0:
+            new_sat = current + (target - current) * 0.5
+            filmic.params["saturation"] = new_sat
+            warnings.append(
+                f"FIDELITY nudge: filmicrgb.saturation {current:+.1f}->"
+                f"{new_sat:+.1f} toward reference level (global HSV {float(gsat):.2f}, "
+                f"target {target:+.1f})"
+            )
+
+    # Add gentle zone chroma only where the reference zone is clearly
+    # colorful and the spec left that zone at zero.
+    zone_caps = {"shadows": 0.10, "midtones": 0.08, "highlights": 0.05}
+    nudged_cb: Plugin | None = None
+    for zone, cap in zone_caps.items():
+        ref_zone_sat = reference_analysis.get(f"{zone}_sat")
+        if not isinstance(ref_zone_sat, int | float) or isinstance(ref_zone_sat, bool):
+            continue
+        if float(ref_zone_sat) < 0.15:
+            continue
+        # Only zones the analyzer declared as an intentional grade may be
+        # nudged.  A "neutral" midtones zone (confidence 0) with a leftover
+        # saturation estimate was re-tinting everything at hue 0 after the
+        # validator had already forced midtones_C to 0.
+        if reference_analysis.get(f"{zone}_hue_mode") not in ("mono", "bi", "global"):
+            continue
+        cb = _plugin("colorbalancergb")
+        current_c = cb.params.get(f"{zone}_C") if cb is not None else None
+        if isinstance(current_c, int | float) and not isinstance(current_c, bool) and current_c != 0:
+            continue
+        if cb is None:
+            cb = _ensure("colorbalancergb")
+        target_c = min(cap, float(ref_zone_sat) * 0.3)
+        new_c = target_c * 0.5
+        cb.params[f"{zone}_C"] = new_c
+        nudged_cb = cb
+        warnings.append(
+            f"FIDELITY nudge: {zone}_C 0.000->{new_c:.3f} (reference {zone}_sat="
+            f"{float(ref_zone_sat):.3f}, gentle half-step)"
+        )
+
+    # Warm/cool contradiction: a strongly warm reference with a cool zone hue
+    # (or vice versa) is rotated halfway toward the reference's hue band.
+    warmth = reference_analysis.get("global_warmth_rb")
+    if isinstance(warmth, int | float) and not isinstance(warmth, bool):
+        cb = nudged_cb or _plugin("colorbalancergb")
+        if cb is not None and abs(float(warmth)) >= 0.05:
+            target_hue = 45.0 if float(warmth) > 0 else 220.0
+            label = "warm" if float(warmth) > 0 else "cool"
+
+            def _circ_diff(a: float, b: float) -> float:
+                d = abs(a - b) % 360.0
+                return min(d, 360.0 - d)
+
+            for zone in ("shadows", "midtones", "highlights"):
+                h_val = cb.params.get(f"{zone}_H")
+                c_val = cb.params.get(f"{zone}_C")
+                if not isinstance(h_val, int | float) or isinstance(h_val, bool):
+                    continue
+                if not isinstance(c_val, int | float) or isinstance(c_val, bool) or c_val <= 0:
+                    continue
+                delta = ((target_hue - float(h_val) + 180.0) % 360.0) - 180.0
+                if abs(delta) <= 90.0:
+                    continue
+                new_h = (float(h_val) + delta * 0.5) % 360.0
+                cb.params[f"{zone}_H"] = new_h
+                warnings.append(
+                    f"FIDELITY nudge: {label} reference (R-B {float(warmth):+.2f}) "
+                    f"rotated {zone}_H {float(h_val):.1f}->{new_h:.1f}"
+                )
+
     for w in warnings:
         logger.info(w)
     return spec, warnings
@@ -197,35 +260,20 @@ def compute_reference_profile(reference_paths: list) -> dict:
     """Extended reference profile: contrast, dynamic range, saturation
     peaks and warmth — the *shape* of the look, not just its averages.
 
-    These are purely informational (for logging/debugging) and do NOT
-    drive automatic fits. The VLM makes all creative decisions.
+    Delegates to the analyzer's single-pass global stats so the prompt,
+    evaluator and refiner all share one implementation.  These values are
+    purely informational (for logging/debugging) and do NOT drive
+    automatic fits; the VLM makes all creative decisions.
     """
-    import numpy as np
-    from PIL import Image
+    from dtstylekit.analyzer.pipeline import compute_reference_globals
 
-    stds: list[float] = []
-    drs: list[float] = []
-    sp90s: list[float] = []
-    rbs: list[float] = []
-    for ref in reference_paths:
-        try:
-            im = np.asarray(Image.open(ref).convert("RGB"), dtype=np.float32) / 255.0
-            lum = 0.2126 * im[..., 0] + 0.7152 * im[..., 1] + 0.0722 * im[..., 2]
-            stds.append(float(lum.std()))
-            drs.append(float(np.percentile(lum, 95) - np.percentile(lum, 5)))
-            mx, mn = im.max(-1), im.min(-1)
-            sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
-            sp90s.append(float(np.percentile(sat, 90)))
-            rbs.append(float((im[..., 0] - im[..., 2]).mean()))
-        except Exception:
-            continue
-    out: dict = {}
-    if stds:
-        out["global_contrast"] = sum(stds) / len(stds)
-    if drs:
-        out["global_dynamic_range"] = sum(drs) / len(drs)
-    if sp90s:
-        out["global_saturation_p90"] = sum(sp90s) / len(sp90s)
-    if rbs:
-        out["global_warmth_rb"] = sum(rbs) / len(rbs)
-    return out
+    globals_ = compute_reference_globals([Path(p) for p in reference_paths])
+    return {
+        key: globals_[key]
+        for key in (
+            "global_contrast",
+            "global_dynamic_range",
+            "global_saturation_p90",
+            "global_warmth_rb",
+        )
+    }

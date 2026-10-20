@@ -16,7 +16,6 @@ not enough — darktable renders a RAW, not the reference JPEGs).
 from __future__ import annotations
 
 import shutil
-import subprocess
 
 import numpy as np
 import pytest
