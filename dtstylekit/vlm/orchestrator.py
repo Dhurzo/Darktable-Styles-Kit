@@ -42,6 +42,277 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _prepare_reference_context(
+    references: list[str | Path] | None,
+    *,
+    reference_filter: ReferenceFilterConfig | None = None,
+    reference_filter_result: ReferenceFilterResult | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
+) -> tuple[list[Path], list[str], list[str], ReferenceAnalysis | None]:
+    """Filter, encode, and analyze the optional reference set."""
+    if not references:
+        return [], [], [], None
+
+    supplied_paths = [Path(ref) for ref in references]
+    filter_result = reference_filter_result or filter_references(
+        supplied_paths,
+        reference_filter or ReferenceFilterConfig(),
+    )
+    if filter_result.error:
+        raise ValueError(filter_result.error)
+    if not filter_result.kept:
+        raise ValueError("No readable reference images remain after consistency filtering.")
+    if filter_result.summary:
+        logger.info(filter_result.summary)
+
+    reference_warnings = list(filter_result.warnings)
+    reference_paths: list[Path] = []
+    reference_b64s: list[str] = []
+    for ref in filter_result.kept:
+        try:
+            reference_b64s.append(encode_base64(ref))
+            reference_paths.append(ref)
+            logger.info("Attaching reference image: %s", ref)
+        except Exception as e:
+            logger.warning("Could not encode reference image %s: %s", ref, e)
+
+    if reference_paths and reference_analysis is None:
+        logger.info("Analyzing reference signature with Python...")
+        try:
+            reference_analysis = compute_reference_signature(reference_paths)
+        except Exception as exc:
+            logger.warning(
+                "Reference signature analysis failed (%s); falling back to hues", exc
+            )
+            try:
+                reference_analysis = analyze_reference_hues(reference_paths)
+            except Exception as hue_exc:
+                logger.warning("Reference hue analysis failed: %s", hue_exc)
+
+    if reference_analysis:
+        logger.info(
+            "Reference signature: luminance=%.3f saturation=%.3f warmth=%+.3f "
+            "contrast=%.3f DR=%.3f",
+            reference_analysis.get("global_luminance", 0.0),
+            reference_analysis.get("global_saturation", 0.0),
+            reference_analysis.get("global_warmth_rb", 0.0),
+            reference_analysis.get("global_contrast", 0.0),
+            reference_analysis.get("global_dynamic_range", 0.0),
+        )
+
+    return reference_paths, reference_b64s, reference_warnings, reference_analysis
+
+
+def _resolve_search_query(
+    direction: str,
+    analysis: ImageAnalysis,
+    reference_analysis: ReferenceAnalysis | None,
+) -> str:
+    """Choose the preset-search query from direction, tags, or references."""
+    if reference_analysis:
+        return _reference_query(reference_analysis)
+    if direction and direction.strip().lower() not in ("", "auto"):
+        return direction
+    tags = getattr(analysis, "scene_tags", None) or []
+    return " ".join(tags) if tags else "neutral balanced photography"
+
+
+def _resolve_search_results(search_results: list) -> list[Preset]:
+    """Resolve lightweight search results into full parsed presets."""
+    from dtstylekit.presets.parser import parse_preset
+
+    presets: list[Preset] = []
+    for r in search_results:
+        file_path = getattr(r.preset, "file_path", None)
+        if not file_path:
+            logger.warning(
+                "SearchResult for %r has no file_path — cannot resolve full Preset",
+                getattr(r.preset, "display_name", None) or r.preset.name,
+            )
+            continue
+        full = parse_preset(Path(file_path))
+        if full is not None:
+            presets.append(full)
+        else:
+            logger.warning("Could not re-parse preset file: %s", file_path)
+    return presets
+
+
+def _filter_presets_by_exposure(
+    presets: list[Preset],
+    analysis: ImageAnalysis,
+) -> list[Preset]:
+    """Drop candidates whose net exposure is unsuitable for the target image."""
+    mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
+    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
+        mean_lum = None
+    if mean_lum is None:
+        return list(presets)
+
+    fitted = [p for p in presets if _preset_ev_fits(p, mean_lum)]
+    if len(fitted) >= 2:
+        dropped = len(presets) - len(fitted)
+        if dropped:
+            logger.info(
+                "Dropped %d candidate preset(s) with unsuitable net exposure for a "
+                "%.2f-luminance image",
+                dropped,
+                mean_lum,
+            )
+        return fitted
+
+    if len(presets) > len(fitted) > 0:
+        logger.info(
+            "Kept all %d candidates: filter would leave fewer than 2",
+            len(presets),
+        )
+    return list(presets)
+
+
+def _bake_spec(
+    spec: StyleSpec,
+    presets: list[Preset],
+    *,
+    bake_path: str | Path | None,
+    image_path: str | Path,
+    warnings: list[str],
+) -> StyleSpec:
+    """Resolve selected presets and apply the deterministic safety bake."""
+    import tempfile
+
+    from dtstylekit.presets.resolver import PresetResolver
+
+    selected: list[Preset] = []
+    names = list(spec.selected_preset_names or [])
+    if names:
+        bake_warnings: list[str] = []
+        try:
+            with PresetResolver() as resolver:
+                selected = resolver.load_many(names, bake_warnings)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("Could not resolve presets for safety bake: %s", exc)
+        for warning in bake_warnings:
+            if warning not in warnings:
+                warnings.append(warning)
+        known = {Path(preset.file_path) for preset in selected}
+        selected.extend(
+            preset for preset in presets if Path(preset.file_path) not in known
+        )
+
+    try:
+        return safety_bake(
+            spec,
+            selected,
+            bake_path or image_path,
+            Path(tempfile.mkdtemp(prefix="dtstylekit_bake_")),
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("Safety bake failed (kept un-baked spec): %s", exc)
+        return spec
+
+
+def _ensure_reference_baseline(
+    spec: StyleSpec,
+    presets: list[Preset],
+    reference_preset: str | None,
+) -> StyleSpec:
+    """Ensure reference-driven specs start from a usable baseline preset."""
+    if spec.selected_preset_names:
+        return spec
+
+    _fn: str | None = None
+    if reference_preset:
+        _fn = reference_preset
+    elif presets:
+        _best = None
+        for _p in presets:
+            _fn_cand = getattr(getattr(_p, "file_path", None), "name", "") or getattr(_p, "name", "")
+            if _fn_cand.startswith("examples_"):
+                _best = _p
+                break
+        if _best is None:
+            _best = presets[0]
+        _fn = getattr(getattr(_best, "file_path", None), "name", "") or getattr(_best, "name", "")
+
+    if _fn:
+        spec = replace(spec, selected_preset_names=(_fn,))
+        logger.info("Reference generation: auto-selected baseline preset %s", _fn)
+    return spec
+
+
+def _run_iterative_refinement(
+    initial_spec: StyleSpec,
+    *,
+    refine_iterations: int,
+    refine_raw_path: str | Path,
+    reference_paths: list[Path],
+    direction: str,
+    analysis: ImageAnalysis,
+    presets: list[Preset],
+    schema: str,
+    image_b64: str | None,
+    reference_analysis: ReferenceAnalysis | None,
+    temperature: float,
+    warnings: list[str],
+    call: Callable[..., tuple[StyleSpec, str, list[str]]],
+    bake_path: str | Path | None,
+    image_path: str | Path,
+) -> StyleSpec:
+    """Run the optional iterative refinement loop on a generated spec."""
+
+    def _generate_for_refiner(
+        refine_direction: str,
+        ref_b64s: list[str],
+    ) -> StyleSpec:
+        refine_messages = build_prompt(
+            analysis,
+            presets,
+            refine_direction,
+            schema,
+            image_b64,
+            reference_b64s=ref_b64s or None,
+            reference_analysis=reference_analysis,
+        )
+        refine_spec, _, refine_warns = call(temperature, refine_messages)
+        warnings.extend(refine_warns)
+        if presets is not None:
+            refine_spec = _bake_spec(
+                refine_spec,
+                presets,
+                bake_path=bake_path,
+                image_path=image_path,
+                warnings=warnings,
+            )
+        return refine_spec
+
+    try:
+        refine_result = iterative_refine(
+            raw_path=Path(refine_raw_path),
+            reference_paths=reference_paths,
+            direction=direction,
+            target_analysis=analysis,
+            generate_func=_generate_for_refiner,
+            max_iterations=refine_iterations,
+            reference_analysis=reference_analysis,
+        )
+    except Exception as e:
+        logger.warning("Iterative refinement failed: %s, using original spec", e)
+        return initial_spec
+
+    if refine_result.passed:
+        logger.info(
+            "Iterative refinement passed on iteration %d",
+            refine_result.iterations_completed,
+        )
+    else:
+        logger.info(
+            "Iterative refinement completed %d iteration(s) without passing; "
+            "returning best attempt",
+            refine_result.iterations_completed,
+        )
+    return refine_result.spec
+
+
 def generate_style_spec(
     image_path: str | Path,
     direction: str,
@@ -103,55 +374,12 @@ def generate_style_spec(
     #     semantic preset search from the reference aesthetic (not the literal
     #     direction string) and (b) feed the prompt.  Computed once here and
     #     reused below (no double analysis).
-    reference_analysis = reference_analysis if references else None
-    reference_paths: list[Path] = []
-    reference_b64s: list[str] = []
-    reference_warnings: list[str] = []
-    filter_result: ReferenceFilterResult | None = None
-    if references:
-        supplied_paths = [Path(ref) for ref in references]
-        filter_result = reference_filter_result or filter_references(
-            supplied_paths,
-            reference_filter or ReferenceFilterConfig(),
-        )
-        if filter_result.error:
-            raise ValueError(filter_result.error)
-        if not filter_result.kept:
-            raise ValueError(
-                "No readable reference images remain after consistency filtering."
-            )
-        if filter_result.summary:
-            logger.info(filter_result.summary)
-        reference_warnings.extend(filter_result.warnings)
-        for ref in filter_result.kept:
-            try:
-                reference_b64s.append(encode_base64(ref))
-                reference_paths.append(ref)
-                logger.info("Attaching reference image: %s", ref)
-            except Exception as e:
-                logger.warning("Could not encode reference image %s: %s", ref, e)
-        if reference_paths and reference_analysis is None:
-            logger.info("Analyzing reference signature with Python...")
-            try:
-                reference_analysis = compute_reference_signature(reference_paths)
-            except Exception as exc:
-                logger.warning(
-                    "Reference signature analysis failed (%s); falling back to hues", exc
-                )
-                try:
-                    reference_analysis = analyze_reference_hues(reference_paths)
-                except Exception as hue_exc:
-                    logger.warning("Reference hue analysis failed: %s", hue_exc)
-        if reference_analysis:
-            logger.info(
-                "Reference signature: luminance=%.3f saturation=%.3f "
-                "warmth=%+.3f contrast=%.3f DR=%.3f",
-                reference_analysis.get("global_luminance", 0.0),
-                reference_analysis.get("global_saturation", 0.0),
-                reference_analysis.get("global_warmth_rb", 0.0),
-                reference_analysis.get("global_contrast", 0.0),
-                reference_analysis.get("global_dynamic_range", 0.0),
-            )
+    reference_paths, reference_b64s, reference_warnings, reference_analysis = _prepare_reference_context(
+        references,
+        reference_filter=reference_filter,
+        reference_filter_result=reference_filter_result,
+        reference_analysis=reference_analysis,
+    )
 
     # 2. Search presets.  When references are supplied, build the query from
     #    the *reference* look (so search returns the creative presets that
@@ -159,68 +387,14 @@ def generate_style_spec(
     #    of treating the literal direction as a search term).  Otherwise fall
     #    back to the direction, or to the image's scene tags when direction is
     #    empty/auto.
-    if references and reference_analysis:
-        query = _reference_query(reference_analysis)
-    elif direction and direction.strip().lower() not in ("", "auto"):
-        query = direction
-    else:
-        tags = getattr(analysis, "scene_tags", None) or []
-        query = " ".join(tags) if tags else "neutral balanced photography"
+    query = _resolve_search_query(direction, analysis, reference_analysis)
     logger.info("Searching presets for query: %s", query)
-    # Reference-driven generation needs a wider candidate pool so the VLM can
-    # pick the preset that actually matches the reference look.
     search_limit = 10 if references else 5
     search_results = searcher.hybrid_search(query, limit=search_limit)
-
-    # 2b. Resolve each SearchResult (lightweight PresetIndexEntry) back to a
-    # full Preset (with plugins / op_params / blendops / filename) by
-    # re-parsing the .dtstyle file from disk. The indexer persists the
-    # absolute file_path for exactly this case.
-    presets: list[Preset] = []
-    for r in search_results:
-        file_path = getattr(r.preset, "file_path", None)
-        if not file_path:
-            logger.warning(
-                "SearchResult for %r has no file_path — cannot resolve full Preset",
-                getattr(r.preset, "display_name", None) or r.preset.name,
-            )
-            continue
-        from dtstylekit.presets.parser import parse_preset
-
-        full = parse_preset(Path(file_path))
-        if full is not None:
-            presets.append(full)
-        else:
-            logger.warning("Could not re-parse preset file: %s", file_path)
-
-    # 2c. Luminance-suitability filter.  The semantic search matches
-    # keywords, not exposure: a query built from scene tags like "night
-    # low-key" happily returns "day for twilight" (net exposure -1 EV),
-    # and gemma3:12b picked it for an already-dark
-    # image — crushing the output to near black.  Drop candidates whose
-    # net exposure pushes a dark image darker (or a bright image
-    # brighter), but always keep at least two candidates so the VLM
-    # still has a choice.
-    mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
-    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
-        mean_lum = None
-    if mean_lum is not None:
-        fitted = [p for p in presets if _preset_ev_fits(p, mean_lum)]
-        if len(fitted) >= 2:
-            dropped = len(presets) - len(fitted)
-            if dropped:
-                logger.info(
-                    "Dropped %d candidate preset(s) with unsuitable net "
-                    "exposure for a %.2f-luminance image",
-                    dropped,
-                    mean_lum,
-                )
-            presets = fitted
-        elif len(presets) > len(fitted) > 0:
-            logger.info(
-                "Kept all %d candidates: filter would leave fewer than 2",
-                len(presets),
-            )
+    presets = _filter_presets_by_exposure(
+        _resolve_search_results(search_results),
+        analysis,
+    )
 
     # 3. Build schema
     schema = render_iop_schema(registry)
@@ -281,39 +455,6 @@ def generate_style_spec(
         )
         return validated, report, warns
 
-    def _bake(spec: StyleSpec) -> StyleSpec:
-        """Resolve selected presets and apply the clipping-only bake."""
-        import tempfile
-
-        from dtstylekit.presets.resolver import PresetResolver
-
-        selected: list[Preset] = []
-        names = list(spec.selected_preset_names or [])
-        if names:
-            bake_warnings: list[str] = []
-            try:
-                with PresetResolver() as resolver:
-                    selected = resolver.load_many(names, bake_warnings)
-            except Exception as exc:  # pragma: no cover — defensive
-                logger.warning("Could not resolve presets for safety bake: %s", exc)
-            for warning in bake_warnings:
-                if warning not in warnings:
-                    warnings.append(warning)
-            known = {Path(preset.file_path) for preset in selected}
-            selected.extend(
-                preset for preset in presets if Path(preset.file_path) not in known
-            )
-        try:
-            return safety_bake(
-                spec,
-                selected,
-                bake_path or image_path,
-                Path(tempfile.mkdtemp(prefix="dtstylekit_bake_")),
-            )
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("Safety bake failed (kept un-baked spec): %s", exc)
-            return spec
-
     raw_capture: list[str] = []
     validated_spec, report, warnings = _call(temperature)
 
@@ -349,33 +490,11 @@ def generate_style_spec(
         # select the most relevant *creative* candidate as the baseline so the
         # style inherits a real tone map + grade; the VLM's adjustments still
         # refine it on top.
-        if not validated_spec.selected_preset_names:
-            _fn: str | None = None
-            if reference_preset:
-                # Ground-truth baseline (e.g. the source preset of the
-                # reference look) supplied by the caller — always preferred.
-                _fn = reference_preset
-            elif presets:
-                # gemma3 often returns selected_presets:[] even when instructed
-                # to compose from a preset; deterministically pick the most
-                # relevant *creative* candidate so the style inherits a real
-                # tone map + grade.  The VLM's adjustments still refine on top.
-                _best = None
-                for _p in presets:
-                    _fn_cand = getattr(
-                        getattr(_p, "file_path", None), "name", ""
-                    ) or getattr(_p, "name", "")
-                    if _fn_cand.startswith("examples_"):
-                        _best = _p
-                        break
-                if _best is None:
-                    _best = presets[0]
-                _fn = getattr(
-                    getattr(_best, "file_path", None), "name", ""
-                ) or getattr(_best, "name", "")
-            if _fn:
-                validated_spec = replace(validated_spec, selected_preset_names=(_fn,))
-                logger.info("Reference generation: auto-selected baseline preset %s", _fn)
+        validated_spec = _ensure_reference_baseline(
+            validated_spec,
+            presets,
+            reference_preset,
+        )
 
         from dtstylekit.vlm.fidelity import auto_fit_signature
 
@@ -391,7 +510,13 @@ def generate_style_spec(
     # brighter photos.  ``dtstylekit apply`` normalizes brightness per image.
     # Runs after validation + auto-fit so the saved style is clipping-safe.
     if presets is not None:
-        validated_spec = _bake(validated_spec)
+        validated_spec = _bake_spec(
+            validated_spec,
+            presets,
+            bake_path=bake_path,
+            image_path=image_path,
+            warnings=warnings,
+        )
 
     # 7. Report + warnings for the CLI
     if reference_warnings:
@@ -403,55 +528,23 @@ def generate_style_spec(
     # 8. Optional iterative refinement (generate → render → evaluate → adjust)
     if refine_iterations > 0 and refine_raw_path:
         logger.info("Starting iterative refinement (%d iterations)...", refine_iterations)
-
-        # Build a generate function that the refiner can call.  The refined
-        # direction must actually reach the VLM, so rebuild the messages for
-        # every iteration instead of reusing the original prompt.
-        def _generate_for_refiner(refine_direction: str, ref_b64s: list[str]) -> StyleSpec:
-            refine_messages = build_prompt(
-                analysis,
-                presets,
-                refine_direction,
-                schema,
-                image_b64,
-                reference_b64s=ref_b64s or None,
-                reference_analysis=reference_analysis,
-            )
-            refine_spec, _, refine_warns = _call(temperature, refine_messages)
-            # Merge warnings
-            warnings.extend(refine_warns)
-            # Check clipping before returning: the refiner renders this spec
-            # directly, so keep its highlights safe.  It never lifts exposure
-            # to a reference target (that is apply's job).
-            if presets is not None:
-                refine_spec = _bake(refine_spec)
-            return refine_spec
-
-        # Run iterative refinement
-        try:
-            refine_result = iterative_refine(
-                raw_path=Path(refine_raw_path),
-                reference_paths=reference_paths,
-                direction=direction,
-                target_analysis=analysis,
-                generate_func=_generate_for_refiner,
-                max_iterations=refine_iterations,
-                reference_analysis=reference_analysis,
-            )
-            validated_spec = refine_result.spec
-            if refine_result.passed:
-                logger.info(
-                    "Iterative refinement passed on iteration %d",
-                    refine_result.iterations_completed,
-                )
-            else:
-                logger.info(
-                    "Iterative refinement completed %d iteration(s) without passing; "
-                    "returning best attempt",
-                    refine_result.iterations_completed,
-                )
-        except Exception as e:
-            logger.warning("Iterative refinement failed: %s, using original spec", e)
+        validated_spec = _run_iterative_refinement(
+            validated_spec,
+            refine_iterations=refine_iterations,
+            refine_raw_path=refine_raw_path,
+            reference_paths=reference_paths,
+            direction=direction,
+            analysis=analysis,
+            presets=presets,
+            schema=schema,
+            image_b64=image_b64,
+            reference_analysis=reference_analysis,
+            temperature=temperature,
+            warnings=warnings,
+            call=_call,
+            bake_path=bake_path,
+            image_path=image_path,
+        )
 
     if capture_raw:
         return validated_spec, report, warnings, analysis, (  # type: ignore[return-value]
