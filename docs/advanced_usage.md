@@ -84,11 +84,75 @@ When you provide reference images with `--references`, dtstylekit performs deep 
    - Confidence scores
    - Secondary hues for bimodal grades
 
+### Reference Consistency Filter
+
+Reference sets assembled by hand often mix different edits: a warm
+cinematic frame, a neutral snapshot, and a grainy vintage photo. The VLM
+then tries to satisfy contradictory looks, and the numeric targets are
+averaged across incomparable images. Before any VLM or darktable work,
+dtstylekit can keep only the largest mutually-consistent group.
+
+The filter is enabled by default (`--reference-filter auto`,
+`--reference-match edit`, `--reference-min 2`) whenever three or more
+references are supplied:
+
+```bash
+# Default: drop clear edit outliers, keep at least 2 references
+dtstylekit generate photo.jpg --references "refs/*.jpg"
+
+# Inspect what would be dropped without changing the set
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter warn
+
+# Fail instead of falling back when no consistent group exists
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter strict
+
+# Group by lighting instead of the full edit fingerprint
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-match light
+
+# Same filter for the luminance target used by apply
+dtstylekit apply style.dtstyle "photos/*.ARW" --references "refs/*.jpeg"
+```
+
+| Mode | Behaviour |
+|------|-----------|
+| `off` | Legacy behaviour; keep every readable reference. |
+| `warn` | Report outliers in the console/report but keep all references. |
+| `auto` | Drop clear outliers; fall back to the closest references if needed. |
+| `strict` | Like `auto`, but abort when no consistent group of `--reference-min` exists. |
+
+`--reference-match edit` compares tone curve, colour grade, and processing
+texture. `light` compares scene key and white balance. `both` requires both
+to agree. The filter needs at least three readable references to detect an
+outlier; with fewer it keeps them all and adds a note. The decision table is
+written to the technical report (`<style>.md`) and summarized in
+`*_EXPLICACION.md`.
+
+The fingerprint uses statistical proxies because a JPEG does not contain
+its editing history. It is deliberately conservative: visual outliers are
+dropped, but references from the same edit with different subjects or
+lighting usually remain. If you intentionally want to mix lighting, run
+with `--reference-filter warn` first and inspect the report.
+
+Programmatic use:
+
+```python
+from pathlib import Path
+from dtstylekit.analyzer import ReferenceFilterConfig, filter_references
+
+result = filter_references(
+    [Path("ref1.jpg"), Path("ref2.jpg"), Path("ref3.jpg")],
+    ReferenceFilterConfig(mode="auto", match="edit", min_refs=2),
+)
+print(result.kept, result.dropped, result.summary)
+```
+
 ### Reference Selection Tips
 
 - Use **3-5 reference images** for best results
-- References should share the **same aesthetic direction**
-- Mix of **lighting conditions** helps VLM generalize
+- References should share the **same edit and grade**
+- Mixing **different lighting** can work, but run `--reference-filter warn`
+  first; use `--reference-match light` only when lighting is the attribute
+  you want to enforce
 - Include **at least one portrait** if targeting skin tones
 
 ### Interpretation Guide

@@ -18,11 +18,15 @@ import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dtstylekit.codec.iop_registry import pack_params, unpack_params
 from dtstylekit.codec.serializer import encode_plugin
 from dtstylekit.codec.xmp_codec import decode_xmp, encode_xmp
 from dtstylekit.vlm.iterative_refiner import compute_render_metrics, render_with_style
+
+if TYPE_CHECKING:
+    from dtstylekit.analyzer.reference_filter import ReferenceFilterResult
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +132,23 @@ def style_with_exposure(
     return destination
 
 
-def reference_target_luminance(reference_paths: Sequence[str | Path]) -> float:
-    """Reference mean luminance measured by the analyzer."""
+def reference_target_luminance(
+    reference_paths: Sequence[str | Path],
+    *,
+    filter_result: ReferenceFilterResult | None = None,
+) -> float:
+    """Reference mean luminance measured by the analyzer.
+
+    ``filter_result`` may be a :class:`ReferenceFilterResult`; when given,
+    only its ``kept`` paths are used.  This keeps the luminance target
+    aligned with the references that actually drove the style.
+    """
     from dtstylekit.analyzer.pipeline import compute_reference_signature
 
-    signature = compute_reference_signature([Path(p) for p in reference_paths])
+    paths = [Path(p) for p in reference_paths]
+    if filter_result is not None and filter_result.kept:
+        paths = [Path(p) for p in filter_result.kept]
+    signature = compute_reference_signature(paths)
     value = signature.get("global_luminance")
     if not isinstance(value, int | float) or isinstance(value, bool):
         raise ValueError("Could not compute reference luminance")

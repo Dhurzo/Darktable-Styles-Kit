@@ -17,6 +17,14 @@ from .luminance import compute_luminance_stats
 from .models import HistogramStats, ImageAnalysis, LuminanceStats
 from .noise import estimate_noise
 from .pipeline import analyze_image
+from .reference_filter import (
+    ReferenceFeatures,
+    ReferenceFilterConfig,
+    ReferenceFilterResult,
+    extract_reference_features,
+    filter_references,
+    format_reference_filter_report,
+)
 from .scene import detect_scene
 
 __all__ = [
@@ -28,6 +36,13 @@ __all__ = [
     "estimate_noise",
     "extract_exif",
     "detect_scene",
+    # Reference consistency
+    "ReferenceFeatures",
+    "ReferenceFilterConfig",
+    "ReferenceFilterResult",
+    "extract_reference_features",
+    "filter_references",
+    "format_reference_filter_report",
     # Data classes
     "HistogramStats",
     "ImageAnalysis",

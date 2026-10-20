@@ -848,6 +848,7 @@ def generate_explanation(
     reference_paths: list[Path],
     output_path: Path,
     lang: str = "es",
+    reference_filter_report: list[str] | None = None,
 ) -> Path:
     """Write the natural-language explanation document.
 
@@ -860,6 +861,8 @@ def generate_explanation(
         reference_paths: Paths of the reference images.
         output_path: Destination .md path.
         lang: Document language, ``"es"`` (default) or ``"en"``.
+        reference_filter_report: Optional markdown lines describing which
+            references were kept/dropped and why.
 
     Returns:
         Path to the written document.
@@ -875,6 +878,9 @@ def generate_explanation(
     lines.append("")
     lines.append(L["auto"].format(date=datetime.now().strftime("%Y-%m-%d %H:%M")))  # type: ignore[union-attr]
     lines.append("")
+    if reference_filter_report:
+        lines.extend(reference_filter_report)
+        lines.append("")
 
     # -- 1. Profile Summary & Visual Identity -----------------------------
     lines.append(L["ped_s1_title"])

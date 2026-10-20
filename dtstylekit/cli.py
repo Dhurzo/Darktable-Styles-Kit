@@ -227,6 +227,11 @@ def _prepare_target(image: Path, refine_raw: str | None) -> tuple[Path, Path | N
 def cmd_generate(args: argparse.Namespace) -> int:
     """End-to-end generation."""
     from dtstylekit.analyzer.pipeline import analyze_image
+    from dtstylekit.analyzer.reference_filter import (
+        ReferenceFilterConfig,
+        filter_references,
+        format_reference_filter_report,
+    )
     from dtstylekit.codec.iop_registry import IOP_REGISTRY
     from dtstylekit.composer.generator import generate_dtstyle
     from dtstylekit.composer.report import generate_report
@@ -266,6 +271,24 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if args.references and not references:
         logger.warning("No reference image files matched: %s", args.references)
 
+    filter_config = ReferenceFilterConfig(
+        mode=args.reference_filter,
+        match=args.reference_match,
+        min_refs=args.reference_min,
+    )
+    filter_result = None
+    if references:
+        filter_result = filter_references(references, filter_config)
+        if filter_result.error:
+            print(f"ERROR: {filter_result.error}", file=sys.stderr)
+            return 1
+        if filter_result.summary:
+            print(filter_result.summary)
+        references = filter_result.kept
+        if not references:
+            print("ERROR: all reference images were rejected by the filter.", file=sys.stderr)
+            return 1
+
     try:
         image_path, bake_path, refine_raw = _prepare_target(
             Path(args.image).expanduser(), args.refine_raw
@@ -278,6 +301,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
             registry=IOP_REGISTRY,
             model=args.model,
             references=[str(p) for p in references],  # str | Path union
+            reference_filter=filter_config,
+            reference_filter_result=filter_result,
             temperature=args.temperature if args.temperature is not None else 0.4,
             refine_iterations=args.refine_iterations,
             refine_raw_path=refine_raw,
@@ -366,7 +391,16 @@ def cmd_generate(args: argparse.Namespace) -> int:
         logger.warning("Post-write style check failed: %s", exc)
 
     try:
-        generate_report(spec, selected_presets, analysis, vlm_report, report_path)
+        generate_report(
+            spec,
+            selected_presets,
+            analysis,
+            vlm_report,
+            report_path,
+            reference_filter_report=(
+                format_reference_filter_report(filter_result) if filter_result else None
+            ),
+        )
     except Exception as exc:
         # Report generation failure is non-fatal
         all_warnings.append(f"Report generation failed: {exc}")
@@ -391,6 +425,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 reference_paths=[Path(p) for p in references],
                 output_path=explanation_path,
                 lang=args.lang,
+                reference_filter_report=(
+                    format_reference_filter_report(filter_result) if filter_result else None
+                ),
             )
             print(f"✓ Explanation: {explanation_path}")
         except Exception as exc:
@@ -438,7 +475,29 @@ def cmd_apply(args: argparse.Namespace) -> int:
         if not refs:
             logger.error("No reference images matched: %s", args.references)
             return 1
-        target = reference_target_luminance(refs)
+        from dtstylekit.analyzer.reference_filter import (
+            ReferenceFilterConfig,
+            filter_references,
+        )
+
+        filter_result = filter_references(
+            refs,
+            ReferenceFilterConfig(
+                mode=args.reference_filter,
+                match=args.reference_match,
+                min_refs=args.reference_min,
+            ),
+        )
+        if filter_result.error:
+            print(f"ERROR: {filter_result.error}", file=sys.stderr)
+            return 1
+        if filter_result.summary:
+            print(filter_result.summary)
+        refs = filter_result.kept
+        if not refs:
+            print("ERROR: all reference images were rejected by the filter.", file=sys.stderr)
+            return 1
+        target = reference_target_luminance(refs, filter_result=filter_result)
         logger.info("Reference luminance: %.3f", target)
     else:
         target = DEFAULT_TARGET_LUMINANCE
@@ -519,6 +578,24 @@ def main(argv: list[str] | None = None) -> int:
         "target aesthetic from, e.g. '/path/refs/*.jpeg'",
     )
     gen.add_argument(
+        "--reference-filter",
+        choices=("off", "warn", "auto", "strict"),
+        default="auto",
+        help="Reference consistency policy (default: auto = drop clear outliers).",
+    )
+    gen.add_argument(
+        "--reference-match",
+        choices=("edit", "light", "both"),
+        default="edit",
+        help="Reference attribute used for consistency (default: edit).",
+    )
+    gen.add_argument(
+        "--reference-min",
+        type=int,
+        default=2,
+        help="Minimum number of references to keep (default: 2).",
+    )
+    gen.add_argument(
         "--refine-iterations",
         type=int,
         default=0,
@@ -574,6 +651,24 @@ def main(argv: list[str] | None = None) -> int:
         "target aesthetic from, e.g. '/path/refs/*.jpeg'",
     )
     ana.add_argument(
+        "--reference-filter",
+        choices=("off", "warn", "auto", "strict"),
+        default="auto",
+        help="Reference consistency policy (default: auto = drop clear outliers).",
+    )
+    ana.add_argument(
+        "--reference-match",
+        choices=("edit", "light", "both"),
+        default="edit",
+        help="Reference attribute used for consistency (default: edit).",
+    )
+    ana.add_argument(
+        "--reference-min",
+        type=int,
+        default=2,
+        help="Minimum number of references to keep (default: 2).",
+    )
+    ana.add_argument(
         "--lang",
         choices=("es", "en"),
         default="es",
@@ -602,6 +697,24 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="Reference look images used to derive the target luminance",
+    )
+    app.add_argument(
+        "--reference-filter",
+        choices=("off", "warn", "auto", "strict"),
+        default="auto",
+        help="Reference consistency policy for the luminance target (default: auto).",
+    )
+    app.add_argument(
+        "--reference-match",
+        choices=("edit", "light", "both"),
+        default="edit",
+        help="Reference attribute used for consistency (default: edit).",
+    )
+    app.add_argument(
+        "--reference-min",
+        type=int,
+        default=2,
+        help="Minimum number of references to keep (default: 2).",
     )
     app.add_argument(
         "--target-luminance",

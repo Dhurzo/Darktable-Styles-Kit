@@ -188,6 +188,10 @@ def run_eval_case(
 ) -> EvalResult:
     """Run the full pipeline for one case and score the result."""
     from dtstylekit.analyzer.pipeline import analyze_reference_hues
+    from dtstylekit.analyzer.reference_filter import (
+        ReferenceFilterConfig,
+        filter_references,
+    )
     from dtstylekit.composer.generator import generate_dtstyle
     from dtstylekit.eval.metrics import compare_looks, extract_look_profile
     from dtstylekit.vlm.iterative_refiner import render_with_style
@@ -197,7 +201,19 @@ def run_eval_case(
     out_dir.mkdir(parents=True, exist_ok=True)
     result = EvalResult(case=case)
 
+    reference_filter_result = None
     refs = cast("list[str | Path] | None", list(case.reference_images) or None)
+    if case.reference_images:
+        reference_filter_result = filter_references(
+            case.reference_images, ReferenceFilterConfig()
+        )
+        if reference_filter_result.error:
+            result.notes.append(reference_filter_result.error)
+            return result
+        refs = [str(p) for p in reference_filter_result.kept]
+        if not refs:
+            result.notes.append("all reference images rejected by the filter")
+            return result
     try:
         gen = generate_style_spec(
             image_path=case.base_image,
@@ -207,6 +223,7 @@ def run_eval_case(
             registry=registry,
             model=model,
             references=refs,
+            reference_filter_result=reference_filter_result,
             refine_iterations=refine_iterations,
             refine_raw_path=refine_raw_path,
             capture_raw=True,
@@ -233,9 +250,10 @@ def run_eval_case(
         result.valid = False
         return result
 
+    kept_refs = [Path(p) for p in (refs or [])]
     ref_analysis = (
-        analyze_reference_hues(case.reference_images)
-        if case.reference_images
+        analyze_reference_hues(kept_refs)
+        if kept_refs
         else None
     )
     result.intent_loss = measure_intent_loss(
@@ -253,7 +271,7 @@ def run_eval_case(
         else:
             result.rendered_path = rendered
             result.achieved_profile = extract_look_profile(rendered)
-            result.reference_profile = extract_look_profile(case.reference_images[0])
+            result.reference_profile = extract_look_profile(kept_refs[0])
             result.fidelity = compare_looks(
                 result.reference_profile, result.achieved_profile
             )

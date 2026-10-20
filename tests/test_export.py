@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from PIL import Image
 
 from dtstylekit.codec.serializer import build_dtstyle_xml
-from dtstylekit.export import style_exposure, style_with_exposure
+from dtstylekit.export import (
+    reference_target_luminance,
+    style_exposure,
+    style_with_exposure,
+)
 from dtstylekit.vlm.iterative_refiner import compute_render_metrics
 
 
@@ -50,3 +56,19 @@ def test_clipped_pct_measures_hard_highlights(tmp_path):
     image.save(path)
     metrics = compute_render_metrics(path)
     assert metrics.clipped_pct == pytest.approx(0.01)
+
+
+def test_reference_target_luminance_uses_filtered_paths(tmp_path):
+    dark = tmp_path / "dark.png"
+    bright = tmp_path / "bright.png"
+    Image.new("RGB", (16, 16), (20, 20, 20)).save(dark)
+    Image.new("RGB", (16, 16), (235, 235, 235)).save(bright)
+
+    unfiltered = reference_target_luminance([dark, bright])
+    filtered = reference_target_luminance(
+        [dark, bright],
+        filter_result=SimpleNamespace(kept=[dark]),
+    )
+
+    assert unfiltered > filtered
+    assert filtered == pytest.approx(reference_target_luminance([dark]))

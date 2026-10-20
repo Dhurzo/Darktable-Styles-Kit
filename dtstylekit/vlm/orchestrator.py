@@ -16,6 +16,11 @@ from dtstylekit.analyzer.pipeline import (
     analyze_reference_hues,
     compute_reference_signature,
 )
+from dtstylekit.analyzer.reference_filter import (
+    ReferenceFilterConfig,
+    ReferenceFilterResult,
+    filter_references,
+)
 
 from .client import VLMClient
 from .iterative_refiner import iterative_refine
@@ -66,6 +71,8 @@ def generate_style_spec(
     model: str | None = None,
     temperature: float = 0.4,
     references: list[str | Path] | None = None,
+    reference_filter: ReferenceFilterConfig | None = None,
+    reference_filter_result: ReferenceFilterResult | None = None,
     refine_iterations: int = 0,  # 0 = no iterative refinement
     refine_raw_path: str | Path | None = None,  # RAW file for test renders
     bake_path: str | Path | None = None,  # image used for safety-bake renders
@@ -86,6 +93,13 @@ def generate_style_spec(
             VLM should derive the target aesthetic from.  The analysis
             still runs on ``image_path``; the references are attached to
             the prompt as vision context.
+        reference_filter: Consistency policy for the reference set.  The
+            default (auto edit matching) drops clear outliers before they
+            reach the VLM.  Use ``ReferenceFilterConfig(mode="off")`` to
+            restore legacy behaviour.
+        reference_filter_result: Pre-computed filter result (for callers
+            that need the per-reference report).  When supplied, the
+            filter is not run again.
         refine_iterations: If >0, run iterative generate→render→eval loop
             using ``refine_raw_path`` as test RAW. Each iteration re-prompts
             the VLM with visual feedback from the previous render.
@@ -109,11 +123,27 @@ def generate_style_spec(
     reference_analysis: dict | None = None
     reference_paths: list[Path] = []
     reference_b64s: list[str] = []
+    reference_warnings: list[str] = []
+    filter_result: ReferenceFilterResult | None = None
     if references:
-        for ref in references:
+        supplied_paths = [Path(ref) for ref in references]
+        filter_result = reference_filter_result or filter_references(
+            supplied_paths,
+            reference_filter or ReferenceFilterConfig(),
+        )
+        if filter_result.error:
+            raise ValueError(filter_result.error)
+        if not filter_result.kept:
+            raise ValueError(
+                "No readable reference images remain after consistency filtering."
+            )
+        if filter_result.summary:
+            logger.info(filter_result.summary)
+        reference_warnings.extend(filter_result.warnings)
+        for ref in filter_result.kept:
             try:
                 reference_b64s.append(_encode_resized(ref))
-                reference_paths.append(Path(ref))
+                reference_paths.append(ref)
                 logger.info("Attaching reference image: %s", ref)
             except Exception as e:
                 logger.warning("Could not encode reference image %s: %s", ref, e)
@@ -359,6 +389,8 @@ def generate_style_spec(
             logger.warning("Safety bake failed (kept un-baked spec): %s", exc)
 
     # 7. Report + warnings for the CLI
+    if reference_warnings:
+        warnings = list(reference_warnings) + warnings
     logger.info("VLM report: %s", (report or "(empty)")[:500])
     for w in warnings:
         logger.warning(w)
@@ -404,7 +436,7 @@ def generate_style_spec(
         try:
             refine_result = iterative_refine(
                 raw_path=Path(refine_raw_path),
-                reference_paths=[Path(r) for r in (references or [])],
+                reference_paths=reference_paths,
                 direction=direction,
                 target_analysis=analysis,
                 generate_func=_generate_for_refiner,

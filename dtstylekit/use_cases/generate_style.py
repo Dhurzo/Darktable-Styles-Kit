@@ -70,45 +70,68 @@ class GenerateStyleUseCase:
             Response with generated files and metadata.
         """
         from dtstylekit.analyzer.pipeline import analyze_reference_hues
+        from dtstylekit.analyzer.reference_filter import (
+            ReferenceFilterConfig,
+            filter_references,
+            format_reference_filter_report,
+        )
         from dtstylekit.composer.explanation import generate_explanation
         from dtstylekit.composer.generator import generate_dtstyle
         from dtstylekit.composer.report import generate_report
         from dtstylekit.paths import get_generated_dir
 
-        # 1. Generate style spec via VLM
+        # 1. Filter references before they reach the VLM, so the explanation
+        #    and report describe the same set the style was generated from.
+        references = [Path(p) for p in (request.references or [])]
+        filter_result = None
+        filter_report: list[str] | None = None
+        if references:
+            filter_result = filter_references(references, ReferenceFilterConfig())
+            if filter_result.error:
+                raise ValueError(filter_result.error)
+            if not filter_result.kept:
+                raise ValueError(
+                    "No readable reference images remain after consistency filtering."
+                )
+            references = filter_result.kept
+            filter_report = format_reference_filter_report(filter_result)
+
+        # 2. Generate style spec via VLM
         style_spec, vlm_report, vlm_warnings, analysis = self._style_generator.generate(
             image_path=request.image_path,
             direction=request.direction,
-            references=request.references,
+            references=[str(p) for p in references] or None,
             refine_iterations=request.refine_iterations,
             refine_raw_path=request.refine_raw_path,
         )
 
-        # 2. Load selected presets
+        # 3. Load selected presets
         all_warnings = list(vlm_warnings)
+        if filter_result is not None and filter_result.summary:
+            all_warnings.append(filter_result.summary)
         selected_presets = self._preset_repository.load_selected_presets(
             style_spec.selected_preset_names or [], all_warnings
         )
 
-        # 3. Validate we have something to output
+        # 4. Validate we have something to output
         if not selected_presets and not style_spec.plugins:
             raise ValueError(
                 "Cannot generate style: no presets and no adjustments. "
                 "Try a different --model or provide --references."
             )
 
-        # 4. Determine output directory
+        # 5. Determine output directory
         output_dir = request.output_dir or get_generated_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 5. Generate .dtstyle file
+        # 6. Generate .dtstyle file
         style_name_safe = style_spec.style_name.replace(" ", "_")
         dtstyle_path = output_dir / f"{style_name_safe}.dtstyle"
         report_path = output_dir / f"{style_name_safe}.md"
 
         generate_dtstyle(style_spec, selected_presets, dtstyle_path, analysis)
 
-        # 6. Generate technical report
+        # 7. Generate technical report
         try:
             generate_report(
                 style_spec,
@@ -116,29 +139,31 @@ class GenerateStyleUseCase:
                 analysis,
                 vlm_report,
                 report_path,
+                reference_filter_report=filter_report,
             )
         except Exception as exc:
             all_warnings.append(f"Report generation failed: {exc}")
 
-        # 7. Generate explanation document (if references provided)
+        # 8. Generate explanation document (if references provided)
         explanation_path = None
-        if request.references:
+        if references:
             try:
-                reference_analysis = analyze_reference_hues([Path(p) for p in request.references])
+                reference_analysis = analyze_reference_hues(references)
                 explanation_path = output_dir / f"{style_name_safe}_EXPLICACION.md"
                 generate_explanation(
                     style_spec,
                     selected_presets,
                     analysis,
                     reference_analysis,
-                    [Path(p) for p in request.references],
+                    references,
                     explanation_path,
                     lang=request.lang,
+                    reference_filter_report=filter_report,
                 )
             except Exception as exc:
                 all_warnings.append(f"Explanation generation failed: {exc}")
 
-        # 8. Post-generation validation
+        # 9. Post-generation validation
         self._validate_generated_style(dtstyle_path, all_warnings)
 
         return GenerateStyleResponse(

@@ -12,6 +12,11 @@ dtstylekit generate photo.jpg \
   --direction "warm cinematic" \
   -o style.dtstyle
 
+# Reference consistency (default: auto / edit / min 2)
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter warn
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter strict
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-match light
+
 # Generate with Spanish explanation (default)
 dtstylekit generate photo.jpg --lang es -o style.dtstyle
 

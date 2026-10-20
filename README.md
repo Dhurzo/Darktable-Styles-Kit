@@ -170,6 +170,10 @@ dtstylekit curves --help
 
 # Generate with reference-look images + a Spanish explanation document
 dtstylekit generate photo.jpg --references 'refs/*.jpg' --direction "cinematic warm portrait" --lang es
+
+# Keep only references that share the same edit (default: auto, min 2).
+# Use --reference-filter warn to inspect decisions without dropping anything.
+dtstylekit generate photo.jpg --references 'refs/*.jpg' --reference-filter auto
 ```
 
 Styles are exposure-neutral: `generate` saves the look, and `apply` computes
@@ -264,7 +268,7 @@ The VLM analyzes the input image and:
 
 Each run produces:
 - **`.dtstyle` file** — Ready to import into Darktable
-- **Markdown report** — Explains preset selection, parameter choices, and expected visual effect
+- **Markdown report** — Explains preset selection, parameter choices, expected visual effect, and the reference consistency decision when references are used
 - **`*_EXPLICACION.md` explanation document** — When `--references` are given, a natural-language narrative companion is auto-generated: it analyses the reference photographs (tonal key, contrast, saturation, white balance, per-zone hue grading) and explains in plain language how they are edited and why every module/parameter of the generated style was chosen. Language: `--lang es` (default) or `--lang en`.
 
 ## Example results (before → after)

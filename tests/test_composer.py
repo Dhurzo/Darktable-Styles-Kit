@@ -525,6 +525,33 @@ class TestGenerateReport:
         assert "Test VLM rationale" in content
         assert "filmicrgb" in content
 
+    def test_includes_reference_filter_section(self, tmp_path: Path) -> None:
+        spec = MagicMock()
+        spec.style_name = "filtered"
+        spec.style_description = "Filtered references"
+        spec.plugins = []
+
+        analysis = MagicMock()
+        analysis.to_prompt_dict.return_value = {}
+
+        output = tmp_path / "report.md"
+        generate_report(
+            spec,
+            [],
+            analysis,
+            "Report body",
+            output,
+            reference_filter_report=[
+                "## Reference Consistency",
+                "",
+                "Dropped: `outlier.jpg`",
+            ],
+        )
+
+        content = output.read_text()
+        assert "## Reference Consistency" in content
+        assert "Dropped: `outlier.jpg`" in content
+
 
 # ---------------------------------------------------------------------------
 # TestRoundtrip (XML structure and blob validation)

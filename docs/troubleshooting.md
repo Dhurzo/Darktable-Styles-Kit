@@ -199,6 +199,27 @@ chmod 644 refs/*.jpg
 ollama run gemma3:27b "Describe this image" --image refs/ref1.jpg
 ```
 
+### References with different edits are mixed
+
+**Cause**: The reference set contains two or more incompatible looks
+(for example, a neutral snapshot next to a heavily graded frame). The VLM
+and the numeric targets receive contradictory signals.
+
+```bash
+# See which references would be dropped, without changing the set
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter warn
+
+# Default auto mode drops clear outliers and keeps at least 2
+dtstylekit generate photo.jpg --references "refs/*.jpg"
+
+# Abort instead of falling back when no consistent group exists
+dtstylekit generate photo.jpg --references "refs/*.jpg" --reference-filter strict
+```
+
+The decision table is included in the generated report. With fewer than
+three readable references the filter keeps them all: there is not enough
+evidence to identify an outlier.
+
 ### Reference analysis shows "neutral" for all zones
 
 **Cause**: References lack strong color grading.

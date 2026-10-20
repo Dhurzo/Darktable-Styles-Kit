@@ -15,6 +15,7 @@ def generate_report(
     analysis: ImageAnalysis | None,
     vlm_report: str,
     output_path: Path,
+    reference_filter_report: list[str] | None = None,
 ) -> Path:
     """Generate a markdown report.
 
@@ -24,6 +25,8 @@ def generate_report(
         analysis: ImageAnalysis from analyzer pipeline.
         vlm_report: Free-form markdown from VLM "---REPORT---" section.
         output_path: Destination path.
+        reference_filter_report: Optional markdown lines describing which
+            references were kept/dropped and why.
 
     Returns:
         Path to written report.
@@ -61,6 +64,9 @@ def generate_report(
         noise = prompt_dict.get("noise", 0)
         lines.append(f"- **Noise estimate**: {noise}")
         lines.append("")
+
+    if reference_filter_report:
+        lines.extend(reference_filter_report)
 
     # Presets used
     lines.append("## Base Presets")
