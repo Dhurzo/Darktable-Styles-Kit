@@ -108,7 +108,7 @@ class VLMResponse:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class Plugin:
     """One darktable plugin entry inside a :class:`StyleSpec`.
 
@@ -137,7 +137,7 @@ class Plugin:
     params: dict[str, float | int] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(frozen=True)
 class StyleSpec:
     """A parsed and validated darktable style spec.
 
@@ -150,16 +150,22 @@ class StyleSpec:
     style_name: str = ""
     style_description: str = ""
     iop_list: str | None = None
-    plugins: list[Plugin] = field(default_factory=list)
+    plugins: tuple[Plugin, ...] = ()
     # Filenames (e.g. "examples_colors_sepia.dtstyle") that the VLM chose
     # as base presets.  The composer loads + merges these before applying
     # ``plugins`` scalar adjustments.  Populated from the ``selected_presets``
     # JSON field the prompt asks the VLM to emit.
-    selected_preset_names: list[str] = field(default_factory=list)
+    selected_preset_names: tuple[str, ...] = ()
     # Free-form rationale the VLM emits in its JSON.  Surfaced in the
     # markdown report when the separate ``---REPORT---`` section is not
     # produced (the minimalist SYSTEM_PROMPT doesn't request that section).
     rationale: str = ""
+
+    def __post_init__(self) -> None:
+        # Accept lists from JSON parsing/callers while keeping the container
+        # immutable.  Parameter dicts stay mutable for deterministic fits.
+        object.__setattr__(self, "plugins", tuple(self.plugins))
+        object.__setattr__(self, "selected_preset_names", tuple(self.selected_preset_names))
 
     @property
     def operations(self) -> list[str]:

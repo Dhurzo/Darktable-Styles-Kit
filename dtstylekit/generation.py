@@ -23,7 +23,7 @@ from .presets.resolver import PresetResolver
 from .vlm.orchestrator import generate_style_spec
 
 if TYPE_CHECKING:
-    from .analyzer.models import ImageAnalysis
+    from .analyzer.models import ImageAnalysis, ReferenceAnalysis
     from .analyzer.reference_filter import ReferenceFilterResult
     from .presets.models import Preset
     from .presets.search import PresetSearcher
@@ -61,7 +61,7 @@ class GenerationResult:
     presets: list[Preset] = field(default_factory=list)
     references: list[Path] = field(default_factory=list)
     filter_result: ReferenceFilterResult | None = None
-    reference_analysis: dict | None = None
+    reference_analysis: ReferenceAnalysis | None = None
     raw_response: str | None = None
 
 
@@ -92,7 +92,7 @@ class GenerationService:
     def generate(self, request: GenerationRequest) -> GenerationResult:
         references, filter_result = self._filter_references(request)
 
-        reference_analysis: dict | None = None
+        reference_analysis: ReferenceAnalysis | None = None
         if references:
             try:
                 reference_analysis = compute_reference_signature(references)

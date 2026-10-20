@@ -12,10 +12,10 @@ Runs the full pipeline for an :class:`EvalCase`, renders the resulting
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from dtstylekit.analyzer.models import ImageAnalysis
@@ -78,7 +78,7 @@ class EvalResult:
 def measure_intent_loss(
     raw_text: str,
     registry: dict,
-    reference_analysis: dict | None = None,
+    reference_analysis: Mapping[str, Any] | None = None,
     target_analysis: ImageAnalysis | None = None,
 ) -> IntentLoss:
     """Compare the VLM's intended adjustments to the validated spec.

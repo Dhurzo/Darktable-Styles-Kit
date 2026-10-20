@@ -15,7 +15,10 @@ without references it is a no-op.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from dtstylekit.vlm.models import Plugin, StyleSpec
 
@@ -24,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def auto_fit_signature(
     spec: StyleSpec,
-    reference_analysis: dict | None,
+    reference_analysis: Mapping[str, Any] | None,
     _analysis: object,
 ) -> tuple[StyleSpec, list[str]]:
     """Clamp unsafe values and gently nudge gross reference contradictions.
@@ -50,10 +53,11 @@ def auto_fit_signature(
         return None
 
     def _ensure(op: str) -> Plugin:
+        nonlocal spec
         plg = _plugin(op)
         if plg is None:
             plg = Plugin(operation=op, enabled=True, multi_name="", params={})
-            spec.plugins.append(plg)
+            spec = replace(spec, plugins=(*spec.plugins, plg))
         return plg
 
     # 1. MONOCHROME REFERENCES → real B/W via monochrome IOP
@@ -265,11 +269,8 @@ def compute_reference_profile(reference_paths: list) -> dict:
 
     globals_ = compute_reference_globals([Path(p) for p in reference_paths])
     return {
-        key: globals_[key]
-        for key in (
-            "global_contrast",
-            "global_dynamic_range",
-            "global_saturation_p90",
-            "global_warmth_rb",
-        )
+        "global_contrast": globals_["global_contrast"],
+        "global_dynamic_range": globals_["global_dynamic_range"],
+        "global_saturation_p90": globals_["global_saturation_p90"],
+        "global_warmth_rb": globals_["global_warmth_rb"],
     }

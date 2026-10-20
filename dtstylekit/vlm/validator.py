@@ -12,6 +12,8 @@ for rgbcurve) are within their declared ranges.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from dtstylekit.color import circular_diff as _circular_diff
 from dtstylekit.color import circular_mean as _circular_mean
@@ -30,7 +32,7 @@ _STRING_VIRTUAL_FIELDS = {"curve_preset"}
 def validate_style(
     spec: StyleSpec,
     registry: dict,
-    reference_analysis: dict | None = None,
+    reference_analysis: Mapping[str, Any] | None = None,
     target_analysis: object | None = None,
 ) -> tuple[StyleSpec, list[str]]:
     """Validate the StyleSpec.
@@ -113,8 +115,8 @@ def validate_style(
         style_description=spec.style_description,
         rationale=spec.rationale,
         iop_list=spec.iop_list,
-        plugins=validated_plugins,
-        selected_preset_names=selected_presets,
+        plugins=tuple(validated_plugins),
+        selected_preset_names=tuple(selected_presets),
     )
     return validated, warnings
 
@@ -264,7 +266,7 @@ def _apply_colorbalancergb_guards(
     plg: Plugin,
     clamped_params: dict,
     warnings: list[str],
-    reference_analysis: dict | None,
+    reference_analysis: Mapping[str, Any] | None,
     target_analysis: object | None,
 ) -> None:
     """Apply colorbalancergb semantic guards in their historical order."""
@@ -438,7 +440,7 @@ def _apply_filmicrgb_guard(
     plg: Plugin,
     clamped_params: dict,
     warnings: list[str],
-    reference_analysis: dict | None,
+    reference_analysis: Mapping[str, Any] | None,
 ) -> None:
     """Reject filmicrgb saturation that contradicts colorful references."""
     gsat = (reference_analysis or {}).get("global_saturation")

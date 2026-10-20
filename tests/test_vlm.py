@@ -76,7 +76,7 @@ class TestValidateStyle:
             selected_preset_names=["s_strong", "examples_colors_sepia.dtstyle"],
         )
         validated, warnings = validate_style(spec, IOP_REGISTRY)
-        assert validated.selected_preset_names == ["examples_colors_sepia.dtstyle"]
+        assert validated.selected_preset_names == ("examples_colors_sepia.dtstyle",)
         assert any("curve template" in w for w in warnings)
 
     def test_clamps_out_of_range(self) -> None:

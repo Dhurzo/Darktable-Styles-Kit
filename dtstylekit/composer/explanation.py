@@ -12,9 +12,10 @@ Languages: ``es`` (Spanish, default) and ``en`` (English).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from dtstylekit.analyzer.models import ImageAnalysis
 from dtstylekit.vlm.models import Plugin, StyleSpec
@@ -536,7 +537,7 @@ def _explain_exposure(lang: str, params: dict) -> list[str]:
     return out
 
 
-def _explain_colorbalance(lang: str, params: dict, ref_analysis: dict | None) -> list[str]:
+def _explain_colorbalance(lang: str, params: dict, ref_analysis: Mapping[str, Any] | None) -> list[str]:
     out: list[str] = []
     if "vibrance" in params and abs(float(params["vibrance"])) > 0.001:
         out.append(_t(lang, "cbr_vibrance").format(v=params["vibrance"]))
@@ -741,7 +742,7 @@ def _explain_colorharmonizer(lang: str, params: dict) -> list[str]:
 _ROW_RE = re.compile(r"\*\*(.+?)\s*=\s*(.+?)\*\*\s*:\s*(.*)")
 
 
-def _plugin_explains(lang: str, plg: Plugin, reference_analysis: dict | None) -> list[str]:
+def _plugin_explains(lang: str, plg: Plugin, reference_analysis: Mapping[str, Any] | None) -> list[str]:
     """Return the human-readable explanation strings for one plugin."""
     op = plg.operation
     if op == "filmicrgb":
@@ -844,7 +845,7 @@ def generate_explanation(
     spec: StyleSpec,
     presets: list,
     _analysis: ImageAnalysis | None,
-    reference_analysis: dict | None,
+    reference_analysis: Mapping[str, Any] | None,
     reference_paths: list[Path],
     output_path: Path,
     lang: str = "es",

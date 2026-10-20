@@ -9,7 +9,7 @@ import logging
 import math
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,10 +22,10 @@ from dtstylekit.render import (
 )
 
 if TYPE_CHECKING:
-    from dtstylekit.analyzer.models import ImageAnalysis
+    from dtstylekit.analyzer.models import ImageAnalysis, ReferenceAnalysis
     from dtstylekit.eval.metrics import LookProfile
 
-from dtstylekit.analyzer.models import ImageAnalysis
+from dtstylekit.analyzer.models import ImageAnalysis, ReferenceAnalysis
 from dtstylekit.vlm.models import Plugin, StyleSpec
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class RefinementResult:
     passed: bool
 
 
-def _reference_distance(metrics: RenderMetrics, reference_analysis: dict) -> float:
+def _reference_distance(metrics: RenderMetrics, reference_analysis: ReferenceAnalysis) -> float:
     """Weighted distance between a render and the reference signature.
 
     Uses HSV saturation (exposure-invariant) rather than absolute chroma,
@@ -74,7 +74,7 @@ def _reference_distance(metrics: RenderMetrics, reference_analysis: dict) -> flo
 
 
 def _reference_targets(
-    reference_paths: list[Path], reference_analysis: dict | None
+    reference_paths: list[Path], reference_analysis: ReferenceAnalysis | None
 ) -> dict[str, float]:
     """Reference targets from the signature, filling gaps from the images."""
     targets = {
@@ -108,7 +108,7 @@ def _reference_targets(
 def compare_to_references(
     render_path: Path,
     reference_paths: list[Path],
-    reference_analysis: dict | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
 ) -> tuple[bool, list[str]]:
     """Compare a rendered image with the reference set.
 
@@ -152,7 +152,7 @@ def compare_to_references(
 def nudge_spec_toward_reference(
     spec: StyleSpec,
     metrics: RenderMetrics,
-    reference_analysis: dict | None,
+    reference_analysis: ReferenceAnalysis | None,
 ) -> StyleSpec:
     """Deterministically move a spec halfway toward gross reference targets.
 
@@ -179,7 +179,7 @@ def nudge_spec_toward_reference(
             exposure = _find("exposure")
             if exposure is None:
                 exposure = Plugin(operation="exposure", enabled=True, params={})
-                nudged.plugins.append(exposure)
+                nudged = replace(nudged, plugins=(*nudged.plugins, exposure))
             current = _as_float(exposure.params.get("exposure"))
             exposure.params["exposure"] = max(-4.0, min(4.0, current + delta))
 
@@ -198,7 +198,7 @@ def nudge_spec_toward_reference(
             else:
                 if cb is None:
                     cb = Plugin(operation="colorbalancergb", enabled=True, params={})
-                    nudged.plugins.append(cb)
+                    nudged = replace(nudged, plugins=(*nudged.plugins, cb))
                 chroma = max(-0.4, -(1.0 - factor))
                 cb.params["chroma_global"] = chroma
 
@@ -221,7 +221,7 @@ def evaluate_metrics(
     target_analysis: ImageAnalysis,
     _tolerance: float = 0.15,  # reserved: evaluation strictness knob
     reference_look: "LookProfile | None" = None,
-    reference_analysis: dict | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
 ) -> tuple[bool, list[str]]:
     """Evaluate render metrics against target analysis.
 
@@ -346,7 +346,7 @@ def build_refinement_prompt(
     feedback: list[str],
     metrics: RenderMetrics,
     target_analysis: ImageAnalysis,
-    reference_analysis: dict | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
 ) -> str:
     """Build a refined direction prompt based on evaluation feedback."""
     target_lum = _metric_attr(target_analysis, "luminance", "mean")
@@ -439,7 +439,7 @@ def iterative_refine(
     max_iterations: int = 3,
     work_dir: Path | None = None,
     reference_look: "LookProfile | None" = None,
-    reference_analysis: dict | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
 ) -> RefinementResult:
     """Iterative refinement loop: generate → render → evaluate → adjust.
 

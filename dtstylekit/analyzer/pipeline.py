@@ -24,7 +24,7 @@ from dtstylekit.color import circular_mean as _circular_mean
 from .exif import extract_exif
 from .histogram import compute_histogram
 from .luminance import compute_luminance_stats
-from .models import HistogramStats, ImageAnalysis, LuminanceStats
+from .models import HistogramStats, ImageAnalysis, LuminanceStats, ReferenceAnalysis
 from .noise import estimate_noise
 from .scene import detect_scene
 
@@ -289,7 +289,7 @@ def _detect_bimodal(
     return (primary, secondary, primary_share)
 
 
-def analyze_reference_hues(reference_paths: list[Path]) -> dict:
+def analyze_reference_hues(reference_paths: list[Path]) -> ReferenceAnalysis:
     """Extract dominant hue and saturation per tonal range (shadows/midtones/highlights)
     from a list of reference images, using **circular** statistics and **bimodal**
     detection so references with two distinct color grades (e.g. teal shadows +
@@ -574,7 +574,7 @@ def _combine_reference_zones(zone_key: str, ref_data: list[dict], global_share: 
     }
 
 
-def compute_reference_globals(reference_paths: list[Path]) -> dict:
+def compute_reference_globals(reference_paths: list[Path]) -> ReferenceAnalysis:
     """Compute global numeric statistics for a set of reference images.
 
     Single pass over the references returning the shape of the look:
@@ -648,7 +648,7 @@ def compute_reference_globals(reference_paths: list[Path]) -> dict:
         palette_sin += np.bincount(bins, weights=weights * np.sin(rad), minlength=12)
         palette_cos += np.bincount(bins, weights=weights * np.cos(rad), minlength=12)
 
-    out: dict = {
+    out: ReferenceAnalysis = {
         "global_luminance": 0.0,
         "global_contrast": 0.0,
         "global_dynamic_range": 0.0,
@@ -679,10 +679,10 @@ def _palette_from_bins(
     cos_sum: np.ndarray,
     total: float,
     top_n: int = 3,
-) -> list[dict]:
+) -> list[dict[str, float]]:
     """Merge adjacent hue bins into the dominant palette entries."""
     used: np.ndarray = np.zeros(12, dtype=bool)
-    palette: list[dict] = []
+    palette: list[dict[str, float]] = []
     for idx in np.argsort(weights)[::-1]:
         idx = int(idx)
         if used[idx] or weights[idx] <= 0:
@@ -710,7 +710,7 @@ def _palette_from_bins(
     return palette
 
 
-def compute_reference_signature(reference_paths: list[Path]) -> dict:
+def compute_reference_signature(reference_paths: list[Path]) -> ReferenceAnalysis:
     """Full reference signature: per-zone hues + global shape + palette.
 
     Combines :func:`analyze_reference_hues` (per-zone graded hues with

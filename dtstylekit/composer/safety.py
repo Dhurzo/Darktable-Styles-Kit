@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import replace
 from pathlib import Path
 
 from dtstylekit.presets.models import Preset
@@ -83,7 +84,7 @@ def safety_bake(
         exp = next((p for p in spec.plugins if p.operation == "exposure"), None)
         if exp is None:
             exp = Plugin(operation="exposure", enabled=True, params={"exposure": 0.0})
-            spec.plugins.append(exp)
+            spec = replace(spec, plugins=(*spec.plugins, exp))
         current = float(exp.params.get("exposure") or 0.0)
         step = min(1.5, max(0.25, math.log2(max(metrics.clipped_pct / max_clip, 1.0001))))
         new = max(-6.0, min(6.0, current - step))

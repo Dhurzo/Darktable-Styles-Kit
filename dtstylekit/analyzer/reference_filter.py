@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 from PIL import Image
@@ -273,8 +273,9 @@ def extract_reference_features(path: str | Path) -> ReferenceFeatures:
     zone_modes: dict[str, str] = {}
     zone_confidences: dict[str, float] = {}
     zone_saturations: dict[str, float] = {}
+    zones: dict[str, Any]
     try:
-        zones = analyze_reference_hues([p])
+        zones = dict(analyze_reference_hues([p]))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Reference hue analysis failed for %s: %s", p, exc)
         zones = {}

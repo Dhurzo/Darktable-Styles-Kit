@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,7 +33,7 @@ from .schema_renderer import render_iop_schema
 from .validator import validate_style
 
 if TYPE_CHECKING:
-    from dtstylekit.analyzer.models import ImageAnalysis
+    from dtstylekit.analyzer.models import ImageAnalysis, ReferenceAnalysis
     from dtstylekit.presets.models import Preset
     from dtstylekit.presets.search import PresetSearcher
 
@@ -52,7 +53,7 @@ def generate_style_spec(
     references: list[str | Path] | None = None,
     reference_filter: ReferenceFilterConfig | None = None,
     reference_filter_result: ReferenceFilterResult | None = None,
-    reference_analysis: dict | None = None,
+    reference_analysis: ReferenceAnalysis | None = None,
     refine_iterations: int = 0,  # 0 = no iterative refinement
     refine_raw_path: str | Path | None = None,  # RAW file for test renders
     bake_path: str | Path | None = None,  # image used for safety-bake renders
@@ -373,7 +374,7 @@ def generate_style_spec(
                     getattr(_best, "file_path", None), "name", ""
                 ) or getattr(_best, "name", "")
             if _fn:
-                validated_spec.selected_preset_names = [_fn]
+                validated_spec = replace(validated_spec, selected_preset_names=(_fn,))
                 logger.info("Reference generation: auto-selected baseline preset %s", _fn)
 
         from dtstylekit.vlm.fidelity import auto_fit_signature
@@ -469,7 +470,7 @@ def _safety_bake(
     return safety_bake(spec, presets, target_path, work_dir)
 
 
-def _reference_query(reference_analysis: dict) -> str:
+def _reference_query(reference_analysis: ReferenceAnalysis) -> str:
     """Build a semantic-search query from the *reference* look.
 
     When reference images define the target aesthetic we must search the

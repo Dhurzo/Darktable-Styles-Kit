@@ -304,6 +304,8 @@ def _build_style_spec(data: dict) -> StyleSpec:
         style_description=str(data.get("style_description", "")),
         rationale=str(data.get("rationale", "")),
         iop_list=data.get("iop_list"),
-        plugins=plugins,
-        selected_preset_names=[str(name) for name in (data.get("selected_presets") or []) if name],
+        plugins=tuple(plugins),
+        selected_preset_names=tuple(
+            str(name) for name in (data.get("selected_presets") or []) if name
+        ),
     )

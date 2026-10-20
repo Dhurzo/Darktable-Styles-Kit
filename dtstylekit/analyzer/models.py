@@ -9,7 +9,39 @@ that is sized for inclusion in a VLM prompt (~200-500 tokens).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypedDict
+
+
+class ReferenceAnalysis(TypedDict, total=False):
+    """Reference signature shared by prompt, validator, fidelity and refiner.
+
+    Fields are optional because :func:`compute_reference_globals` returns
+    only the global shape while :func:`compute_reference_signature` adds
+    the per-zone keys; unreadable references may leave either set empty.
+    """
+
+    shadows_hue: float | None
+    midtones_hue: float | None
+    highlights_hue: float | None
+    shadows_hue_secondary: float | None
+    midtones_hue_secondary: float | None
+    highlights_hue_secondary: float | None
+    shadows_sat: float
+    midtones_sat: float
+    highlights_sat: float
+    shadows_hue_confidence: float
+    midtones_hue_confidence: float
+    highlights_hue_confidence: float
+    shadows_hue_mode: str
+    midtones_hue_mode: str
+    highlights_hue_mode: str
+    global_luminance: float
+    global_contrast: float
+    global_dynamic_range: float
+    global_saturation: float
+    global_saturation_p90: float
+    global_warmth_rb: float
+    palette: list[dict[str, float]]
 
 
 @dataclass

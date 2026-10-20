@@ -6,7 +6,8 @@ preset suggestions, and user style direction. Targets ≤6000 tokens total.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from dtstylekit.color import circular_diff as _circ_diff
 from dtstylekit.color import circular_mean as _circ_mean
@@ -384,7 +385,7 @@ def build_prompt(
     iop_schema: str,
     image_b64: str | None = None,
     reference_b64s: list[str] | None = None,
-    reference_analysis: dict | None = None,
+    reference_analysis: Mapping[str, Any] | None = None,
 ) -> list[dict]:
     """Build Ollama messages list.
 
@@ -631,7 +632,7 @@ def _build_preset_notes(
 
 def _build_reference_note(
     reference_b64s: list[str] | None,
-    reference_analysis: dict | None,
+    reference_analysis: Mapping[str, Any] | None,
 ) -> str:
     """Build the pre-computed hues, reference spec and chroma-caps section."""
     if not reference_b64s:
@@ -833,7 +834,7 @@ _HIGH_CONF_THRESHOLD = 0.85
 _NEUTRAL_CONF_THRESHOLD = 0.70  # below this -> chroma 0 (neutral)
 
 
-def _is_global_grade(reference_analysis: dict | None) -> bool:
+def _is_global_grade(reference_analysis: Mapping[str, Any] | None) -> bool:
     """True when the reference analysis declares hue_mode='global' in all
     three zones (one coherent tint across the whole tonal range)."""
     if not reference_analysis:
@@ -841,7 +842,7 @@ def _is_global_grade(reference_analysis: dict | None) -> bool:
     return all((reference_analysis.get(f"{z}_hue_mode") or "") == "global" for z in _SOFT_CAPS)
 
 
-def _reference_spec_block(reference_analysis: dict | None) -> str:
+def _reference_spec_block(reference_analysis: Mapping[str, Any] | None) -> str:
     """Numeric reference signature: luminance, contrast, saturation, warmth.
 
     Complements the per-zone hue block with the measured *global* shape of
@@ -890,7 +891,7 @@ def _reference_spec_block(reference_analysis: dict | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _chroma_caps_block(reference_analysis: dict | None) -> str:
+def _chroma_caps_block(reference_analysis: Mapping[str, Any] | None) -> str:
     """Build the dynamic chroma caps instructions for the prompt.
 
     Mirrors the validator's Hito 2.1 logic so the prompt and the post-
