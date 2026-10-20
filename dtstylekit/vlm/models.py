@@ -136,6 +136,20 @@ class Plugin:
     multi_priority: int = 0
     params: dict[str, float | int] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Reject malformed plugin payloads before they reach the codec."""
+        if not self.operation:
+            raise ValueError("Plugin.operation must be a non-empty string")
+        if self.multi_priority < 0:
+            raise ValueError(
+                f"Plugin.multi_priority must be non-negative for {self.operation!r}, got {self.multi_priority}"
+            )
+        for name, value in self.params.items():
+            if isinstance(value, bool) or not isinstance(value, int | float | str):
+                raise ValueError(
+                    f"Plugin.params[{name!r}] for {self.operation!r} must be numeric or a curve/template string, got {value!r}"
+                )
+
 
 @dataclass(frozen=True)
 class StyleSpec:
@@ -164,6 +178,11 @@ class StyleSpec:
     def __post_init__(self) -> None:
         # Accept lists from JSON parsing/callers while keeping the container
         # immutable.  Parameter dicts stay mutable for deterministic fits.
+        if not isinstance(self.plugins, (Plugin, list, tuple)):
+            raise TypeError("StyleSpec.plugins must contain Plugin instances")
+        for plugin in self.plugins:
+            if not isinstance(plugin, Plugin):
+                raise TypeError(f"StyleSpec.plugins must contain Plugin instances, got {type(plugin)}")
         object.__setattr__(self, "plugins", tuple(self.plugins))
         object.__setattr__(self, "selected_preset_names", tuple(self.selected_preset_names))
 

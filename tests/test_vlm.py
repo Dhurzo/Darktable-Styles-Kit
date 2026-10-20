@@ -33,6 +33,20 @@ This style increases filmic contrast and shifts shadows/highlights warm for a ci
 """
 
 
+class TestStyleContracts:
+    def test_plugin_rejects_non_scalar_param(self) -> None:
+        with pytest.raises(ValueError):
+            Plugin(operation="fake", params={"amount": [1, 2]})
+
+    def test_plugin_rejects_negative_priority(self) -> None:
+        with pytest.raises(ValueError):
+            Plugin(operation="fake", multi_priority=-1)
+
+    def test_style_spec_rejects_non_plugin_entries(self) -> None:
+        with pytest.raises(TypeError):
+            StyleSpec(plugins=[{"operation": "fake"}])
+
+
 class TestParseResponse:
     def test_parses_json_in_fence(self) -> None:
         spec, report = parse_response(MOCK_VLM_RESPONSE_OK)

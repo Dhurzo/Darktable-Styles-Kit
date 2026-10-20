@@ -83,6 +83,34 @@ class TestRegistryAccess:
             reg = get_registry(op)
             assert reg.size_bytes is None, f"{op} is unverified but has size_bytes={reg.size_bytes}"
 
+    def test_registry_rejects_unknown_default(self):
+        """Registry contract rejects default keys outside declared fields."""
+        with pytest.raises(ValueError):
+            IOPRegistry(
+                operation="fake",
+                version=1,
+                pack_format="<f",
+                fields=("value",),
+                defaults={"missing": 0.0},
+                ranges={"value": (0.0, 1.0)},
+                size_bytes=4,
+                blendop_cst=4,
+            )
+
+    def test_registry_rejects_unknown_blend_mode(self):
+        """Registry contract rejects unknown blendop constants."""
+        with pytest.raises(ValueError):
+            IOPRegistry(
+                operation="fake",
+                version=1,
+                pack_format="<f",
+                fields=("value",),
+                defaults={"value": 0.0},
+                ranges={"value": (0.0, 1.0)},
+                size_bytes=4,
+                blendop_cst=9,
+            )
+
 
 class TestPackParams:
     """Tests for pack_params function."""
