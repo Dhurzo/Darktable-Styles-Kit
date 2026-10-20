@@ -36,15 +36,21 @@ class RenderMetrics:
 
     @property
     def has_red_cast(self) -> bool:
-        return self.r_over_g > 1.3 and self.r_mean > self.b_mean * 1.2
+        from dtstylekit.color import is_red_cast
+
+        return is_red_cast(self.r_over_g, self.r_mean, self.b_mean)
 
     @property
     def is_crushed(self) -> bool:
-        return self.mean_luminance < 0.1 or self.std_luminance < 0.05
+        from dtstylekit.color import is_crushed
+
+        return is_crushed(self.mean_luminance, self.std_luminance)
 
     @property
     def is_blown(self) -> bool:
-        return self.mean_luminance > 0.9 or self.highlights_pct > 0.5
+        from dtstylekit.color import is_blown
+
+        return is_blown(self.mean_luminance, self.highlights_pct)
 
 
 def _safe_style_name(name: str) -> str:
@@ -66,17 +72,14 @@ def find_darktable_cli() -> str | None:
 
 def compute_render_metrics(image_path: Path) -> RenderMetrics:
     """Compute visual metrics from a rendered image."""
-    import numpy as np
-
+    from dtstylekit.color import hsv_saturation_array, luminance_array
     from dtstylekit.images import load_rgb_array
 
     arr = load_rgb_array(image_path)
 
-    lum = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
-    mx = arr.max(-1)
-    mn = arr.min(-1)
-    sat = mx - mn
-    hsv_sat = np.where(mx > 1e-6, sat / np.maximum(mx, 1e-6), 0.0)
+    lum = luminance_array(arr)
+    sat = arr.max(-1) - arr.min(-1)
+    hsv_sat = hsv_saturation_array(arr)
 
     # Shadows/highlights by luminance percentiles
     shadows_pct = float((lum < 0.15).mean())

@@ -16,6 +16,8 @@ from collections.abc import Iterable
 
 import numpy as np
 
+from dtstylekit.color import hsv_saturation_array
+
 from .models import LuminanceStats
 
 # Standard ITU-R BT.601 luma weights.
@@ -89,20 +91,14 @@ def _mean_saturation(rgb: np.ndarray) -> float:
     under HLS vs 0.15 true HSV, which then tripped the "colorful
     references" anti-mute guard and blocked legitimate desaturation).
     """
-    mx = rgb.max(axis=1)
-    mn = rgb.min(axis=1)
-    s = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
-    return float(s.mean())
+    return float(hsv_saturation_array(rgb).mean())
 
 
 def _saturation_p90(rgb: np.ndarray) -> float:
     """90th percentile of HSV saturation — the saturation *peaks* that
     define a look (neons, saturated skies), robust against large neutral
     areas that drag the mean down."""
-    mx = rgb.max(axis=1)
-    mn = rgb.min(axis=1)
-    s = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-9), 0.0)
-    return float(np.percentile(s, 90))
+    return float(np.percentile(hsv_saturation_array(rgb), 90))
 
 
 def _white_balance_ratio(mean_r: float, mean_b: float) -> float:

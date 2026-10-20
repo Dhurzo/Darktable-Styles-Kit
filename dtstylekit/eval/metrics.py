@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from dtstylekit.color import circular_diff as _circ_dist
+from dtstylekit.color import is_blown, is_crushed, is_red_cast
 
 
 @dataclass
@@ -59,15 +60,15 @@ class LookProfile:
 
     @property
     def has_red_cast(self) -> bool:
-        return self.r_over_g > 1.3 and self.r_mean > self.b_mean * 1.2
+        return is_red_cast(self.r_over_g, self.r_mean, self.b_mean)
 
     @property
     def is_crushed(self) -> bool:
-        return self.mean_luminance < 0.1
+        return is_crushed(self.mean_luminance)
 
     @property
     def is_blown(self) -> bool:
-        return self.mean_luminance > 0.9 or self.highlights_pct > 0.5
+        return is_blown(self.mean_luminance, self.highlights_pct)
 
     @property
     def safety_ok(self) -> bool:

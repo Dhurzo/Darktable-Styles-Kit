@@ -20,6 +20,7 @@ from PIL import Image, UnidentifiedImageError
 
 from dtstylekit.color import circular_diff as _circular_diff
 from dtstylekit.color import circular_mean as _circular_mean
+from dtstylekit.color import hsv_saturation_array, luminance_array
 
 from .exif import extract_exif
 from .histogram import compute_histogram
@@ -347,7 +348,7 @@ def analyze_reference_hues(reference_paths: list[Path]) -> ReferenceAnalysis:
             arr = np.asarray(img, dtype=np.float32) / 255.0
 
             # Luminance (BT.709 weighting matches the dependency on tonal masks)
-            lum = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
+            lum = luminance_array(arr)
             # Tonal masks
             shadows_mask = lum < 0.25
             midtones_mask = (lum >= 0.25) & (lum < 0.75)
@@ -604,18 +605,16 @@ def compute_reference_globals(reference_paths: list[Path]) -> ReferenceAnalysis:
         if arr.size == 0:
             continue
 
-        lum = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+        lum = luminance_array(arr)
         lums.append(float(lum.mean()))
         stds.append(float(lum.std()))
         drs.append(float(np.percentile(lum, 95) - np.percentile(lum, 5)))
 
-        mx = arr.max(axis=-1)
-        mn = arr.min(axis=-1)
-        delta = mx - mn
-        hsv = np.where(mx > 0, delta / np.maximum(mx, 1e-9), 0.0)
+        hsv = hsv_saturation_array(arr)
         sats.append(float(hsv.mean()))
         sats_p90.append(float(np.percentile(hsv, 90)))
         warmth.append(float((arr[..., 0] - arr[..., 2]).mean()))
+        delta = arr.max(axis=-1) - arr.min(axis=-1)
 
         mask = delta > 0.05
         if not np.any(mask):

@@ -31,6 +31,7 @@ import numpy as np
 from PIL import Image
 
 from dtstylekit.color import circular_diff as _circular_difference
+from dtstylekit.color import hsv_saturation_array, luminance_array
 
 from .noise import estimate_noise
 from .pipeline import analyze_reference_hues
@@ -235,15 +236,12 @@ def extract_reference_features(path: str | Path) -> ReferenceFeatures:
     if arr.size == 0:
         raise ValueError(f"empty image: {p}")
 
-    lum = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+    lum = luminance_array(arr)
     mean_lum = float(lum.mean())
     contrast = float(lum.std())
     quantiles = tuple(float(v) for v in np.percentile(lum, [q * 100.0 for q in _QUANTILES]))
 
-    mx = arr.max(axis=-1)
-    mn = arr.min(axis=-1)
-    delta = mx - mn
-    sat = np.where(mx > 0, delta / np.maximum(mx, 1e-9), 0.0)
+    sat = hsv_saturation_array(arr)
     saturation = float(sat.mean())
     saturation_p90 = float(np.percentile(sat, 90))
     warmth = float((arr[..., 0] - arr[..., 2]).mean())
@@ -260,7 +258,7 @@ def extract_reference_features(path: str | Path) -> ReferenceFeatures:
     small = image.copy()
     small.thumbnail((512, 512), Image.Resampling.BILINEAR)
     small_arr = np.asarray(small, dtype=np.float32) / 255.0
-    small_lum = 0.2126 * small_arr[..., 0] + 0.7152 * small_arr[..., 1] + 0.0722 * small_arr[..., 2]
+    small_lum = luminance_array(small_arr)
     gradient = 0.0
     if small_lum.shape[1] > 1:
         gradient += float(np.abs(np.diff(small_lum, axis=1)).mean())
