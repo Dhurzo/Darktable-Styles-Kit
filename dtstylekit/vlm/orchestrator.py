@@ -22,6 +22,7 @@ from dtstylekit.analyzer.reference_filter import (
 )
 from dtstylekit.composer.safety import safety_bake
 from dtstylekit.images import encode_base64
+from dtstylekit.presets.suitability import preset_ev_fits, preset_net_ev
 
 from .client import VLMClient
 from .iterative_refiner import iterative_refine
@@ -51,6 +52,7 @@ def generate_style_spec(
     references: list[str | Path] | None = None,
     reference_filter: ReferenceFilterConfig | None = None,
     reference_filter_result: ReferenceFilterResult | None = None,
+    reference_analysis: dict | None = None,
     refine_iterations: int = 0,  # 0 = no iterative refinement
     refine_raw_path: str | Path | None = None,  # RAW file for test renders
     bake_path: str | Path | None = None,  # image used for safety-bake renders
@@ -78,6 +80,8 @@ def generate_style_spec(
         reference_filter_result: Pre-computed filter result (for callers
             that need the per-reference report).  When supplied, the
             filter is not run again.
+        reference_analysis: Pre-computed reference signature. When supplied,
+            it is reused instead of re-analyzing the filtered references.
         refine_iterations: If >0, run iterative generate→render→eval loop
             using ``refine_raw_path`` as test RAW. Each iteration re-prompts
             the VLM with visual feedback from the previous render.
@@ -98,7 +102,7 @@ def generate_style_spec(
     #     semantic preset search from the reference aesthetic (not the literal
     #     direction string) and (b) feed the prompt.  Computed once here and
     #     reused below (no double analysis).
-    reference_analysis: dict | None = None
+    reference_analysis = reference_analysis if references else None
     reference_paths: list[Path] = []
     reference_b64s: list[str] = []
     reference_warnings: list[str] = []
@@ -125,7 +129,7 @@ def generate_style_spec(
                 logger.info("Attaching reference image: %s", ref)
             except Exception as e:
                 logger.warning("Could not encode reference image %s: %s", ref, e)
-        if reference_paths:
+        if reference_paths and reference_analysis is None:
             logger.info("Analyzing reference signature with Python...")
             try:
                 reference_analysis = compute_reference_signature(reference_paths)
@@ -137,16 +141,16 @@ def generate_style_spec(
                     reference_analysis = analyze_reference_hues(reference_paths)
                 except Exception as hue_exc:
                     logger.warning("Reference hue analysis failed: %s", hue_exc)
-            if reference_analysis:
-                logger.info(
-                    "Reference signature: luminance=%.3f saturation=%.3f "
-                    "warmth=%+.3f contrast=%.3f DR=%.3f",
-                    reference_analysis.get("global_luminance", 0.0),
-                    reference_analysis.get("global_saturation", 0.0),
-                    reference_analysis.get("global_warmth_rb", 0.0),
-                    reference_analysis.get("global_contrast", 0.0),
-                    reference_analysis.get("global_dynamic_range", 0.0),
-                )
+        if reference_analysis:
+            logger.info(
+                "Reference signature: luminance=%.3f saturation=%.3f "
+                "warmth=%+.3f contrast=%.3f DR=%.3f",
+                reference_analysis.get("global_luminance", 0.0),
+                reference_analysis.get("global_saturation", 0.0),
+                reference_analysis.get("global_warmth_rb", 0.0),
+                reference_analysis.get("global_contrast", 0.0),
+                reference_analysis.get("global_dynamic_range", 0.0),
+            )
 
     # 2. Search presets.  When references are supplied, build the query from
     #    the *reference* look (so search returns the creative presets that
@@ -504,50 +508,10 @@ def _reference_query(reference_analysis: dict) -> str:
 
 
 def _preset_net_ev(preset: Preset) -> float:
-    """Net exposure EV contributed by a preset's *enabled* exposure IOPs.
-
-    Decodes the exposure blobs (v6 or v7 layout) and sums their
-    ``exposure`` field.  A preset like "day for twilight" contributes
-    -1.0 EV; a plain color preset contributes 0.0.
-    """
-    from dtstylekit.codec.iop_registry import unpack_params
-    from dtstylekit.codec.xmp_codec import decode_xmp
-
-    ev = 0.0
-    for plg in preset.plugins:
-        if plg.operation != "exposure" or not plg.enabled or not plg.op_params:
-            continue
-        try:
-            params = unpack_params("exposure", decode_xmp(plg.op_params))
-            ev += float(params.get("exposure", 0.0))
-        except Exception:
-            continue
-    return ev
+    """Compatibility shim for :func:`dtstylekit.presets.suitability.preset_net_ev`."""
+    return preset_net_ev(preset)
 
 
 def _preset_ev_fits(preset: Preset, mean_lum: float) -> bool:
-    """Whether a preset's net exposure suits the image's brightness.
-
-    Dark images (mean luminance < 0.3) are crushed by darkening presets
-    (net EV < -0.3); bright images (> 0.7) are blown out by brightening
-    presets (net EV > +0.3).  Everything else is acceptable.
-
-    In addition, for dark images we drop dehaze/defog presets by name:
-    hazeremoval is not in the IOP registry (its blob cannot be decoded
-    for a net-EV estimate), but dehaze removes atmospheric brightness,
-    which empirically crushes dark images (gemma3:12b picked "dehaze
-    strong luminance only" for a night photo and pushed 61% of pixels
-    below 10/255).
-    """
-    ev = _preset_net_ev(preset)
-    if mean_lum < 0.3 and ev < -0.3:
-        return False
-    if mean_lum > 0.7 and ev > 0.3:
-        return False
-    if mean_lum < 0.3:
-        name = " ".join(
-            part.lower() for part in (preset.name, getattr(preset, "description", "") or "") if part
-        )
-        if any(kw in name for kw in ("dehaze", "defog", "fog", "mist")):
-            return False
-    return True
+    """Compatibility shim for :func:`dtstylekit.presets.suitability.preset_ev_fits`."""
+    return preset_ev_fits(preset, mean_lum)

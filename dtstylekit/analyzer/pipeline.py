@@ -353,90 +353,20 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
             midtones_mask = (lum >= 0.25) & (lum < 0.75)
             highlights_mask = lum >= 0.75
 
-            def analyze_tonal_range(
-                mask: np.ndarray, arr: np.ndarray = arr
-            ) -> tuple[list[float], list[float], float, int, float, str]:
-                """Returns (hue_list, sat_weights, mean_sat, valid_count, confidence, hue_mode)."""
-                if not np.any(mask):
-                    return [], [], 0.0, 0, 0.0, "neutral"
-
-                # Per-pixel max/min/delta (RGB)
-                px_max = np.max(arr, axis=2)
-                px_min = np.min(arr, axis=2)
-                delta = px_max - px_min
-                sat_in_range = delta[mask]
-                mean_sat = float(np.mean(sat_in_range))
-
-                # Hito 6B — volume rule: a zone whose mean saturation sits
-                # below MIN_SATURATION_FOR_HUE but that still holds a large
-                # volume of mildly-saturated pixels (delta > 0.05) is real
-                # color data (e.g. warm shadows at sat 0.10–0.14 over 550k
-                # px). Only veto when there is NO volume of saturated pixels.
-                valid_mask = mask & (delta > 0.05)
-                valid_count = int(np.sum(valid_mask))
-                if valid_count < MIN_VALID_PIXELS:
-                    return [], [], mean_sat, valid_count, 0.0, "neutral"
-
-                r = arr[valid_mask, 0]
-                g = arr[valid_mask, 1]
-                b = arr[valid_mask, 2]
-                max_c = np.maximum(np.maximum(r, g), b)
-                min_c = np.minimum(np.minimum(r, g), b)
-                delta_c = max_c - min_c
-
-                # Per-pixel hue (0-360)
-                hue = np.zeros_like(r)
-                idx = delta_c > 0.01
-                r_idx = (max_c == r) & idx
-                g_idx = (max_c == g) & idx
-                b_idx = (max_c == b) & idx
-                hue[r_idx] = (60 * ((g[r_idx] - b[r_idx]) / delta_c[r_idx]) + 360) % 360
-                hue[g_idx] = (60 * ((b[g_idx] - r[g_idx]) / delta_c[g_idx]) + 120) % 360
-                hue[b_idx] = (60 * ((r[b_idx] - g[b_idx]) / delta_c[b_idx]) + 240) % 360
-
-                weights = delta_c[idx] ** SATURATION_WEIGHT_POWER
-                hues_list = hue[idx].tolist()
-                w_list = weights.tolist()
-
-                # Confidence: combined valid-pixel count + saturation level
-                # (Hito 6B: softer saturation scale, /0.20 instead of /0.30).
-                conf = min(1.0, valid_count / (MIN_VALID_PIXELS * 10)) * min(1.0, mean_sat / 0.20)
-                return hues_list, w_list, mean_sat, valid_count, conf, "unknown"
-
-            sh = analyze_tonal_range(shadows_mask)
-            mt = analyze_tonal_range(midtones_mask)
-            hi = analyze_tonal_range(highlights_mask)
-
-            def _pack(z: tuple[list[float], list[float], float, int, float, str]) -> dict:
-                # Detect bimodality *within this single reference* — distinguishes
-                # an intentional two-color grade (e.g. teal shadows + warm
-                # highlights in one Blade Runner frame) from "two references that
-                # happen to disagree" (e.g. one warm photo + one cool photo). Only
-                # the former should propagate as `bi`; the latter must collapse to
-                # neutral so we don't invent a tint.
-                bi = _detect_bimodal(z[0], z[1]) if z[0] else None
-                # Per-reference circular mean hue — the unit the Hito 6A vote
-                # operates on. A bimodal reference's average is meaningless for
-                # voting, so it contributes None (Case 1 handles it separately).
-                hue_mean = None
-                if bi is None and z[0]:
-                    hue_mean = _circular_mean(z[0], z[1])
-                return {
-                    "hues": z[0],
-                    "weights": z[1],
-                    "sat": z[2],
-                    "count": z[3],
-                    "conf": z[4],
-                    "hue_mean": hue_mean,
-                    "is_bi": bi is not None,
-                    "bi_primary": bi[0] if bi else None,
-                    "bi_secondary": bi[1] if bi else None,
-                }
+            sh = _analyze_tonal_range(
+                shadows_mask, arr, MIN_VALID_PIXELS, SATURATION_WEIGHT_POWER
+            )
+            mt = _analyze_tonal_range(
+                midtones_mask, arr, MIN_VALID_PIXELS, SATURATION_WEIGHT_POWER
+            )
+            hi = _analyze_tonal_range(
+                highlights_mask, arr, MIN_VALID_PIXELS, SATURATION_WEIGHT_POWER
+            )
 
             ref_entry = {
-                "shadows": _pack(sh),
-                "midtones": _pack(mt),
-                "highlights": _pack(hi),
+                "shadows": _pack_zone_stats(sh),
+                "midtones": _pack_zone_stats(mt),
+                "highlights": _pack_zone_stats(hi),
             }
 
             # Hito 6C — per-reference "global grade" detection: the three zone
@@ -487,105 +417,9 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
     # carry one coherent tint across the whole tonal range.
     global_share = sum(1 for d in ref_data if d.get("is_global")) / len(ref_data)
 
-    def _zone_combine(zone_key: str) -> dict:
-        """Combine one zone across all references with circular stats + bimodal detection.
-
-        Decision rule:
-          1. If ANY reference is internally bimodal in this zone (e.g. one photo
-             with two distinct color grades), aggregate its peaks + the
-             monomodal hues of the rest into a `bi` result. This is the
-             intentional-orange-and-teal case.
-          2. Otherwise (all refs individually monomodal), run a majority-
-             consensus circular vote (Hito 6A): the consensus band ±30° is
-             found iteratively over per-reference hues and the share of refs
-             inside it is the confidence. `agree > 0.6` → `mono` (or `global`
-             when most refs share one coherent tint across zones, Hito 6C);
-             `agree <= 0.6` → `neutral`, no tint is forced.
-        """
-        all_hues = []
-        all_weights = []
-        sats = []
-        confs = []
-        any_internal_bi = False
-        bi_primary = None
-        bi_secondary = None
-        for d in ref_data:
-            z = d[zone_key]
-            if z.get("is_bi"):
-                any_internal_bi = True
-                bi_primary = z["bi_primary"]
-                bi_secondary = z["bi_secondary"]
-            if z["hues"]:
-                all_hues.extend(z["hues"])
-                all_weights.extend(z["weights"])
-            sats.append(z["sat"])
-            confs.append(z["conf"])
-
-        mean_sat = float(np.mean(sats)) if sats else 0.0
-        mean_conf = float(np.mean(confs)) if confs else 0.0
-
-        if not all_hues:
-            return {
-                "hue": None,
-                "hue_secondary": None,
-                "sat": mean_sat,
-                "conf": 0.0,
-                "mode": "neutral",
-            }
-
-        # Case 1: at least one reference was internally bimodal → emit `bi`.
-        # Prefer an internally-bimodal ref's primary as the zone hue; the
-        # aggregate circular mean becomes the secondary if no internal one exists.
-        if any_internal_bi:
-            # Fall back to aggregate circular mean if needed
-            if bi_primary is None:
-                bi_primary = _circular_mean(all_hues, all_weights)
-            return {
-                "hue": bi_primary,
-                "hue_secondary": bi_secondary,
-                "sat": mean_sat,
-                "conf": max(mean_conf, 0.55),
-                "mode": "bi",
-            }
-
-        # Case 2: all refs monomodal → majority-consensus vote (Hito 6A).
-        # A single disagreeing reference no longer vetoes the set: the vote
-        # finds the majority band (±30°) iteratively and the share of refs
-        # inside it becomes the confidence.
-        ref_zone_hues = [
-            d[zone_key]["hue_mean"] for d in ref_data if d[zone_key].get("hue_mean") is not None
-        ]
-        ref_zone_weights = [
-            d[zone_key]["conf"] for d in ref_data if d[zone_key].get("hue_mean") is not None
-        ]
-        consensus, agree_flat, agree_weighted = _consensus_vote(ref_zone_hues, ref_zone_weights)
-        if agree_weighted <= 0.6:  # no weighted majority → neutral
-            return {
-                "hue": None,
-                "hue_secondary": None,
-                "sat": mean_sat,
-                "conf": 0.0,
-                "mode": "neutral",
-            }
-        # Confidence: majority share of references (agree_flat, per the
-        # plan "voto 4/5 → 0.8"), unless a single reference carries the
-        # whole signal (then mean_conf is the honest estimate).
-        conf = max(mean_conf, agree_flat) if len(ref_zone_hues) > 1 else mean_conf
-        # Hito 6C: most references share one coherent tint across the whole
-        # tonal range → report the mode as 'global' (each zone keeps its own
-        # consensus hue; the mode marks it an intentional uniform grade).
-        mode = "global" if global_share >= 0.6 else "mono"
-        return {
-            "hue": consensus,
-            "hue_secondary": None,
-            "sat": mean_sat,
-            "conf": conf,
-            "mode": mode,
-        }
-
-    shc = _zone_combine("shadows")
-    mtc = _zone_combine("midtones")
-    hic = _zone_combine("highlights")
+    shc = _combine_reference_zones("shadows", ref_data, global_share)
+    mtc = _combine_reference_zones("midtones", ref_data, global_share)
+    hic = _combine_reference_zones("highlights", ref_data, global_share)
 
     return {
         "shadows_hue": shc["hue"],
@@ -603,6 +437,140 @@ def analyze_reference_hues(reference_paths: list[Path]) -> dict:
         "shadows_hue_mode": shc["mode"],
         "midtones_hue_mode": mtc["mode"],
         "highlights_hue_mode": hic["mode"],
+    }
+
+
+def _analyze_tonal_range(
+    mask: np.ndarray,
+    arr: np.ndarray,
+    min_valid_pixels: int,
+    saturation_weight_power: float,
+) -> tuple[list[float], list[float], float, int, float, str]:
+    """Return ``(hue_list, sat_weights, mean_sat, valid_count, conf, hue_mode)``."""
+    if not np.any(mask):
+        return [], [], 0.0, 0, 0.0, "neutral"
+
+    px_max = np.max(arr, axis=2)
+    px_min = np.min(arr, axis=2)
+    delta = px_max - px_min
+    sat_in_range = delta[mask]
+    mean_sat = float(np.mean(sat_in_range))
+
+    valid_mask = mask & (delta > 0.05)
+    valid_count = int(np.sum(valid_mask))
+    if valid_count < min_valid_pixels:
+        return [], [], mean_sat, valid_count, 0.0, "neutral"
+
+    r = arr[valid_mask, 0]
+    g = arr[valid_mask, 1]
+    b = arr[valid_mask, 2]
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    delta_c = max_c - min_c
+
+    hue = np.zeros_like(r)
+    idx = delta_c > 0.01
+    r_idx = (max_c == r) & idx
+    g_idx = (max_c == g) & idx
+    b_idx = (max_c == b) & idx
+    hue[r_idx] = (60 * ((g[r_idx] - b[r_idx]) / delta_c[r_idx]) + 360) % 360
+    hue[g_idx] = (60 * ((b[g_idx] - r[g_idx]) / delta_c[g_idx]) + 120) % 360
+    hue[b_idx] = (60 * ((r[b_idx] - g[b_idx]) / delta_c[b_idx]) + 240) % 360
+
+    weights = delta_c[idx] ** saturation_weight_power
+    hues_list = hue[idx].tolist()
+    w_list = weights.tolist()
+
+    conf = min(1.0, valid_count / (min_valid_pixels * 10)) * min(1.0, mean_sat / 0.20)
+    return hues_list, w_list, mean_sat, valid_count, conf, "unknown"
+
+
+def _pack_zone_stats(z: tuple[list[float], list[float], float, int, float, str]) -> dict:
+    """Pack one tonal zone's stats and detect bimodality within a reference."""
+    bi = _detect_bimodal(z[0], z[1]) if z[0] else None
+    hue_mean = None
+    if bi is None and z[0]:
+        hue_mean = _circular_mean(z[0], z[1])
+    return {
+        "hues": z[0],
+        "weights": z[1],
+        "sat": z[2],
+        "count": z[3],
+        "conf": z[4],
+        "hue_mean": hue_mean,
+        "is_bi": bi is not None,
+        "bi_primary": bi[0] if bi else None,
+        "bi_secondary": bi[1] if bi else None,
+    }
+
+
+def _combine_reference_zones(zone_key: str, ref_data: list[dict], global_share: float) -> dict:
+    """Combine one zone across all references with circular stats + bimodality."""
+    all_hues = []
+    all_weights = []
+    sats = []
+    confs = []
+    any_internal_bi = False
+    bi_primary = None
+    bi_secondary = None
+    for d in ref_data:
+        z = d[zone_key]
+        if z.get("is_bi"):
+            any_internal_bi = True
+            bi_primary = z["bi_primary"]
+            bi_secondary = z["bi_secondary"]
+        if z["hues"]:
+            all_hues.extend(z["hues"])
+            all_weights.extend(z["weights"])
+        sats.append(z["sat"])
+        confs.append(z["conf"])
+
+    mean_sat = float(np.mean(sats)) if sats else 0.0
+    mean_conf = float(np.mean(confs)) if confs else 0.0
+
+    if not all_hues:
+        return {
+            "hue": None,
+            "hue_secondary": None,
+            "sat": mean_sat,
+            "conf": 0.0,
+            "mode": "neutral",
+        }
+
+    if any_internal_bi:
+        if bi_primary is None:
+            bi_primary = _circular_mean(all_hues, all_weights)
+        return {
+            "hue": bi_primary,
+            "hue_secondary": bi_secondary,
+            "sat": mean_sat,
+            "conf": max(mean_conf, 0.55),
+            "mode": "bi",
+        }
+
+    ref_zone_hues = [
+        d[zone_key]["hue_mean"] for d in ref_data if d[zone_key].get("hue_mean") is not None
+    ]
+    ref_zone_weights = [
+        d[zone_key]["conf"] for d in ref_data if d[zone_key].get("hue_mean") is not None
+    ]
+    consensus, agree_flat, agree_weighted = _consensus_vote(ref_zone_hues, ref_zone_weights)
+    if agree_weighted <= 0.6:
+        return {
+            "hue": None,
+            "hue_secondary": None,
+            "sat": mean_sat,
+            "conf": 0.0,
+            "mode": "neutral",
+        }
+    conf = max(mean_conf, agree_flat) if len(ref_zone_hues) > 1 else mean_conf
+    mode = "global" if global_share >= 0.6 else "mono"
+    return {
+        "hue": consensus,
+        "hue_secondary": None,
+        "sat": mean_sat,
+        "conf": conf,
+        "mode": mode,
     }
 
 

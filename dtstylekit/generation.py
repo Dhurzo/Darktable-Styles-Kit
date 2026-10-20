@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 
 from dtstylekit.paths import get_generated_dir
 
-from .analyzer.pipeline import analyze_image
+from .analyzer.pipeline import analyze_image, compute_reference_signature
 from .analyzer.reference_filter import ReferenceFilterConfig, filter_references
 from .codec.iop_registry import IOP_REGISTRY
 from .presets.resolver import PresetResolver
@@ -61,6 +61,7 @@ class GenerationResult:
     presets: list[Preset] = field(default_factory=list)
     references: list[Path] = field(default_factory=list)
     filter_result: ReferenceFilterResult | None = None
+    reference_analysis: dict | None = None
     raw_response: str | None = None
 
 
@@ -91,6 +92,13 @@ class GenerationService:
     def generate(self, request: GenerationRequest) -> GenerationResult:
         references, filter_result = self._filter_references(request)
 
+        reference_analysis: dict | None = None
+        if references:
+            try:
+                reference_analysis = compute_reference_signature(references)
+            except Exception as exc:
+                logger.warning("Reference signature analysis failed: %s", exc)
+
         result = generate_style_spec(
             image_path=request.image_path,
             direction=request.direction,
@@ -102,6 +110,7 @@ class GenerationService:
             references=[str(path) for path in references] or None,
             reference_filter=request.reference_filter,
             reference_filter_result=filter_result,
+            reference_analysis=reference_analysis,
             refine_iterations=request.refine_iterations,
             refine_raw_path=request.refine_raw_path,
             bake_path=request.bake_path,
@@ -133,6 +142,7 @@ class GenerationService:
             presets=resolved,
             references=references,
             filter_result=filter_result,
+            reference_analysis=reference_analysis,
             raw_response=raw_response,
         )
 
@@ -184,7 +194,9 @@ class GenerationService:
         if result.references:
             explanation_path = output_dir / f"{stem}_EXPLICACION.md"
             try:
-                reference_analysis = analyze_reference_hues(result.references)
+                reference_analysis = result.reference_analysis
+                if reference_analysis is None:
+                    reference_analysis = analyze_reference_hues(result.references)
                 generate_explanation(
                     result.spec,
                     result.presets,

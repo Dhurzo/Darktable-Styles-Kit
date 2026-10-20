@@ -407,398 +407,16 @@ def build_prompt(
         List of message dicts compatible with ollama.chat().
     """
     analysis.to_prompt_dict()
-    # Compact preset list (top 5)
-    from dtstylekit.presets.models import clean_description, derive_display_name
 
-    # Exposure guardrail.  The VLM receives the image analysis JSON, but
-    # gemma3:12b repeatedly stacked darkening
-    # presets ("day for twilight", -1 EV) onto already-dark images,
-    # crushing the output to near black.  State the rule explicitly so
-    # the model has an actionable constraint instead of raw numbers.
-    mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
-    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
-        mean_lum = None
-    guard: str = ""
-    if mean_lum is not None and mean_lum < 0.3:
-        guard = (
-            f"\n[EXPOSURE GUARD - DARK IMAGE (mean {mean_lum:.2f})]\n"
-            f"• Do NOT create a NEW filmicrgb instance from scratch - it re-maps "
-            f"display-referred data through the scene tone-mapper and crushes shadows. "
-            f"• For contrast use SIGMOID (scene-referred, safe) with middle_grey_contrast 1.1–4.0. "
-            f"• exposure.black MUST stay 0.0 (or at most +0.005); do NOT lift shadows with negative black. "
-            f"• Prefer colorbalancergb/tone curves for shadow lifting; keep exposure.exposure within -0.5..+0.5. "
-            f"• colorbalancergb: shadows_Y -0.3..0 for moody shadows (NEVER < -0.3). "
-            f"• NEVER dehaze/defog, NEVER negative shadows_Y/shadhi.shadows.\n"
-        )
-    elif mean_lum is not None and mean_lum > 0.7:
-        guard = (
-            f"\n[EXPOSURE GUARD]\nThe image is BRIGHT (mean luminance {mean_lum:.2f} "
-            f"on 0-1). NEVER select presets that brighten the image further "
-            f"(they will blow out highlights). Prefer presets that preserve "
-            f"exposure or slightly darken.\n"
-        )
+    guard = _build_exposure_guard(analysis)
+    tech_diagnosis = _build_technical_diagnosis(analysis)
+    preset_summaries = _summarize_presets(presets, bool(reference_b64s))
 
-    # ─── PRE-COMPUTED TECHNICAL DIAGNOSIS FOR VLM ───
-    # This gives the VLM a head-start on Step 1-2 of the analytical framework
-    lum = getattr(analysis, "luminance", None)
-    hist = getattr(analysis, "histogram", None)
-    diagnosis_parts = []
-
-    if lum is not None:
-        # Tonal diagnosis
-        contrast_level = (
-            "low" if (lum.std or 0) < 0.15 else ("high" if (lum.std or 0) > 0.25 else "medium")
-        )
-        brightness = (
-            "dark" if (lum.mean or 0) < 0.3 else ("bright" if (lum.mean or 0) > 0.7 else "balanced")
-        )
-        diagnosis_parts.append(
-            f"TONAL: {brightness} (mean={lum.mean:.2f}), {contrast_level} contrast (std={lum.std:.2f}), "
-            f"shadows={lum.shadows_pct:.0%}, midtones={lum.midtones_pct:.0%}, highlights={lum.highlights_pct:.0%}"
-        )
-
-        # Color diagnosis
-        wb = lum.white_balance_ratio_rb or 1.0
-        wb_desc = "neutral" if 0.95 < wb < 1.05 else ("warm" if wb > 1.05 else "cool")
-        sat_level = (
-            "low"
-            if (lum.saturation_mean or 0) < 0.15
-            else ("high" if (lum.saturation_mean or 0) > 0.35 else "medium")
-        )
-        diagnosis_parts.append(
-            f"COLOR: {wb_desc} cast (R/B={wb:.2f}), {sat_level} saturation (mean={lum.saturation_mean:.2f})"
-        )
-
-        # Mood diagnosis
-        if (lum.mean or 0) < 0.3 and (lum.std or 0) < 0.2:
-            mood = "flat/dark - needs contrast + shadow definition"
-        elif (lum.mean or 0) < 0.3 and (lum.std or 0) >= 0.2:
-            mood = "contrasty/dark - moody, preserve drama"
-        elif (lum.mean or 0) > 0.7:
-            mood = "bright - protect highlights, add depth"
-        else:
-            mood = "balanced - creative grading opportunity"
-        diagnosis_parts.append(f"MOOD: {mood}")
-
-    if hist is not None:
-        r_mean, g_mean, b_mean = hist.mean_red, hist.mean_green, hist.mean_blue
-        cast = ""
-        if r_mean > g_mean * 1.1 and r_mean > b_mean * 1.1:
-            cast = "red/magenta cast"
-        elif b_mean > r_mean * 1.1 and b_mean > g_mean * 1.1:
-            cast = "blue/cyan cast"
-        elif g_mean > r_mean * 1.1 and g_mean > b_mean * 1.1:
-            cast = "green cast"
-        if cast:
-            diagnosis_parts.append(
-                f"CHANNEL CAST: {cast} (R={r_mean:.2f} G={g_mean:.2f} B={b_mean:.2f})"
-            )
-
-    tech_diagnosis = (
-        "\n".join(diagnosis_parts) if diagnosis_parts else "(insufficient analysis data)"
+    relevance_note, preset_note, pipeline_note = _build_preset_notes(
+        preset_summaries, bool(reference_b64s)
     )
 
-    preset_summaries = []
-    for p in presets[: 8 if reference_b64s else 5]:
-        ops = [plg.operation for plg in p.plugins if plg.enabled]
-        # The .dtstyle filename (e.g. "examples_colors_sepia.dtstyle").
-        try:
-            filename = p.file_path.name if p.file_path else (getattr(p, "name", "") or "")
-        except AttributeError:
-            filename = getattr(p, "name", "") or ""
-        # Use the cleaned display name ("sepia", "faded") when available.
-        display_name = derive_display_name(getattr(p, "name", "") or "") or filename
-        description = clean_description(getattr(p, "description", "") or "") or "(no description)"
-        preset_summaries.append(
-            {
-                "filename": filename,
-                "name": display_name,
-                "description": description[:200],
-                "operations": list(dict.fromkeys(ops))[:10],
-            }
-        )
-
-    # Detect if candidates are relevant: check if any has operations matching
-    # the desired style (film, color, tone). If not, add explicit guidance.
-    has_relevant = any(
-        any(
-            op
-            in (
-                "filmicrgb",
-                "colorbalancergb",
-                "sigmoid",
-                "exposure",
-                "tonecurve",
-                "rgbcurve",
-                "colorzones",
-            )
-            for op in p.get("operations", [])
-        )
-        for p in preset_summaries
-    )
-    relevance_note = ""
-    if not has_relevant and preset_summaries:
-        relevance_note = (
-            f"\n[RELEVANCE WARNING] None of the {len(preset_summaries)} candidate presets "
-            f"contain the core grading IOPs (filmicrgb, colorbalancergb, sigmoid, tonecurve). "
-            f"DO NOT select any of them - use selected_presets: [] and create the look "
-            f"entirely via `adjustments` targeting the available IOPs.\n"
-        )
-    # CRITICAL: Curve template names (s_strong, inverted_s_strong, sepia_warm, etc.) are NOT preset filenames.
-    # They are used ONLY in adjustments.tonecurve.curve_preset or adjustments.colorzones.curve_preset.
-    if reference_b64s:
-        # Reference-driven generation: the attached references DEFINE the target
-        # look, so the VLM should COMPOSE FROM the closest matching candidate
-        # preset (which supplies the real baseline tone map + grade) and then
-        # refine it with adjustments. This engages the headline "compose from 534
-        # presets" feature instead of re-deriving the whole look from scratch.
-        preset_note = (
-            "\n[PRESET SELECTION RULE - REFERENCE LOOK] The attached reference images define the TARGET LOOK. "
-            "Among the CANDIDATE PRESETS listed above, you MUST SELECT the one that closest matches the reference "
-            "aesthetic (e.g. a warm monochrome reference -> choose the 'sepia' preset; a vivid saturated "
-            "reference -> choose the 'extreme saturation' preset) and put its EXACT filename in "
-            "selected_presets: [\"examples_colors_sepia.dtstyle\"]. Then apply the reference-derived adjustments ON TOP of "
-            "that preset's baseline (the preset supplies the tone map and base grade; your adjustments refine it). "
-            "Example: \"selected_presets\": [\"examples_colors_autumn.dtstyle\"]. "
-            "If NONE of the candidates resemble the reference, use selected_presets: []. "
-            "Curve template names (s_strong, inverted_s_strong, sepia_warm, matte_film, ...) are NOT "
-            "preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset / colorzones.curve_preset.\n"
-        )
-    else:
-        preset_note = (
-            "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
-            "Curve template names like 's_strong', 'inverted_s_strong', 'lift_medium', "
-            "'sepia_warm', 'shadow_cool', 'matte_film', 'bleach_bypass' "
-            "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
-            "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
-            "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
-            "and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
-            "add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
-        )
-    # PIPELINE RULE: This style will be applied to RAW files via darktable-cli.
-    # darktable adds a DEFAULT filmicrgb instance to RAW files automatically.
-    # DO NOT use sigmoid for tone mapping - it will stack with default filmicrgb and produce broken/dark images.
-    # INSTEAD: Use filmicrgb for tone mapping (it will OVERRIDE the default).
-    # Use colorbalancergb for color grading (match reference hues), tonecurve/colorzones for curves.
-    pipeline_note = (
-        "\n[PIPELINE RULE - RAW COMPATIBILITY] This style targets RAW files. "
-        "darktable-cli applies a DEFAULT filmicrgb to RAW automatically. "
-        "• DO NOT use sigmoid - it stacks with default filmicrgb = double tone-mapping = crushed/blue images. "
-        "• USE filmicrgb for tone mapping: contrast=1.4–1.7 (moderate cinematic), latitude=2–4, saturation=-15 to -35, balance=-3 to +3 (NEVER ≤ -10). "
-        "• This filmicrgb will REPLACE the default, not stack. "
-        "• Use colorbalancergb for color grading (shadows/midtones/highlights split - MATCH reference hues). "
-        "• Use tonecurve.curve_preset='s_soft' (or 's_strong') and colorzones.curve_preset='identity' for curves."
-    )
-
-    if reference_b64s:
-        # Include pre-computed reference hues from Python analysis if available
-        ref_hues_lines = []
-        ref_instructions = []
-
-        if reference_analysis:
-            # Shadows
-            sh = reference_analysis.get("shadows_hue")
-            sh_conf = reference_analysis.get("shadows_hue_confidence", 0)
-            sh_mode = reference_analysis.get("shadows_hue_mode", "neutral")
-            sh_sec = reference_analysis.get("shadows_hue_secondary")
-            # CONFIDENCE THRESHOLD: only apply color grading when Python analysis
-            # is HIGH confidence (>=0.7). Otherwise respect the target photo's
-            # original colors (hue=0°, chroma=0). This stops the system from
-            # inventing a warm/cool tint when references are neutral (e.g. Alen
-            # Palander). Photographers with CLEAR grading (Nolan Batman blues,
-            # Blade Runner) will exceed 0.7 and apply the actual hue.
-            if sh is not None and sh_conf >= 0.7:
-                ref_hues_lines.append(
-                    f"  shadows_hue = {sh:.1f}° (confidence={sh_conf:.2f}, mode={sh_mode})"
-                )
-                ref_instructions.append(
-                    f"  -> SET shadows_H = {sh:.1f}° (from Python analysis, confidence={sh_conf:.2f})"
-                )
-                if sh_mode == "bi" and sh_sec is not None:
-                    ref_instructions.append(
-                        f"     NOTE: reference has bi-modal color in SHADOWS: primary {sh:.1f}°, secondary {sh_sec:.1f}° "
-                        f"(e.g. teal shadows + warm accents). Apply primary {sh:.1f}° as shadows_H and keep shadows_C "
-                        f"modest (<=0.10) so the secondary tone is not muted."
-                    )
-            else:
-                ref_instructions.append(
-                    "  -> SET shadows_H = 0° (NEUTRAL - reference has no clear shadow grading; respect target colors)"
-                )
-
-            # Midtones
-            mh = reference_analysis.get("midtones_hue")
-            mh_conf = reference_analysis.get("midtones_hue_confidence", 0)
-            mh_mode = reference_analysis.get("midtones_hue_mode", "neutral")
-            mh_sec = reference_analysis.get("midtones_hue_secondary")
-            if mh is not None and mh_conf >= 0.7:
-                ref_hues_lines.append(
-                    f"  midtones_hue = {mh:.1f}° (confidence={mh_conf:.2f}, mode={mh_mode})"
-                )
-                ref_instructions.append(
-                    f"  -> SET midtones_H = {mh:.1f}° (from Python analysis, confidence={mh_conf:.2f})"
-                )
-                if mh_mode == "bi" and mh_sec is not None:
-                    ref_instructions.append(
-                        f"     NOTE: reference has bi-modal color in MIDTONES: primary {mh:.1f}°, secondary {mh_sec:.1f}°. "
-                        f"Apply primary {mh:.1f}° as midtones_H and keep midtones_C modest (<=0.08) - midtones carry skin tones."
-                    )
-            else:
-                ref_instructions.append(
-                    "  -> SET midtones_H = 0° (NEUTRAL - reference has no clear midtone grading; respect target colors)"
-                )
-
-            # Highlights
-            hh = reference_analysis.get("highlights_hue")
-            hh_conf = reference_analysis.get("highlights_hue_confidence", 0)
-            hh_mode = reference_analysis.get("highlights_hue_mode", "neutral")
-            hh_sec = reference_analysis.get("highlights_hue_secondary")
-            if hh is not None and hh_conf >= 0.7:
-                ref_hues_lines.append(
-                    f"  highlights_hue = {hh:.1f}° (confidence={hh_conf:.2f}, mode={hh_mode})"
-                )
-                ref_instructions.append(
-                    f"  -> SET highlights_H = {hh:.1f}° (from Python analysis, confidence={hh_conf:.2f})"
-                )
-                if hh_mode == "bi" and hh_sec is not None:
-                    ref_instructions.append(
-                        f"     NOTE: reference has bi-modal color in HIGHLIGHTS: primary {hh:.1f}°, secondary {hh_sec:.1f}°. "
-                        f"Apply primary {hh:.1f}° as highlights_H and keep highlights_C modest (<=0.05) - highlights clip easily."
-                    )
-            else:
-                ref_instructions.append(
-                    "  -> SET highlights_H = 0° (NEUTRAL - reference has no clear highlight grading; respect target colors)"
-                )
-
-            # Saturation (always include)
-            ss = reference_analysis.get("shadows_sat", 0)
-            ms = reference_analysis.get("midtones_sat", 0)
-            hs = reference_analysis.get("highlights_sat", 0)
-            ref_hues_lines.append(f"  shadows_sat = {ss:.3f}")
-            ref_hues_lines.append(f"  midtones_sat = {ms:.3f}")
-            ref_hues_lines.append(f"  highlights_sat = {hs:.3f}")
-
-            # Global HSV saturation (mean over references).  The per-zone
-            # *_sat values above use ABSOLUTE RGB deltas averaged over ALL
-            # pixels of the zone; on low-key photography (most pixels in
-            # shadows) they under-report how colorful the references really
-            # are (Palander: zones 0.04–0.08 vs HSV mean ~0.30).  The
-            # global HSV mean is the TRUE colorfulness — saturation
-            # decisions (filmicrgb.saturation / vibrance) must use it, not
-            # the depressed per-zone deltas.
-            gsat = reference_analysis.get("global_saturation")
-            if isinstance(gsat, int | float) and not isinstance(gsat, bool):
-                ref_hues_lines.append(
-                    f"  global_saturation (HSV) = {gsat:.3f}  <- TRUE colorfulness of the references"
-                )
-                if gsat >= 0.25:
-                    ref_instructions.append(
-                        f"  -> References are COLORFUL (global HSV {gsat:.3f}): do NOT desaturate to "
-                        f"match the low per-zone deltas. Keep filmicrgb.saturation in [0, +15] "
-                        f"(use 0 or +5..+15) — NEVER negative. Use colorbalancergb.vibrance "
-                        f"+0.1..+0.3 to preserve the vivid look."
-                    )
-                elif gsat >= 0.15:
-                    ref_instructions.append(
-                        f"  -> References are moderately colorful (global HSV {gsat:.3f}): "
-                        f"filmicrgb.saturation MUST be >= 0 (use 0..+5, NEVER negative) and "
-                        f"vibrance 0..+0.15."
-                    )
-                else:
-                    ref_instructions.append(
-                        f"  -> References are DESATURATED (global HSV {gsat:.3f}): filmicrgb.saturation "
-                        f"-15..-30 is appropriate; keep vibrance 0."
-                    )
-
-            # Detect INTENTIONAL MONOCHROME reference: same hue across the 3
-            # zones with hue_mode='mono' in all of them. This is the rare
-            # case where a global-tint look IS the intended look (sepia,
-            # cyanotype). We trust the explicit Python signal and emit a
-            # portability WARNING: even deliberate mono grades should keep
-            # midtones neutral so the style remains portable across photos
-            # with varying content.
-            modes = (sh_mode, mh_mode, hh_mode)
-            hues_trio = (sh, mh, hh)
-            if all(m == "mono" for m in modes) and all(h is not None for h in hues_trio):
-
-                pair_close = (
-                    _circ_diff(hues_trio[0], hues_trio[1]) < 15  # type: ignore[arg-type]
-                    and _circ_diff(hues_trio[1], hues_trio[2]) < 15  # type: ignore[arg-type]
-                    and _circ_diff(hues_trio[0], hues_trio[2]) < 15  # type: ignore[arg-type]
-                )
-                if pair_close:
-                    ref_instructions.append(
-                        f"  [INTENTIONAL MONOCHROME REFERENCE] All 3 zones share hue ~{hues_trio[0]:.0f}° "
-                        f"(hue_mode='mono' in shadows+midtones+highlights). This IS a deliberate global-tint look. "
-                        f"For PORTABILITY keep midtones NEUTRAL (midtones_H=0°, midtones_C=0) and grade only "
-                        f"shadows+highlights with the shared hue; the validator will let this through but warns if "
-                        f"all three zones carry chroma>0.05."
-                    )
-
-            # Hito 6E — GLOBAL WARM/COOL GRADE: one coherent tint across the
-            # whole tonal range (hue_mode='global' in all 3 zones, confident).
-            # Unlike the rare 'mono' case this is a *graded* look with
-            # per-zone hue variation (e.g. warm 15°/38°/45°): the VLM should
-            # apply the three zone hues with modest chroma, never the
-            # additive global offset.
-            if (
-                all(m == "global" for m in modes)
-                and all(h is not None for h in hues_trio)
-                and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))
-            ):
-
-                g_mean = _circ_mean(list(hues_trio))  # type: ignore[arg-type]
-                # Warm: red/orange/yellow/pink band (0°–90° and 315°–360°).
-                # Cool: green/cyan/blue band (90°–315°).
-                warm = g_mean <= 90.0 or g_mean >= 315.0
-                label = "WARM" if warm else "COOL"
-                ref_instructions.append(
-                    f"  [GLOBAL {label} GRADE] The references are consistently "
-                    f"{label.lower()} across the tonal range (hue_mode='global', "
-                    f"confidence {sh_conf:.2f}/{mh_conf:.2f}/{hh_conf:.2f}): "
-                    f"shadows_H={sh:.0f}°, midtones_H={mh:.0f}°, "
-                    f"highlights_H={hh:.0f}°. This IS an intentional uniform "
-                    f"grade — apply these THREE zone hues with SUBTLE chroma: "
-                    f"shadows_C<=0.02, midtones_C<=0.015, highlights_C<=0.012 "
-                    f"(the CHROMA CAPS block below enforces these numbers). "
-                    f"NEVER exceed them: a uniform tint with zone-level chroma "
-                    f"over-tints the whole image red/orange. Keep global_C=0.0 "
-                    f"(never use the additive global offset for this look)."
-                )
-
-        if ref_hues_lines:
-            ref_hues = (
-                "\n[PRE-COMPUTED REFERENCE HUES (from Python analysis)]\n"
-                + "\n".join(ref_hues_lines)
-                + "\n"
-                "Hues with confidence>=0.7 are GROUND TRUTH - use them exactly.\n"
-                "Missing/low-confidence hues: use NEUTRAL (0°) - respect target photo colors.\n"
-            )
-
-        else:
-            ref_hues = "\n[No reliable pre-computed hues - use NEUTRAL: shadows=0°, midtones=0°, highlights=0° (respect target colors)]\n"
-
-        reference_note = (
-            f"{ref_hues}"
-            f"{_reference_spec_block(reference_analysis)}"
-            f"\n================================================================\n"
-            f"CRITICAL: USE PRE-COMPUTED HUES WHERE CONFIDENT >=0.7 - NEUTRAL (0°) WHERE NOT\n"
-            f"===============================================================\n\n"
-            f"The FIRST {len(reference_b64s)} attached images are REFERENCE PHOTOS.\n"
-            + "\n".join(ref_instructions)
-            + "\n"
-            + _chroma_caps_block(reference_analysis)
-            + "\n"
-            "[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
-            "[WARNING]  NEUTRALITY RULE: If reference hues are NOT confident (>=0.7), keep shadows_H/midtones_H/highlights_H = 0°.\n"
-            "   Apply color grading ONLY when references show CLEAR grading (e.g. Nolan Batman blues ~200°, Blade Runner).\n"
-            "   Photographers like Alen Palander have neutral references - RESPECT the target photo's original colors.\n"
-            "The LAST attached image is the TARGET PHOTO. Design style so target matches reference look.\n"
-            "===============================================================\n"
-        )
-
-    else:
-        # No reference images provided - use empty reference note
-        reference_note = ""
+    reference_note = _build_reference_note(reference_b64s, reference_analysis)
 
     user_content_parts = [
         "[STYLE DIRECTION]",
@@ -839,10 +457,360 @@ def build_prompt(
     ]
 
 
+def _build_exposure_guard(analysis: ImageAnalysis) -> str:
+    """Warn the VLM against stacking exposure changes on already-extreme images."""
+    mean_lum = getattr(getattr(analysis, "luminance", None), "mean", None)
+    if not isinstance(mean_lum, int | float) or isinstance(mean_lum, bool):
+        mean_lum = None
+    if mean_lum is not None and mean_lum < 0.3:
+        return (
+            f"\n[EXPOSURE GUARD - DARK IMAGE (mean {mean_lum:.2f})]\n"
+            f"• Do NOT create a NEW filmicrgb instance from scratch - it re-maps "
+            f"display-referred data through the scene tone-mapper and crushes shadows. "
+            f"• For contrast use SIGMOID (scene-referred, safe) with middle_grey_contrast 1.1–4.0. "
+            f"• exposure.black MUST stay 0.0 (or at most +0.005); do NOT lift shadows with negative black. "
+            f"• Prefer colorbalancergb/tone curves for shadow lifting; keep exposure.exposure within -0.5..+0.5. "
+            f"• colorbalancergb: shadows_Y -0.3..0 for moody shadows (NEVER < -0.3). "
+            f"• NEVER dehaze/defog, NEVER negative shadows_Y/shadhi.shadows.\n"
+        )
+    if mean_lum is not None and mean_lum > 0.7:
+        return (
+            f"\n[EXPOSURE GUARD]\nThe image is BRIGHT (mean luminance {mean_lum:.2f} "
+            f"on 0-1). NEVER select presets that brighten the image further "
+            f"(they will blow out highlights). Prefer presets that preserve "
+            f"exposure or slightly darken.\n"
+        )
+    return ""
+
+
+def _build_technical_diagnosis(analysis: ImageAnalysis) -> str:
+    """Pre-compute the Step 1-2 tonal/color/mood diagnosis for the prompt."""
+    lum = getattr(analysis, "luminance", None)
+    hist = getattr(analysis, "histogram", None)
+    diagnosis_parts = []
+
+    if lum is not None:
+        contrast_level = (
+            "low" if (lum.std or 0) < 0.15 else ("high" if (lum.std or 0) > 0.25 else "medium")
+        )
+        brightness = (
+            "dark" if (lum.mean or 0) < 0.3 else ("bright" if (lum.mean or 0) > 0.7 else "balanced")
+        )
+        diagnosis_parts.append(
+            f"TONAL: {brightness} (mean={lum.mean:.2f}), {contrast_level} contrast (std={lum.std:.2f}), "
+            f"shadows={lum.shadows_pct:.0%}, midtones={lum.midtones_pct:.0%}, highlights={lum.highlights_pct:.0%}"
+        )
+
+        wb = lum.white_balance_ratio_rb or 1.0
+        wb_desc = "neutral" if 0.95 < wb < 1.05 else ("warm" if wb > 1.05 else "cool")
+        sat_level = (
+            "low"
+            if (lum.saturation_mean or 0) < 0.15
+            else ("high" if (lum.saturation_mean or 0) > 0.35 else "medium")
+        )
+        diagnosis_parts.append(
+            f"COLOR: {wb_desc} cast (R/B={wb:.2f}), {sat_level} saturation (mean={lum.saturation_mean:.2f})"
+        )
+
+        if (lum.mean or 0) < 0.3 and (lum.std or 0) < 0.2:
+            mood = "flat/dark - needs contrast + shadow definition"
+        elif (lum.mean or 0) < 0.3 and (lum.std or 0) >= 0.2:
+            mood = "contrasty/dark - moody, preserve drama"
+        elif (lum.mean or 0) > 0.7:
+            mood = "bright - protect highlights, add depth"
+        else:
+            mood = "balanced - creative grading opportunity"
+        diagnosis_parts.append(f"MOOD: {mood}")
+
+    if hist is not None:
+        r_mean, g_mean, b_mean = hist.mean_red, hist.mean_green, hist.mean_blue
+        cast = ""
+        if r_mean > g_mean * 1.1 and r_mean > b_mean * 1.1:
+            cast = "red/magenta cast"
+        elif b_mean > r_mean * 1.1 and b_mean > g_mean * 1.1:
+            cast = "blue/cyan cast"
+        elif g_mean > r_mean * 1.1 and g_mean > b_mean * 1.1:
+            cast = "green cast"
+        if cast:
+            diagnosis_parts.append(
+                f"CHANNEL CAST: {cast} (R={r_mean:.2f} G={g_mean:.2f} B={b_mean:.2f})"
+            )
+
+    return "\n".join(diagnosis_parts) if diagnosis_parts else "(insufficient analysis data)"
+
+
+def _summarize_presets(presets: list[Preset], has_references: bool) -> list[dict]:
+    """Compact candidate-preset summaries for the prompt."""
+    from dtstylekit.presets.models import clean_description, derive_display_name
+
+    preset_summaries = []
+    for p in presets[: 8 if has_references else 5]:
+        ops = [plg.operation for plg in p.plugins if plg.enabled]
+        try:
+            filename = p.file_path.name if p.file_path else (getattr(p, "name", "") or "")
+        except AttributeError:
+            filename = getattr(p, "name", "") or ""
+        display_name = derive_display_name(getattr(p, "name", "") or "") or filename
+        description = clean_description(getattr(p, "description", "") or "") or "(no description)"
+        preset_summaries.append(
+            {
+                "filename": filename,
+                "name": display_name,
+                "description": description[:200],
+                "operations": list(dict.fromkeys(ops))[:10],
+            }
+        )
+    return preset_summaries
+
+
+def _build_preset_notes(
+    preset_summaries: list[dict], has_references: bool
+) -> tuple[str, str, str]:
+    """Build relevance, preset-selection and RAW-pipeline notes."""
+    has_relevant = any(
+        any(
+            op
+            in (
+                "filmicrgb",
+                "colorbalancergb",
+                "sigmoid",
+                "exposure",
+                "tonecurve",
+                "rgbcurve",
+                "colorzones",
+            )
+            for op in p.get("operations", [])
+        )
+        for p in preset_summaries
+    )
+    relevance_note = ""
+    if not has_relevant and preset_summaries:
+        relevance_note = (
+            f"\n[RELEVANCE WARNING] None of the {len(preset_summaries)} candidate presets "
+            f"contain the core grading IOPs (filmicrgb, colorbalancergb, sigmoid, tonecurve). "
+            f"DO NOT select any of them - use selected_presets: [] and create the look "
+            f"entirely via `adjustments` targeting the available IOPs.\n"
+        )
+
+    if has_references:
+        preset_note = (
+            "\n[PRESET SELECTION RULE - REFERENCE LOOK] The attached reference images define the TARGET LOOK. "
+            "Among the CANDIDATE PRESETS listed above, you MUST SELECT the one that closest matches the reference "
+            "aesthetic (e.g. a warm monochrome reference -> choose the 'sepia' preset; a vivid saturated "
+            "reference -> choose the 'extreme saturation' preset) and put its EXACT filename in "
+            "selected_presets: [\"examples_colors_sepia.dtstyle\"]. Then apply the reference-derived adjustments ON TOP of "
+            "that preset's baseline (the preset supplies the tone map and base grade; your adjustments refine it). "
+            "Example: \"selected_presets\": [\"examples_colors_autumn.dtstyle\"]. "
+            "If NONE of the candidates resemble the reference, use selected_presets: []. "
+            "Curve template names (s_strong, inverted_s_strong, sepia_warm, matte_film, ...) are NOT "
+            "preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset / colorzones.curve_preset.\n"
+        )
+    else:
+        preset_note = (
+            "\n[PRESET SELECTION RULE] Candidate presets are listed above with their filenames. "
+            "Curve template names like 's_strong', 'inverted_s_strong', 'lift_medium', "
+            "'sepia_warm', 'shadow_cool', 'matte_film', 'bleach_bypass' "
+            "are NOT preset files - they are ONLY valid inside adjustments.tonecurve.curve_preset or "
+            "adjustments.colorzones.curve_preset. DO NOT put them in selected_presets.\n"
+            "[NO PRESET RULE] For this style direction, DO NOT select any preset. Use selected_presets: [] "
+            "and create the complete look via adjustments only. Presets like 'day for twilight' or 'day for night' "
+            "add exposure/lowlight that CONFLICTS with teal-orange grading and produces BLUE/WHITE images."
+        )
+
+    pipeline_note = (
+        "\n[PIPELINE RULE - RAW COMPATIBILITY] This style targets RAW files. "
+        "darktable-cli applies a DEFAULT filmicrgb to RAW automatically. "
+        "• DO NOT use sigmoid - it stacks with default filmicrgb = double tone-mapping = crushed/blue images. "
+        "• USE filmicrgb for tone mapping: contrast=1.4–1.7 (moderate cinematic), latitude=2–4, saturation=-15 to -35, balance=-3 to +3 (NEVER ≤ -10). "
+        "• This filmicrgb will REPLACE the default, not stack. "
+        "• Use colorbalancergb for color grading (shadows/midtones/highlights split - MATCH reference hues). "
+        "• Use tonecurve.curve_preset='s_soft' (or 's_strong') and colorzones.curve_preset='identity' for curves."
+    )
+    return relevance_note, preset_note, pipeline_note
+
+
+def _build_reference_note(
+    reference_b64s: list[str] | None,
+    reference_analysis: dict | None,
+) -> str:
+    """Build the pre-computed hues, reference spec and chroma-caps section."""
+    if not reference_b64s:
+        return ""
+
+    ref_hues_lines = []
+    ref_instructions = []
+
+    if reference_analysis:
+        sh = reference_analysis.get("shadows_hue")
+        sh_conf = reference_analysis.get("shadows_hue_confidence", 0)
+        sh_mode = reference_analysis.get("shadows_hue_mode", "neutral")
+        sh_sec = reference_analysis.get("shadows_hue_secondary")
+        if sh is not None and sh_conf >= 0.7:
+            ref_hues_lines.append(
+                f"  shadows_hue = {sh:.1f}° (confidence={sh_conf:.2f}, mode={sh_mode})"
+            )
+            ref_instructions.append(
+                f"  -> SET shadows_H = {sh:.1f}° (from Python analysis, confidence={sh_conf:.2f})"
+            )
+            if sh_mode == "bi" and sh_sec is not None:
+                ref_instructions.append(
+                    f"     NOTE: reference has bi-modal color in SHADOWS: primary {sh:.1f}°, secondary {sh_sec:.1f}° "
+                    f"(e.g. teal shadows + warm accents). Apply primary {sh:.1f}° as shadows_H and keep shadows_C "
+                    f"modest (<=0.10) so the secondary tone is not muted."
+                )
+        else:
+            ref_instructions.append(
+                "  -> SET shadows_H = 0° (NEUTRAL - reference has no clear shadow grading; respect target colors)"
+            )
+
+        mh = reference_analysis.get("midtones_hue")
+        mh_conf = reference_analysis.get("midtones_hue_confidence", 0)
+        mh_mode = reference_analysis.get("midtones_hue_mode", "neutral")
+        mh_sec = reference_analysis.get("midtones_hue_secondary")
+        if mh is not None and mh_conf >= 0.7:
+            ref_hues_lines.append(
+                f"  midtones_hue = {mh:.1f}° (confidence={mh_conf:.2f}, mode={mh_mode})"
+            )
+            ref_instructions.append(
+                f"  -> SET midtones_H = {mh:.1f}° (from Python analysis, confidence={mh_conf:.2f})"
+            )
+            if mh_mode == "bi" and mh_sec is not None:
+                ref_instructions.append(
+                    f"     NOTE: reference has bi-modal color in MIDTONES: primary {mh:.1f}°, secondary {mh_sec:.1f}°. "
+                    f"Apply primary {mh:.1f}° as midtones_H and keep midtones_C modest (<=0.08) - midtones carry skin tones."
+                )
+        else:
+            ref_instructions.append(
+                "  -> SET midtones_H = 0° (NEUTRAL - reference has no clear midtone grading; respect target colors)"
+            )
+
+        hh = reference_analysis.get("highlights_hue")
+        hh_conf = reference_analysis.get("highlights_hue_confidence", 0)
+        hh_mode = reference_analysis.get("highlights_hue_mode", "neutral")
+        hh_sec = reference_analysis.get("highlights_hue_secondary")
+        if hh is not None and hh_conf >= 0.7:
+            ref_hues_lines.append(
+                f"  highlights_hue = {hh:.1f}° (confidence={hh_conf:.2f}, mode={hh_mode})"
+            )
+            ref_instructions.append(
+                f"  -> SET highlights_H = {hh:.1f}° (from Python analysis, confidence={hh_conf:.2f})"
+            )
+            if hh_mode == "bi" and hh_sec is not None:
+                ref_instructions.append(
+                    f"     NOTE: reference has bi-modal color in HIGHLIGHTS: primary {hh:.1f}°, secondary {hh_sec:.1f}°. "
+                    f"Apply primary {hh:.1f}° as highlights_H and keep highlights_C modest (<=0.05) - highlights clip easily."
+                )
+        else:
+            ref_instructions.append(
+                "  -> SET highlights_H = 0° (NEUTRAL - reference has no clear highlight grading; respect target colors)"
+            )
+
+        ss = reference_analysis.get("shadows_sat", 0)
+        ms = reference_analysis.get("midtones_sat", 0)
+        hs = reference_analysis.get("highlights_sat", 0)
+        ref_hues_lines.append(f"  shadows_sat = {ss:.3f}")
+        ref_hues_lines.append(f"  midtones_sat = {ms:.3f}")
+        ref_hues_lines.append(f"  highlights_sat = {hs:.3f}")
+
+        gsat = reference_analysis.get("global_saturation")
+        if isinstance(gsat, int | float) and not isinstance(gsat, bool):
+            ref_hues_lines.append(
+                f"  global_saturation (HSV) = {gsat:.3f}  <- TRUE colorfulness of the references"
+            )
+            if gsat >= 0.25:
+                ref_instructions.append(
+                    f"  -> References are COLORFUL (global HSV {gsat:.3f}): do NOT desaturate to "
+                    f"match the low per-zone deltas. Keep filmicrgb.saturation in [0, +15] "
+                    f"(use 0 or +5..+15) — NEVER negative. Use colorbalancergb.vibrance "
+                    f"+0.1..+0.3 to preserve the vivid look."
+                )
+            elif gsat >= 0.15:
+                ref_instructions.append(
+                    f"  -> References are moderately colorful (global HSV {gsat:.3f}): "
+                    f"filmicrgb.saturation MUST be >= 0 (use 0..+5, NEVER negative) and "
+                    f"vibrance 0..+0.15."
+                )
+            else:
+                ref_instructions.append(
+                    f"  -> References are DESATURATED (global HSV {gsat:.3f}): filmicrgb.saturation "
+                    f"-15..-30 is appropriate; keep vibrance 0."
+                )
+
+        modes = (sh_mode, mh_mode, hh_mode)
+        hues_trio = (sh, mh, hh)
+        if all(m == "mono" for m in modes) and all(h is not None for h in hues_trio):
+
+            pair_close = (
+                _circ_diff(hues_trio[0], hues_trio[1]) < 15  # type: ignore[arg-type]
+                and _circ_diff(hues_trio[1], hues_trio[2]) < 15  # type: ignore[arg-type]
+                and _circ_diff(hues_trio[0], hues_trio[2]) < 15  # type: ignore[arg-type]
+            )
+            if pair_close:
+                ref_instructions.append(
+                    f"  [INTENTIONAL MONOCHROME REFERENCE] All 3 zones share hue ~{hues_trio[0]:.0f}° "
+                    f"(hue_mode='mono' in shadows+midtones+highlights). This IS a deliberate global-tint look. "
+                    f"For PORTABILITY keep midtones NEUTRAL (midtones_H=0°, midtones_C=0) and grade only "
+                    f"shadows+highlights with the shared hue; the validator will let this through but warns if "
+                    f"all three zones carry chroma>0.05."
+                )
+
+        if (
+            all(m == "global" for m in modes)
+            and all(h is not None for h in hues_trio)
+            and all(c >= 0.7 for c in (sh_conf, mh_conf, hh_conf))
+        ):
+
+            g_mean = _circ_mean(list(hues_trio))  # type: ignore[arg-type]
+            warm = g_mean <= 90.0 or g_mean >= 315.0
+            label = "WARM" if warm else "COOL"
+            ref_instructions.append(
+                f"  [GLOBAL {label} GRADE] The references are consistently "
+                f"{label.lower()} across the tonal range (hue_mode='global', "
+                f"confidence {sh_conf:.2f}/{mh_conf:.2f}/{hh_conf:.2f}): "
+                f"shadows_H={sh:.0f}°, midtones_H={mh:.0f}°, "
+                f"highlights_H={hh:.0f}°. This IS an intentional uniform "
+                f"grade — apply these THREE zone hues with SUBTLE chroma: "
+                f"shadows_C<=0.02, midtones_C<=0.015, highlights_C<=0.012 "
+                f"(the CHROMA CAPS block below enforces these numbers). "
+                f"NEVER exceed them: a uniform tint with zone-level chroma "
+                f"over-tints the whole image red/orange. Keep global_C=0.0 "
+                f"(never use the additive global offset for this look)."
+            )
+
+    if ref_hues_lines:
+        ref_hues = (
+            "\n[PRE-COMPUTED REFERENCE HUES (from Python analysis)]\n"
+            + "\n".join(ref_hues_lines)
+            + "\n"
+            "Hues with confidence>=0.7 are GROUND TRUTH - use them exactly.\n"
+            "Missing/low-confidence hues: use NEUTRAL (0°) - respect target photo colors.\n"
+        )
+    else:
+        ref_hues = "\n[No reliable pre-computed hues - use NEUTRAL: shadows=0°, midtones=0°, highlights=0° (respect target colors)]\n"
+
+    return (
+        f"{ref_hues}"
+        f"{_reference_spec_block(reference_analysis)}"
+        f"\n================================================================\n"
+        f"CRITICAL: USE PRE-COMPUTED HUES WHERE CONFIDENT >=0.7 - NEUTRAL (0°) WHERE NOT\n"
+        f"===============================================================\n\n"
+        f"The FIRST {len(reference_b64s)} attached images are REFERENCE PHOTOS.\n"
+        + "\n".join(ref_instructions)
+        + "\n"
+        + _chroma_caps_block(reference_analysis)
+        + "\n"
+        "[FORBIDDEN] IGNORE THE LAST ATTACHED IMAGE (target) for hue extraction.\n"
+        "[WARNING]  NEUTRALITY RULE: If reference hues are NOT confident (>=0.7), keep shadows_H/midtones_H/highlights_H = 0°.\n"
+        "   Apply color grading ONLY when references show CLEAR grading (e.g. Nolan Batman blues ~200°, Blade Runner).\n"
+        "   Photographers like Alen Palander have neutral references - RESPECT the target photo's original colors.\n"
+        "The LAST attached image is the TARGET PHOTO. Design style so target matches reference look.\n"
+        "===============================================================\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Dynamic chroma caps (coherent with validator Hito 2.1)
 # ---------------------------------------------------------------------------
-
 # Soft ceiling when confidence is below the high-confidence threshold.
 # Matches validator._zone_caps_default.
 _SOFT_CAPS = {"shadows": 0.10, "midtones": 0.08, "highlights": 0.05}
