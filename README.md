@@ -4,11 +4,12 @@
 
 # dtstylekit — AI-Powered Darktable Style Generator
 
-> **⚠️ BETA / EXPERIMENTAL**
->
-> dtstylekit is in **beta / experimental state**. It is built on a *vibe-coding* foundation: the codec and binary formats were reverse-engineered against the darktable source code. It can **fail when creating styles**, produce unexpected results, or generate `.dtstyle` files that do not behave as expected. Review the visual result of every generated style before using it in real work. See the [DISCLAIMERS](#disclaimers) section below.
+## Overview
 
-A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze photographs, select and compose from 534 existing Darktable presets, apply safe scalar adjustments on verified IOP structs, and output valid `.dtstyle` files with explanatory markdown reports.
+This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The VLM (default: `gemma3:27b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets from the **official darktable style library** (indexed locally via `setup.sh` — not vendored in this repository), and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
+
+**Output:** Valid `.dtstyle` file + markdown report explaining the choices.
+
 
 > ## ⚠️ DISCLAIMERS
 >
@@ -28,11 +29,6 @@ A Python CLI tool that uses Vision Language Models (VLM) via Ollama to analyze p
 >
 > dtstylekit exists for the darktable community: democratizing RAW photography editing, teaching color-grading techniques, and letting anyone — without paying for licenses or commercial presets — understand and apply the techniques of great photographers. If you truly like a look, support its author by buying their work.
 
-## Overview
-
-This project pivots from "LLM generates binary blobs" to "VLM selects/composes verified presets + applies safe scalar adjustments." The VLM (default: `gemma3:27b`, customizable via `--model`) sees the image, describes the aesthetic, selects relevant presets from the **official darktable style library** (indexed locally via `setup.sh` — not vendored in this repository), and proposes parameter tweaks. The Python pipeline serializes the result using verified codec/struct layouts from Darktable source.
-
-**Output:** Valid `.dtstyle` file + markdown report explaining the choices.
 
 ## Quickstart
 
