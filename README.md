@@ -1,3 +1,6 @@
+> [!NOTE]
+> **This project is no longer maintained.** Due to a change in the software I use to edit RAW files, dtstylekit will not receive any further updates. The code remains available for anyone to use or fork.
+
 <p align="center">
   <img src="assets/logo.svg" alt="dtstylekit logo" width="560">
 </p>
